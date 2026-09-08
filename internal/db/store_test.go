@@ -335,3 +335,30 @@ func TestLabelUpdateReplaceSemantics(t *testing.T) {
 		t.Fatalf("labels = %d, want 0", len(got.Labels))
 	}
 }
+
+func TestLabelMatchingIsUnicodeCaseInsensitive(t *testing.T) {
+	s := newTestStore(t)
+	p := seedProject(t, s, "Billing", "BILL")
+
+	if _, err := s.CreateTicket(models.CreateTicketRequest{
+		ProjectID: p.ID, Title: "First", Labels: []string{"Étude"},
+	}); err != nil {
+		t.Fatalf("CreateTicket(first): %v", err)
+	}
+	if _, err := s.CreateTicket(models.CreateTicketRequest{
+		ProjectID: p.ID, Title: "Second", Labels: []string{"étude"},
+	}); err != nil {
+		t.Fatalf("CreateTicket(second): %v", err)
+	}
+
+	all, err := s.ListLabels()
+	if err != nil {
+		t.Fatalf("ListLabels: %v", err)
+	}
+	if len(all) != 1 {
+		t.Fatalf("labels = %d, want 1; unicode casing must not create a duplicate", len(all))
+	}
+	if all[0].Name != "Étude" {
+		t.Fatalf("stored name = %q, want the original casing Étude", all[0].Name)
+	}
+}

@@ -426,31 +426,53 @@ func (s *Store) GetBoard(projectID string) (*models.Board, error) {
 
 const defaultLabelColor = "#6B7280"
 
-// resolveLabelNames maps label names to label IDs, matching case-insensitively.
-// Names with no existing label are created with the default color, keeping the
-// caller's original casing. This is what lets an agent pass ["bug"] without a
-// lookup round trip.
+// resolveLabelNames maps label names to label IDs, matching case-insensitively
+// (Unicode-aware, via strings.EqualFold — SQLite's LOWER() is ASCII-only, so the
+// fold happens entirely in Go). Names with no existing label are created with the
+// default color, keeping the caller's original casing. This is what lets an agent
+// pass ["bug"] without a lookup round trip.
 func (s *Store) resolveLabelNames(names []string) ([]string, error) {
+	type labelRef struct {
+		id   string
+		name string
+	}
+
+	rows, err := s.db.Query("SELECT id, name FROM labels")
+	if err != nil {
+		return nil, fmt.Errorf("loading labels: %w", err)
+	}
+	var candidates []labelRef
+	for rows.Next() {
+		var lr labelRef
+		if scanErr := rows.Scan(&lr.id, &lr.name); scanErr != nil {
+			rows.Close()
+			return nil, fmt.Errorf("scanning label: %w", scanErr)
+		}
+		candidates = append(candidates, lr)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, fmt.Errorf("loading labels: %w", err)
+	}
+	rows.Close()
+
 	ids := make([]string, 0, len(names))
-	seen := make(map[string]bool, len(names))
+	seenIDs := make(map[string]bool, len(names))
 
 	for _, name := range names {
 		trimmed := strings.TrimSpace(name)
 		if trimmed == "" {
 			continue
 		}
-		key := strings.ToLower(trimmed)
-		if seen[key] {
-			continue
-		}
-		seen[key] = true
 
 		var id string
-		err := s.db.QueryRow(
-			"SELECT id FROM labels WHERE LOWER(name) = ?", key,
-		).Scan(&id)
-		switch {
-		case err == sql.ErrNoRows:
+		for _, c := range candidates {
+			if strings.EqualFold(c.name, trimmed) {
+				id = c.id
+				break
+			}
+		}
+		if id == "" {
 			id = newID()
 			if _, err := s.db.Exec(
 				"INSERT INTO labels (id, name, color) VALUES (?, ?, ?)",
@@ -458,9 +480,15 @@ func (s *Store) resolveLabelNames(names []string) ([]string, error) {
 			); err != nil {
 				return nil, fmt.Errorf("creating label %q: %w", trimmed, err)
 			}
-		case err != nil:
-			return nil, fmt.Errorf("looking up label %q: %w", trimmed, err)
+			// Make the new label visible to later names in this same call, so a
+			// name repeated with different casing still resolves to one label.
+			candidates = append(candidates, labelRef{id: id, name: trimmed})
 		}
+
+		if seenIDs[id] {
+			continue
+		}
+		seenIDs[id] = true
 		ids = append(ids, id)
 	}
 	return ids, nil
