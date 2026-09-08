@@ -83,3 +83,63 @@ func TestTicketRoundTripAfterTeamsRemoval(t *testing.T) {
 		t.Fatalf("key = %q, want BILL-1", got.DisplayKey())
 	}
 }
+
+func TestTicketRepoRoundTrip(t *testing.T) {
+	s := newTestStore(t)
+	p := seedProject(t, s, "Billing", "BILL")
+
+	tk, err := s.CreateTicket(models.CreateTicketRequest{
+		ProjectID: p.ID,
+		Title:     "Invoice export",
+		Repo:      "acme/billing-api",
+	})
+	if err != nil {
+		t.Fatalf("CreateTicket: %v", err)
+	}
+	if tk.Repo != "acme/billing-api" {
+		t.Fatalf("repo after create = %q, want acme/billing-api", tk.Repo)
+	}
+
+	newRepo := "acme/billing-web"
+	updated, err := s.UpdateTicket(tk.ID, models.UpdateTicketRequest{Repo: &newRepo})
+	if err != nil {
+		t.Fatalf("UpdateTicket: %v", err)
+	}
+	if updated.Repo != "acme/billing-web" {
+		t.Fatalf("repo after update = %q, want acme/billing-web", updated.Repo)
+	}
+
+	// A nil Repo must leave the existing value alone.
+	title := "Renamed"
+	untouched, err := s.UpdateTicket(tk.ID, models.UpdateTicketRequest{Title: &title})
+	if err != nil {
+		t.Fatalf("UpdateTicket (title only): %v", err)
+	}
+	if untouched.Repo != "acme/billing-web" {
+		t.Fatalf("repo was cleared by an unrelated update: %q", untouched.Repo)
+	}
+}
+
+func TestListTicketsFilterByRepo(t *testing.T) {
+	s := newTestStore(t)
+	p := seedProject(t, s, "Billing", "BILL")
+
+	if _, err := s.CreateTicket(models.CreateTicketRequest{
+		ProjectID: p.ID, Title: "API work", Repo: "acme/billing-api",
+	}); err != nil {
+		t.Fatalf("CreateTicket: %v", err)
+	}
+	if _, err := s.CreateTicket(models.CreateTicketRequest{
+		ProjectID: p.ID, Title: "Web work", Repo: "acme/billing-web",
+	}); err != nil {
+		t.Fatalf("CreateTicket: %v", err)
+	}
+
+	got, err := s.ListTickets(models.TicketFilter{Repo: "acme/billing-api"})
+	if err != nil {
+		t.Fatalf("ListTickets: %v", err)
+	}
+	if len(got) != 1 || got[0].Title != "API work" {
+		t.Fatalf("repo filter returned %d tickets, want 1 (API work)", len(got))
+	}
+}

@@ -153,7 +153,7 @@ func (s *Store) nextTicketNumber(projectID string) (int, error) {
 
 func (s *Store) ListTickets(filter models.TicketFilter) ([]models.Ticket, error) {
 	query := `SELECT t.id, t.project_id, t.number, t.title, t.description,
-		t.status, t.priority, t.due_date, t.position, t.created_at, t.updated_at,
+		t.status, t.priority, t.repo, t.due_date, t.position, t.created_at, t.updated_at,
 		COALESCE(p.prefix, '') as project_prefix
 		FROM tickets t LEFT JOIN projects p ON t.project_id = p.id WHERE 1=1`
 	args := []any{}
@@ -170,6 +170,10 @@ func (s *Store) ListTickets(filter models.TicketFilter) ([]models.Ticket, error)
 		query += " AND t.priority = ?"
 		args = append(args, filter.Priority)
 	}
+	if filter.Repo != "" {
+		query += " AND t.repo = ?"
+		args = append(args, filter.Repo)
+	}
 	query += " ORDER BY t.position ASC, t.created_at DESC"
 
 	rows, err := s.db.Query(query, args...)
@@ -182,7 +186,7 @@ func (s *Store) ListTickets(filter models.TicketFilter) ([]models.Ticket, error)
 	for rows.Next() {
 		var t models.Ticket
 		if err := rows.Scan(&t.ID, &t.ProjectID, &t.Number, &t.Title, &t.Description,
-			&t.Status, &t.Priority, &t.DueDate, &t.Position, &t.CreatedAt, &t.UpdatedAt,
+			&t.Status, &t.Priority, &t.Repo, &t.DueDate, &t.Position, &t.CreatedAt, &t.UpdatedAt,
 			&t.ProjectPrefix); err != nil {
 			return nil, err
 		}
@@ -205,11 +209,11 @@ func (s *Store) GetTicket(id string) (*models.Ticket, error) {
 	var t models.Ticket
 	err := s.db.QueryRow(
 		`SELECT t.id, t.project_id, t.number, t.title, t.description,
-		t.status, t.priority, t.due_date, t.position, t.created_at, t.updated_at,
+		t.status, t.priority, t.repo, t.due_date, t.position, t.created_at, t.updated_at,
 		COALESCE(p.prefix, '') as project_prefix
 		FROM tickets t LEFT JOIN projects p ON t.project_id = p.id WHERE t.id = ?`, id,
 	).Scan(&t.ID, &t.ProjectID, &t.Number, &t.Title, &t.Description,
-		&t.Status, &t.Priority, &t.DueDate, &t.Position, &t.CreatedAt, &t.UpdatedAt,
+		&t.Status, &t.Priority, &t.Repo, &t.DueDate, &t.Position, &t.CreatedAt, &t.UpdatedAt,
 		&t.ProjectPrefix)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -248,6 +252,7 @@ func (s *Store) CreateTicket(req models.CreateTicketRequest) (*models.Ticket, er
 		Description: req.Description,
 		Status:      status,
 		Priority:    priority,
+		Repo:        req.Repo,
 		Position:    float64(num) * 1000,
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
@@ -261,9 +266,9 @@ func (s *Store) CreateTicket(req models.CreateTicketRequest) (*models.Ticket, er
 	}
 
 	_, err = s.db.Exec(
-		`INSERT INTO tickets (id, project_id, number, title, description, status, priority, due_date, position, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		t.ID, t.ProjectID, t.Number, t.Title, t.Description, t.Status, t.Priority, t.DueDate, t.Position, t.CreatedAt, t.UpdatedAt,
+		`INSERT INTO tickets (id, project_id, number, title, description, status, priority, repo, due_date, position, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		t.ID, t.ProjectID, t.Number, t.Title, t.Description, t.Status, t.Priority, t.Repo, t.DueDate, t.Position, t.CreatedAt, t.UpdatedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -302,6 +307,9 @@ func (s *Store) UpdateTicket(id string, req models.UpdateTicketRequest) (*models
 	if req.Priority != nil {
 		t.Priority = *req.Priority
 	}
+	if req.Repo != nil {
+		t.Repo = *req.Repo
+	}
 	if req.Position != nil {
 		t.Position = *req.Position
 	}
@@ -314,8 +322,8 @@ func (s *Store) UpdateTicket(id string, req models.UpdateTicketRequest) (*models
 	t.UpdatedAt = time.Now()
 
 	_, err = s.db.Exec(
-		`UPDATE tickets SET title=?, description=?, status=?, priority=?, due_date=?, position=?, updated_at=? WHERE id=?`,
-		t.Title, t.Description, t.Status, t.Priority, t.DueDate, t.Position, t.UpdatedAt, t.ID,
+		`UPDATE tickets SET title=?, description=?, status=?, priority=?, repo=?, due_date=?, position=?, updated_at=? WHERE id=?`,
+		t.Title, t.Description, t.Status, t.Priority, t.Repo, t.DueDate, t.Position, t.UpdatedAt, t.ID,
 	)
 	if err != nil {
 		return nil, err

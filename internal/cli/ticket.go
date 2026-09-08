@@ -13,7 +13,7 @@ func ticketCommands() *cobra.Command {
 		Short: "Manage tickets",
 	}
 
-	var projectID, status, priority string
+	var projectID, status, priority, listRepo string
 	listCmd := &cobra.Command{
 		Use:   "list",
 		Short: "List tickets",
@@ -26,6 +26,7 @@ func ticketCommands() *cobra.Command {
 				ProjectID: projectID,
 				Status:    status,
 				Priority:  priority,
+				Repo:      listRepo,
 			})
 			if err != nil {
 				return err
@@ -44,8 +45,9 @@ func ticketCommands() *cobra.Command {
 	listCmd.Flags().StringVar(&projectID, "project", "", "filter by project ID")
 	listCmd.Flags().StringVar(&status, "status", "", "filter by status (todo|in_progress|done)")
 	listCmd.Flags().StringVar(&priority, "priority", "", "filter by priority (urgent|high|medium|low)")
+	listCmd.Flags().StringVar(&listRepo, "repo", "", "filter by repo")
 
-	var createProject, createPriority, createDue string
+	var createProject, createPriority, createDue, createRepo string
 	createCmd := &cobra.Command{
 		Use:   "create",
 		Short: "Create a new ticket",
@@ -59,6 +61,7 @@ func ticketCommands() *cobra.Command {
 				ProjectID: createProject,
 				Title:     title,
 				Priority:  createPriority,
+				Repo:      createRepo,
 			}
 			if createDue != "" {
 				req.DueDate = &createDue
@@ -77,6 +80,7 @@ func ticketCommands() *cobra.Command {
 	createCmd.MarkFlagRequired("title")
 	createCmd.Flags().StringVar(&createPriority, "priority", "medium", "priority (urgent|high|medium|low)")
 	createCmd.Flags().StringVar(&createDue, "due", "", "due date (YYYY-MM-DD)")
+	createCmd.Flags().StringVar(&createRepo, "repo", "", "repository identifier")
 
 	var moveStatus string
 	moveCmd := &cobra.Command{
