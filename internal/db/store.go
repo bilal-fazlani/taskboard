@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -296,8 +297,17 @@ func (s *Store) CreateTicket(req models.CreateTicketRequest) (*models.Ticket, er
 	}
 
 	if len(req.DependsOn) > 0 {
-		for _, blockerID := range req.DependsOn {
-			s.db.Exec("INSERT OR IGNORE INTO ticket_dependencies (ticket_id, blocked_by_id) VALUES (?, ?)", t.ID, blockerID)
+		depIDs, err := s.resolveTicketRefs(t.ID, req.DependsOn)
+		if err != nil {
+			return nil, err
+		}
+		for _, depID := range depIDs {
+			if _, err := s.db.Exec(
+				"INSERT OR IGNORE INTO ticket_dependencies (ticket_id, blocked_by_id) VALUES (?, ?)",
+				t.ID, depID,
+			); err != nil {
+				return nil, fmt.Errorf("attaching dependency: %w", err)
+			}
 		}
 	}
 
@@ -363,9 +373,20 @@ func (s *Store) UpdateTicket(id string, req models.UpdateTicketRequest) (*models
 	}
 
 	if req.DependsOn != nil {
-		s.db.Exec("DELETE FROM ticket_dependencies WHERE ticket_id = ?", id)
-		for _, blockerID := range req.DependsOn {
-			s.db.Exec("INSERT OR IGNORE INTO ticket_dependencies (ticket_id, blocked_by_id) VALUES (?, ?)", id, blockerID)
+		depIDs, err := s.resolveTicketRefs(id, req.DependsOn)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := s.db.Exec("DELETE FROM ticket_dependencies WHERE ticket_id = ?", id); err != nil {
+			return nil, fmt.Errorf("clearing dependencies: %w", err)
+		}
+		for _, depID := range depIDs {
+			if _, err := s.db.Exec(
+				"INSERT OR IGNORE INTO ticket_dependencies (ticket_id, blocked_by_id) VALUES (?, ?)",
+				id, depID,
+			); err != nil {
+				return nil, fmt.Errorf("attaching dependency: %w", err)
+			}
 		}
 	}
 
@@ -492,6 +513,82 @@ func (s *Store) resolveLabelNames(names []string) ([]string, error) {
 		ids = append(ids, id)
 	}
 	return ids, nil
+}
+
+// ErrInvalidInput marks a caller-supplied value that could not be resolved, as
+// opposed to an internal failure. The HTTP layer maps it to 400.
+type ErrInvalidInput struct{ Msg string }
+
+func (e *ErrInvalidInput) Error() string { return e.Msg }
+
+func invalidInput(format string, a ...any) error {
+	return &ErrInvalidInput{Msg: fmt.Sprintf(format, a...)}
+}
+
+// resolveTicketRefs maps ticket IDs or display keys like "BILL-2" to ticket IDs.
+// Keys are unique per project, so a key resolves on prefix and number together,
+// which is what allows dependencies to cross projects. selfID is the ticket
+// declaring the dependency and may be empty when it has no ID yet.
+func (s *Store) resolveTicketRefs(selfID string, refs []string) ([]string, error) {
+	ids := make([]string, 0, len(refs))
+	seen := make(map[string]bool, len(refs))
+
+	for _, ref := range refs {
+		trimmed := strings.TrimSpace(ref)
+		if trimmed == "" {
+			continue
+		}
+
+		id, err := s.lookupTicketRef(trimmed)
+		if err != nil {
+			return nil, err
+		}
+		if selfID != "" && id == selfID {
+			return nil, invalidInput("ticket %q cannot depend on itself", trimmed)
+		}
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		ids = append(ids, id)
+	}
+	return ids, nil
+}
+
+// lookupTicketRef resolves a single reference, trying a raw ID first and then a
+// PREFIX-NUMBER display key.
+func (s *Store) lookupTicketRef(ref string) (string, error) {
+	var id string
+	err := s.db.QueryRow("SELECT id FROM tickets WHERE id = ?", ref).Scan(&id)
+	if err == nil {
+		return id, nil
+	}
+	if err != sql.ErrNoRows {
+		return "", fmt.Errorf("looking up ticket %q: %w", ref, err)
+	}
+
+	prefix, numStr, ok := strings.Cut(ref, "-")
+	if !ok {
+		return "", invalidInput("no ticket matches %q", ref)
+	}
+	number, convErr := strconv.Atoi(numStr)
+	if convErr != nil {
+		return "", invalidInput("no ticket matches %q", ref)
+	}
+
+	err = s.db.QueryRow(
+		`SELECT t.id FROM tickets t
+		JOIN projects p ON t.project_id = p.id
+		WHERE LOWER(p.prefix) = LOWER(?) AND t.number = ?`,
+		prefix, number,
+	).Scan(&id)
+	if err == sql.ErrNoRows {
+		return "", invalidInput("no ticket matches %q", ref)
+	}
+	if err != nil {
+		return "", fmt.Errorf("looking up ticket %q: %w", ref, err)
+	}
+	return id, nil
 }
 
 func (s *Store) ListLabels() ([]models.Label, error) {

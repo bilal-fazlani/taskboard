@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"net/http"
@@ -106,6 +107,16 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
+}
+
+// writeStoreError maps a caller's bad input to 400 and everything else to 500.
+func writeStoreError(w http.ResponseWriter, err error) {
+	var invalid *db.ErrInvalidInput
+	if errors.As(err, &invalid) {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeError(w, http.StatusInternalServerError, err.Error())
 }
 
 func decodeJSON(r *http.Request, v any) error {
@@ -226,7 +237,7 @@ func (s *Server) createTicket(w http.ResponseWriter, r *http.Request) {
 	}
 	t, err := s.store.CreateTicket(req)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeStoreError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, t)
@@ -240,7 +251,7 @@ func (s *Server) updateTicket(w http.ResponseWriter, r *http.Request) {
 	}
 	t, err := s.store.UpdateTicket(chi.URLParam(r, "id"), req)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeStoreError(w, err)
 		return
 	}
 	if t == nil {

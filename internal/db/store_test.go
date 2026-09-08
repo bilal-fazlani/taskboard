@@ -2,6 +2,7 @@ package db
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/tcarac/taskboard/internal/models"
@@ -360,5 +361,105 @@ func TestLabelMatchingIsUnicodeCaseInsensitive(t *testing.T) {
 	}
 	if all[0].Name != "Étude" {
 		t.Fatalf("stored name = %q, want the original casing Étude", all[0].Name)
+	}
+}
+
+func TestDependencyResolvesByDisplayKey(t *testing.T) {
+	s := newTestStore(t)
+	p := seedProject(t, s, "Billing", "BILL")
+	blocker := seedTicket(t, s, p.ID, "Blocker") // BILL-1
+
+	dependent, err := s.CreateTicket(models.CreateTicketRequest{
+		ProjectID: p.ID, Title: "Dependent", DependsOn: []string{"BILL-1"},
+	})
+	if err != nil {
+		t.Fatalf("CreateTicket: %v", err)
+	}
+	if len(dependent.DependsOn) != 1 || dependent.DependsOn[0].ID != blocker.ID {
+		t.Fatalf("dependsOn = %+v, want one ref to %s", dependent.DependsOn, blocker.ID)
+	}
+}
+
+func TestDependencyKeyIsCaseInsensitive(t *testing.T) {
+	s := newTestStore(t)
+	p := seedProject(t, s, "Billing", "BILL")
+	seedTicket(t, s, p.ID, "Blocker")
+
+	got, err := s.CreateTicket(models.CreateTicketRequest{
+		ProjectID: p.ID, Title: "Dependent", DependsOn: []string{"bill-1"},
+	})
+	if err != nil {
+		t.Fatalf("CreateTicket: %v", err)
+	}
+	if len(got.DependsOn) != 1 {
+		t.Fatalf("lowercase key did not resolve: %+v", got.DependsOn)
+	}
+}
+
+func TestDependencyCrossProject(t *testing.T) {
+	s := newTestStore(t)
+	billing := seedProject(t, s, "Billing", "BILL")
+	auth := seedProject(t, s, "Auth", "AUTH")
+	authTicket := seedTicket(t, s, auth.ID, "Login") // AUTH-1
+
+	got, err := s.CreateTicket(models.CreateTicketRequest{
+		ProjectID: billing.ID, Title: "Portal", DependsOn: []string{"AUTH-1"},
+	})
+	if err != nil {
+		t.Fatalf("CreateTicket: %v", err)
+	}
+	if len(got.DependsOn) != 1 || got.DependsOn[0].ID != authTicket.ID {
+		t.Fatalf("cross-project dependency did not resolve: %+v", got.DependsOn)
+	}
+	if got.DependsOn[0].Key != "AUTH-1" {
+		t.Fatalf("key = %q, want AUTH-1", got.DependsOn[0].Key)
+	}
+}
+
+func TestDependencyUnresolvableIsAnError(t *testing.T) {
+	s := newTestStore(t)
+	p := seedProject(t, s, "Billing", "BILL")
+
+	_, err := s.CreateTicket(models.CreateTicketRequest{
+		ProjectID: p.ID, Title: "Dependent", DependsOn: []string{"NOPE-42"},
+	})
+	if err == nil {
+		t.Fatal("expected an error for an unresolvable dependency")
+	}
+	if !strings.Contains(err.Error(), "NOPE-42") {
+		t.Fatalf("error %q must name the offending value NOPE-42", err)
+	}
+}
+
+func TestDependencySelfReferenceIsAnError(t *testing.T) {
+	s := newTestStore(t)
+	p := seedProject(t, s, "Billing", "BILL")
+	tk := seedTicket(t, s, p.ID, "Solo")
+
+	_, err := s.UpdateTicket(tk.ID, models.UpdateTicketRequest{
+		DependsOn: []string{tk.ID},
+	})
+	if err == nil {
+		t.Fatal("expected an error for a self-dependency")
+	}
+	if !strings.Contains(err.Error(), "itself") {
+		t.Fatalf("error %q should explain the self-reference", err)
+	}
+}
+
+func TestDependencyDuplicatesCollapse(t *testing.T) {
+	s := newTestStore(t)
+	p := seedProject(t, s, "Billing", "BILL")
+	blocker := seedTicket(t, s, p.ID, "Blocker")
+
+	got, err := s.CreateTicket(models.CreateTicketRequest{
+		ProjectID: p.ID, Title: "Dependent",
+		DependsOn: []string{blocker.ID, "BILL-1", blocker.ID},
+	})
+	if err != nil {
+		t.Fatalf("CreateTicket: %v", err)
+	}
+	if len(got.DependsOn) != 1 {
+		t.Fatalf("dependsOn = %d, want 1 after duplicates collapse", len(got.DependsOn))
 	}
 }
