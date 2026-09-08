@@ -14,6 +14,14 @@ export interface Label {
   id: string;
   name: string;
   color: string;
+  ticketCount: number;
+}
+
+export interface TicketRef {
+  id: string;
+  key: string;
+  title: string;
+  status: string;
 }
 
 export interface Subtask {
@@ -37,9 +45,11 @@ export interface Ticket {
   createdAt: string;
   updatedAt: string;
   projectPrefix: string;
+  repo?: string;
   labels: Label[];
   subtasks: Subtask[];
-  blockedBy: string[];
+  dependsOn?: TicketRef[];
+  blocks?: TicketRef[];
 }
 
 export interface BoardColumn {

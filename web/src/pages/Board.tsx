@@ -20,12 +20,12 @@ import {
   ArrowRight,
   ArrowDown,
   CheckCircle2,
-  FolderKanban,
   Plus,
 } from "lucide-react";
 import { api, type Ticket, type Project, type BoardColumn } from "../api/client";
 import TicketPanel from "../components/TicketPanel";
 import CreateTicketModal from "../components/CreateTicketModal";
+import DependencyBand from "../components/DependencyBand";
 
 const STATUSES = ["todo", "in_progress", "done"];
 const STATUS_LABELS: Record<string, string> = {
@@ -80,17 +80,13 @@ function SubtaskProgress({ subtasks }: { subtasks: Ticket["subtasks"] }) {
 
 function TicketCard({
   ticket,
-  projects,
   isDragging,
   onClick,
 }: {
   ticket: Ticket;
-  projects: Project[];
   isDragging?: boolean;
   onClick?: () => void;
 }) {
-  const project = projects.find((p) => p.id === ticket.projectId);
-
   return (
     <div
       onClick={onClick}
@@ -105,18 +101,18 @@ function TicketCard({
         <PriorityBadge priority={ticket.priority} />
       </div>
       <p className="text-sm text-slate-200 leading-snug">{ticket.title}</p>
-      {project && (
+      <DependencyBand dependsOn={ticket.dependsOn} />
+      {ticket.labels && ticket.labels.length > 0 && (
         <div className="flex flex-wrap items-center gap-1.5">
-          <span
-            className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium"
-            style={{
-              backgroundColor: (project.color || "#3b82f6") + "1a",
-              color: project.color || "#3b82f6",
-            }}
-          >
-            <FolderKanban className="w-3 h-3" />
-            {project.name}
-          </span>
+          {ticket.labels.map((l) => (
+            <span
+              key={l.id}
+              className="inline-flex items-center rounded px-1.5 py-0.5 text-[10.5px] font-medium"
+              style={{ backgroundColor: l.color + "1f", color: l.color }}
+            >
+              {l.name}
+            </span>
+          ))}
         </div>
       )}
       {ticket.dueDate && (
@@ -132,11 +128,9 @@ function TicketCard({
 
 function DraggableTicket({
   ticket,
-  projects,
   onClick,
 }: {
   ticket: Ticket;
-  projects: Project[];
   onClick: () => void;
 }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
@@ -151,7 +145,7 @@ function DraggableTicket({
       {...attributes}
       className={`cursor-grab active:cursor-grabbing ${isDragging ? "opacity-30" : ""}`}
     >
-      <TicketCard ticket={ticket} projects={projects} onClick={onClick} />
+      <TicketCard ticket={ticket} onClick={onClick} />
     </div>
   );
 }
@@ -159,13 +153,11 @@ function DraggableTicket({
 function Column({
   status,
   tickets,
-  projects,
   onTicketClick,
   onAddTicket,
 }: {
   status: string;
   tickets: Ticket[];
-  projects: Project[];
   onTicketClick: (ticket: Ticket) => void;
   onAddTicket: (status: string) => void;
 }) {
@@ -196,7 +188,6 @@ function Column({
           <DraggableTicket
             key={ticket.id}
             ticket={ticket}
-            projects={projects}
             onClick={() => onTicketClick(ticket)}
           />
         ))}
@@ -369,7 +360,6 @@ export default function Board() {
                   key={status}
                   status={status}
                   tickets={getColumnTickets(status)}
-                  projects={projects}
                   onTicketClick={handleTicketClick}
                   onAddTicket={setCreateForStatus}
                 />
@@ -378,7 +368,7 @@ export default function Board() {
             <DragOverlay>
               {activeTicket ? (
                 <div className="w-80">
-                  <TicketCard ticket={activeTicket} projects={projects} isDragging />
+                  <TicketCard ticket={activeTicket} isDragging />
                 </div>
               ) : null}
             </DragOverlay>
