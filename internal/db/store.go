@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/oklog/ulid/v2"
@@ -280,8 +281,17 @@ func (s *Store) CreateTicket(req models.CreateTicketRequest) (*models.Ticket, er
 	}
 
 	if len(req.Labels) > 0 {
-		for _, labelID := range req.Labels {
-			s.db.Exec("INSERT OR IGNORE INTO ticket_labels (ticket_id, label_id) VALUES (?, ?)", t.ID, labelID)
+		labelIDs, err := s.resolveLabelNames(req.Labels)
+		if err != nil {
+			return nil, err
+		}
+		for _, labelID := range labelIDs {
+			if _, err := s.db.Exec(
+				"INSERT OR IGNORE INTO ticket_labels (ticket_id, label_id) VALUES (?, ?)",
+				t.ID, labelID,
+			); err != nil {
+				return nil, fmt.Errorf("attaching label: %w", err)
+			}
 		}
 	}
 
@@ -335,9 +345,20 @@ func (s *Store) UpdateTicket(id string, req models.UpdateTicketRequest) (*models
 	}
 
 	if req.Labels != nil {
-		s.db.Exec("DELETE FROM ticket_labels WHERE ticket_id = ?", id)
-		for _, labelID := range req.Labels {
-			s.db.Exec("INSERT OR IGNORE INTO ticket_labels (ticket_id, label_id) VALUES (?, ?)", id, labelID)
+		labelIDs, err := s.resolveLabelNames(req.Labels)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := s.db.Exec("DELETE FROM ticket_labels WHERE ticket_id = ?", id); err != nil {
+			return nil, fmt.Errorf("clearing labels: %w", err)
+		}
+		for _, labelID := range labelIDs {
+			if _, err := s.db.Exec(
+				"INSERT OR IGNORE INTO ticket_labels (ticket_id, label_id) VALUES (?, ?)",
+				id, labelID,
+			); err != nil {
+				return nil, fmt.Errorf("attaching label: %w", err)
+			}
 		}
 	}
 
@@ -401,6 +422,48 @@ func (s *Store) GetBoard(projectID string) (*models.Board, error) {
 	}
 
 	return board, nil
+}
+
+const defaultLabelColor = "#6B7280"
+
+// resolveLabelNames maps label names to label IDs, matching case-insensitively.
+// Names with no existing label are created with the default color, keeping the
+// caller's original casing. This is what lets an agent pass ["bug"] without a
+// lookup round trip.
+func (s *Store) resolveLabelNames(names []string) ([]string, error) {
+	ids := make([]string, 0, len(names))
+	seen := make(map[string]bool, len(names))
+
+	for _, name := range names {
+		trimmed := strings.TrimSpace(name)
+		if trimmed == "" {
+			continue
+		}
+		key := strings.ToLower(trimmed)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+
+		var id string
+		err := s.db.QueryRow(
+			"SELECT id FROM labels WHERE LOWER(name) = ?", key,
+		).Scan(&id)
+		switch {
+		case err == sql.ErrNoRows:
+			id = newID()
+			if _, err := s.db.Exec(
+				"INSERT INTO labels (id, name, color) VALUES (?, ?, ?)",
+				id, trimmed, defaultLabelColor,
+			); err != nil {
+				return nil, fmt.Errorf("creating label %q: %w", trimmed, err)
+			}
+		case err != nil:
+			return nil, fmt.Errorf("looking up label %q: %w", trimmed, err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, nil
 }
 
 func (s *Store) ListLabels() ([]models.Label, error) {

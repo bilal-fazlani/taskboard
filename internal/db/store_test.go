@@ -239,3 +239,99 @@ func TestDeletingBlockerRemovesReverseLink(t *testing.T) {
 		t.Fatalf("dependsOn = %d, want 0 after the blocker was deleted", len(got.DependsOn))
 	}
 }
+
+func TestLabelsResolveByNameAndAutoCreate(t *testing.T) {
+	s := newTestStore(t)
+	p := seedProject(t, s, "Billing", "BILL")
+
+	tk, err := s.CreateTicket(models.CreateTicketRequest{
+		ProjectID: p.ID,
+		Title:     "Invoice export",
+		Labels:    []string{"bug", "backend"},
+	})
+	if err != nil {
+		t.Fatalf("CreateTicket: %v", err)
+	}
+	if len(tk.Labels) != 2 {
+		t.Fatalf("labels = %d, want 2", len(tk.Labels))
+	}
+
+	all, err := s.ListLabels()
+	if err != nil {
+		t.Fatalf("ListLabels: %v", err)
+	}
+	if len(all) != 2 {
+		t.Fatalf("global labels = %d, want 2", len(all))
+	}
+	for _, l := range all {
+		if l.Color != "#6B7280" {
+			t.Fatalf("auto-created label %q color = %q, want #6B7280", l.Name, l.Color)
+		}
+	}
+}
+
+func TestLabelMatchingIsCaseInsensitive(t *testing.T) {
+	s := newTestStore(t)
+	p := seedProject(t, s, "Billing", "BILL")
+
+	if _, err := s.CreateTicket(models.CreateTicketRequest{
+		ProjectID: p.ID, Title: "First", Labels: []string{"Backend"},
+	}); err != nil {
+		t.Fatalf("CreateTicket(first): %v", err)
+	}
+	if _, err := s.CreateTicket(models.CreateTicketRequest{
+		ProjectID: p.ID, Title: "Second", Labels: []string{"backend"},
+	}); err != nil {
+		t.Fatalf("CreateTicket(second): %v", err)
+	}
+
+	all, err := s.ListLabels()
+	if err != nil {
+		t.Fatalf("ListLabels: %v", err)
+	}
+	if len(all) != 1 {
+		t.Fatalf("labels = %d, want 1; casing must not create a duplicate", len(all))
+	}
+	if all[0].Name != "Backend" {
+		t.Fatalf("stored name = %q, want the original casing Backend", all[0].Name)
+	}
+}
+
+func TestLabelUpdateReplaceSemantics(t *testing.T) {
+	s := newTestStore(t)
+	p := seedProject(t, s, "Billing", "BILL")
+	tk, err := s.CreateTicket(models.CreateTicketRequest{
+		ProjectID: p.ID, Title: "T", Labels: []string{"bug", "backend"},
+	})
+	if err != nil {
+		t.Fatalf("CreateTicket: %v", err)
+	}
+
+	// A nil slice leaves labels untouched.
+	title := "Renamed"
+	got, err := s.UpdateTicket(tk.ID, models.UpdateTicketRequest{Title: &title})
+	if err != nil {
+		t.Fatalf("UpdateTicket(title): %v", err)
+	}
+	if len(got.Labels) != 2 {
+		t.Fatalf("nil labels cleared the set: got %d, want 2", len(got.Labels))
+	}
+
+	// A non-nil slice replaces the whole set.
+	got, err = s.UpdateTicket(tk.ID, models.UpdateTicketRequest{Labels: []string{"docs"}})
+	if err != nil {
+		t.Fatalf("UpdateTicket(labels): %v", err)
+	}
+	if len(got.Labels) != 1 || got.Labels[0].Name != "docs" {
+		t.Fatalf("labels = %+v, want exactly [docs]", got.Labels)
+	}
+
+	// An empty non-nil slice clears the set.
+	got, err = s.UpdateTicket(tk.ID, models.UpdateTicketRequest{Labels: []string{}})
+	if err != nil {
+		t.Fatalf("UpdateTicket(empty): %v", err)
+	}
+	if len(got.Labels) != 0 {
+		t.Fatalf("labels = %d, want 0", len(got.Labels))
+	}
+}
