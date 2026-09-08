@@ -22,7 +22,7 @@ import {
   CheckCircle2,
   Plus,
 } from "lucide-react";
-import { api, type Ticket, type Project, type BoardColumn } from "../api/client";
+import { api, type Ticket, type Project, type BoardColumn, type TicketWrite } from "../api/client";
 import TicketPanel from "../components/TicketPanel";
 import CreateTicketModal from "../components/CreateTicketModal";
 import DependencyBand from "../components/DependencyBand";
@@ -307,7 +307,7 @@ export default function Board() {
     setSelectedTicket(ticket);
   };
 
-  const handleUpdate = async (id: string, data: Partial<Ticket>) => {
+  const handleUpdate = async (id: string, data: TicketWrite) => {
     await api.tickets.update(id, data);
     loadBoard();
   };
@@ -317,7 +317,7 @@ export default function Board() {
     loadBoard();
   };
 
-  const handleCreate = async (data: Partial<Ticket>) => {
+  const handleCreate = async (data: TicketWrite) => {
     await api.tickets.create(data);
     setCreateForStatus(null);
     loadBoard();

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { X } from "lucide-react";
-import type { Ticket, Project } from "../api/client";
+import type { TicketWrite, Project } from "../api/client";
+import LabelPicker from "./LabelPicker";
 
 const PRIORITIES = ["urgent", "high", "medium", "low"];
 
@@ -13,13 +14,14 @@ export default function CreateTicketModal({
   projects: Project[];
   defaultStatus?: string;
   onClose: () => void;
-  onCreate: (data: Partial<Ticket>) => void;
+  onCreate: (data: TicketWrite) => void;
 }) {
   const [projectId, setProjectId] = useState(projects[0]?.id || "");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [priority, setPriority] = useState("medium");
   const [dueDate, setDueDate] = useState("");
+  const [labels, setLabels] = useState<string[]>([]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -31,7 +33,9 @@ export default function CreateTicketModal({
       priority,
       status: defaultStatus || "todo",
       dueDate: dueDate || undefined,
+      labels,
     });
+    setLabels([]);
   };
 
   return (
@@ -125,6 +129,11 @@ export default function CreateTicketModal({
                 className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
               />
             </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-slate-400 mb-1.5">Labels</label>
+            <LabelPicker value={labels} onChange={setLabels} />
           </div>
         </div>
 

@@ -9,7 +9,7 @@ import {
   Calendar,
   Ticket as TicketIcon,
 } from "lucide-react";
-import { api, type Ticket, type Project } from "../api/client";
+import { api, type Ticket, type Project, type TicketWrite } from "../api/client";
 import TicketPanel from "../components/TicketPanel";
 import CreateTicketModal from "../components/CreateTicketModal";
 
@@ -98,13 +98,13 @@ export default function Tickets() {
     return true;
   });
 
-  const handleCreate = async (data: Partial<Ticket>) => {
+  const handleCreate = async (data: TicketWrite) => {
     await api.tickets.create(data);
     setShowCreate(false);
     load();
   };
 
-  const handleUpdate = async (id: string, data: Partial<Ticket>) => {
+  const handleUpdate = async (id: string, data: TicketWrite) => {
     await api.tickets.update(id, data);
     load();
   };

@@ -52,6 +52,24 @@ export interface Ticket {
   blocks?: TicketRef[];
 }
 
+/**
+ * Fields accepted when creating or updating a ticket. Deliberately NOT
+ * Partial<Ticket>: the API takes label names and dependency IDs-or-keys as
+ * strings, whereas a Ticket carries resolved Label and TicketRef objects.
+ */
+export interface TicketWrite {
+  projectId?: string;
+  title?: string;
+  description?: string;
+  status?: string;
+  priority?: string;
+  dueDate?: string;
+  position?: number;
+  repo?: string;
+  labels?: string[];
+  dependsOn?: string[];
+}
+
 export interface BoardColumn {
   status: string;
   tickets: Ticket[];
@@ -96,12 +114,12 @@ export const api = {
   tickets: {
     list: () => request<Ticket[]>("/api/tickets"),
     get: (id: string) => request<Ticket>(`/api/tickets/${id}`),
-    create: (data: Partial<Ticket>) =>
+    create: (data: TicketWrite) =>
       request<Ticket>("/api/tickets", {
         method: "POST",
         body: JSON.stringify(data),
       }),
-    update: (id: string, data: Partial<Ticket>) =>
+    update: (id: string, data: TicketWrite) =>
       request<Ticket>(`/api/tickets/${id}`, {
         method: "PUT",
         body: JSON.stringify(data),
