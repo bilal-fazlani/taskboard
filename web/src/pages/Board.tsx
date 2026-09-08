@@ -21,10 +21,9 @@ import {
   ArrowDown,
   CheckCircle2,
   FolderKanban,
-  Users,
   Plus,
 } from "lucide-react";
-import { api, type Ticket, type Project, type Team, type BoardColumn } from "../api/client";
+import { api, type Ticket, type Project, type BoardColumn } from "../api/client";
 import TicketPanel from "../components/TicketPanel";
 import CreateTicketModal from "../components/CreateTicketModal";
 
@@ -82,18 +81,15 @@ function SubtaskProgress({ subtasks }: { subtasks: Ticket["subtasks"] }) {
 function TicketCard({
   ticket,
   projects,
-  teams,
   isDragging,
   onClick,
 }: {
   ticket: Ticket;
   projects: Project[];
-  teams: Team[];
   isDragging?: boolean;
   onClick?: () => void;
 }) {
   const project = projects.find((p) => p.id === ticket.projectId);
-  const team = teams.find((t) => t.id === ticket.teamId);
 
   return (
     <div
@@ -109,32 +105,18 @@ function TicketCard({
         <PriorityBadge priority={ticket.priority} />
       </div>
       <p className="text-sm text-slate-200 leading-snug">{ticket.title}</p>
-      {(project || team) && (
+      {project && (
         <div className="flex flex-wrap items-center gap-1.5">
-          {project && (
-            <span
-              className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium"
-              style={{
-                backgroundColor: (project.color || "#3b82f6") + "1a",
-                color: project.color || "#3b82f6",
-              }}
-            >
-              <FolderKanban className="w-3 h-3" />
-              {project.name}
-            </span>
-          )}
-          {team && (
-            <span
-              className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium"
-              style={{
-                backgroundColor: (team.color || "#8b5cf6") + "1a",
-                color: team.color || "#8b5cf6",
-              }}
-            >
-              <Users className="w-3 h-3" />
-              {team.name}
-            </span>
-          )}
+          <span
+            className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium"
+            style={{
+              backgroundColor: (project.color || "#3b82f6") + "1a",
+              color: project.color || "#3b82f6",
+            }}
+          >
+            <FolderKanban className="w-3 h-3" />
+            {project.name}
+          </span>
         </div>
       )}
       {ticket.dueDate && (
@@ -151,12 +133,10 @@ function TicketCard({
 function DraggableTicket({
   ticket,
   projects,
-  teams,
   onClick,
 }: {
   ticket: Ticket;
   projects: Project[];
-  teams: Team[];
   onClick: () => void;
 }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
@@ -171,7 +151,7 @@ function DraggableTicket({
       {...attributes}
       className={`cursor-grab active:cursor-grabbing ${isDragging ? "opacity-30" : ""}`}
     >
-      <TicketCard ticket={ticket} projects={projects} teams={teams} onClick={onClick} />
+      <TicketCard ticket={ticket} projects={projects} onClick={onClick} />
     </div>
   );
 }
@@ -180,14 +160,12 @@ function Column({
   status,
   tickets,
   projects,
-  teams,
   onTicketClick,
   onAddTicket,
 }: {
   status: string;
   tickets: Ticket[];
   projects: Project[];
-  teams: Team[];
   onTicketClick: (ticket: Ticket) => void;
   onAddTicket: (status: string) => void;
 }) {
@@ -219,7 +197,6 @@ function Column({
             key={ticket.id}
             ticket={ticket}
             projects={projects}
-            teams={teams}
             onClick={() => onTicketClick(ticket)}
           />
         ))}
@@ -235,7 +212,6 @@ function Column({
 
 export default function Board() {
   const [projects, setProjects] = useState<Project[]>([]);
-  const [teams, setTeams] = useState<Team[]>([]);
   const [selectedProject, setSelectedProject] = useState<string>("");
   const [columns, setColumns] = useState<BoardColumn[]>([]);
   const [activeTicket, setActiveTicket] = useState<Ticket | null>(null);
@@ -261,7 +237,6 @@ export default function Board() {
 
   useEffect(() => {
     api.projects.list().then(setProjects).catch(() => setProjects([]));
-    api.teams.list().then(setTeams).catch(() => setTeams([]));
   }, []);
 
   useEffect(() => {
@@ -395,7 +370,6 @@ export default function Board() {
                   status={status}
                   tickets={getColumnTickets(status)}
                   projects={projects}
-                  teams={teams}
                   onTicketClick={handleTicketClick}
                   onAddTicket={setCreateForStatus}
                 />
@@ -404,7 +378,7 @@ export default function Board() {
             <DragOverlay>
               {activeTicket ? (
                 <div className="w-80">
-                  <TicketCard ticket={activeTicket} projects={projects} teams={teams} isDragging />
+                  <TicketCard ticket={activeTicket} projects={projects} isDragging />
                 </div>
               ) : null}
             </DragOverlay>
@@ -415,7 +389,6 @@ export default function Board() {
       {createForStatus && (
         <CreateTicketModal
           projects={projects}
-          teams={teams}
           defaultStatus={createForStatus}
           onClose={() => setCreateForStatus(null)}
           onCreate={handleCreate}
@@ -426,7 +399,6 @@ export default function Board() {
         <TicketPanel
           ticket={selectedTicket}
           projects={projects}
-          teams={teams}
           onClose={() => {
             setSelectedTicket(null);
             loadBoard();

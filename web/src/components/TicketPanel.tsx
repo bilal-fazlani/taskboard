@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { X, Trash2, CheckCircle2, Circle, Pencil, Eye } from "lucide-react";
 import Markdown from "react-markdown";
-import { api, type Ticket, type Project, type Team, type Subtask } from "../api/client";
+import { api, type Ticket, type Project, type Subtask } from "../api/client";
 
 const STATUSES = ["todo", "in_progress", "done"];
 const PRIORITIES = ["urgent", "high", "medium", "low"];
@@ -15,14 +15,12 @@ const STATUS_LABELS: Record<string, string> = {
 export default function TicketPanel({
   ticket,
   projects,
-  teams,
   onClose,
   onUpdate,
   onDelete,
 }: {
   ticket: Ticket;
   projects: Project[];
-  teams: Team[];
   onClose: () => void;
   onUpdate: (id: string, data: Partial<Ticket>) => void;
   onDelete: (id: string) => void;
@@ -32,7 +30,6 @@ export default function TicketPanel({
   const [status, setStatus] = useState(ticket.status);
   const [priority, setPriority] = useState(ticket.priority);
   const [dueDate, setDueDate] = useState(ticket.dueDate || "");
-  const [teamId, setTeamId] = useState(ticket.teamId || "");
   const [subtasks, setSubtasks] = useState<Subtask[]>(ticket.subtasks || []);
   const [newSubtask, setNewSubtask] = useState("");
   const [dirty, setDirty] = useState(false);
@@ -47,7 +44,6 @@ export default function TicketPanel({
       status,
       priority,
       dueDate: dueDate || undefined,
-      teamId: teamId || undefined,
     });
     setDirty(false);
   };
@@ -212,26 +208,8 @@ export default function TicketPanel({
                 className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
               />
             </div>
-            <div>
-              <label className="block text-xs font-medium text-slate-500 mb-1.5">
-                Team
-              </label>
-              <select
-                value={teamId}
-                onChange={(e) => {
-                  setTeamId(e.target.value);
-                  markDirty();
-                }}
-                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
-              >
-                <option value="">None</option>
-                {teams.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.name}
-                  </option>
-                ))}
-              </select>
-            </div>
+            {/* Task 11 will place the Repo input here, alongside Due Date. */}
+            <div />
             <div>
               <label className="block text-xs font-medium text-slate-500 mb-1.5">
                 Project

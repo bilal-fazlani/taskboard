@@ -9,7 +9,7 @@ import {
   Calendar,
   Ticket as TicketIcon,
 } from "lucide-react";
-import { api, type Ticket, type Project, type Team } from "../api/client";
+import { api, type Ticket, type Project } from "../api/client";
 import TicketPanel from "../components/TicketPanel";
 import CreateTicketModal from "../components/CreateTicketModal";
 
@@ -64,7 +64,6 @@ function PriorityBadge({ priority }: { priority: string }) {
 export default function Tickets() {
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
-  const [teams, setTeams] = useState<Team[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
@@ -75,18 +74,15 @@ export default function Tickets() {
 
   const load = useCallback(async () => {
     try {
-      const [t, p, tm] = await Promise.all([
+      const [t, p] = await Promise.all([
         api.tickets.list(),
         api.projects.list(),
-        api.teams.list(),
       ]);
       setTickets(t || []);
       setProjects(p || []);
-      setTeams(tm || []);
     } catch {
       setTickets([]);
       setProjects([]);
-      setTeams([]);
     }
     setLoading(false);
   }, []);
@@ -241,7 +237,6 @@ export default function Tickets() {
       {showCreate && (
         <CreateTicketModal
           projects={projects}
-          teams={teams}
           onClose={() => setShowCreate(false)}
           onCreate={handleCreate}
         />
@@ -251,7 +246,6 @@ export default function Tickets() {
         <TicketPanel
           ticket={selectedTicket}
           projects={projects}
-          teams={teams}
           onClose={() => {
             setSelectedTicket(null);
             load();

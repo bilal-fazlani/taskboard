@@ -10,13 +10,6 @@ export interface Project {
   updatedAt: string;
 }
 
-export interface Team {
-  id: string;
-  name: string;
-  color: string;
-  createdAt: string;
-}
-
 export interface Label {
   id: string;
   name: string;
@@ -34,7 +27,6 @@ export interface Subtask {
 export interface Ticket {
   id: string;
   projectId: string;
-  teamId?: string;
   number: number;
   title: string;
   description: string;
@@ -89,23 +81,6 @@ export const api = {
       }),
     delete: (id: string) =>
       request<void>(`/api/projects/${id}`, { method: "DELETE" }),
-  },
-
-  teams: {
-    list: () => request<Team[]>("/api/teams"),
-    get: (id: string) => request<Team>(`/api/teams/${id}`),
-    create: (data: Partial<Team>) =>
-      request<Team>("/api/teams", {
-        method: "POST",
-        body: JSON.stringify(data),
-      }),
-    update: (id: string, data: Partial<Team>) =>
-      request<Team>(`/api/teams/${id}`, {
-        method: "PUT",
-        body: JSON.stringify(data),
-      }),
-    delete: (id: string) =>
-      request<void>(`/api/teams/${id}`, { method: "DELETE" }),
   },
 
   tickets: {

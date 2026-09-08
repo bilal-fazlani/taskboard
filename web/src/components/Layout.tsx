@@ -3,7 +3,6 @@ import { NavLink, Outlet } from "react-router-dom";
 import {
   LayoutDashboard,
   FolderKanban,
-  Users,
   Ticket,
   Zap,
   TerminalSquare,
@@ -13,7 +12,6 @@ import TerminalPanel from "./TerminalPanel";
 const navItems = [
   { to: "/", icon: LayoutDashboard, label: "Board" },
   { to: "/projects", icon: FolderKanban, label: "Projects" },
-  { to: "/teams", icon: Users, label: "Teams" },
   { to: "/tickets", icon: Ticket, label: "Tickets" },
 ];
 
