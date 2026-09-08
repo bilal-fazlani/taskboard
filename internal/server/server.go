@@ -59,14 +59,6 @@ func (s *Server) setupRoutes(webFS fs.FS) {
 			r.Delete("/{id}", s.deleteProject)
 		})
 
-		r.Route("/teams", func(r chi.Router) {
-			r.Get("/", s.listTeams)
-			r.Post("/", s.createTeam)
-			r.Get("/{id}", s.getTeam)
-			r.Put("/{id}", s.updateTeam)
-			r.Delete("/{id}", s.deleteTeam)
-		})
-
 		r.Route("/tickets", func(r chi.Router) {
 			r.Get("/", s.listTickets)
 			r.Post("/", s.createTicket)
@@ -191,79 +183,9 @@ func (s *Server) deleteProject(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (s *Server) listTeams(w http.ResponseWriter, r *http.Request) {
-	teams, err := s.store.ListTeams()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	if teams == nil {
-		teams = []models.Team{}
-	}
-	writeJSON(w, http.StatusOK, teams)
-}
-
-func (s *Server) getTeam(w http.ResponseWriter, r *http.Request) {
-	t, err := s.store.GetTeam(chi.URLParam(r, "id"))
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	if t == nil {
-		writeError(w, http.StatusNotFound, "team not found")
-		return
-	}
-	writeJSON(w, http.StatusOK, t)
-}
-
-func (s *Server) createTeam(w http.ResponseWriter, r *http.Request) {
-	var req models.CreateTeamRequest
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON")
-		return
-	}
-	if req.Name == "" {
-		writeError(w, http.StatusBadRequest, "name is required")
-		return
-	}
-	t, err := s.store.CreateTeam(req)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusCreated, t)
-}
-
-func (s *Server) updateTeam(w http.ResponseWriter, r *http.Request) {
-	var req models.UpdateTeamRequest
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON")
-		return
-	}
-	t, err := s.store.UpdateTeam(chi.URLParam(r, "id"), req)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	if t == nil {
-		writeError(w, http.StatusNotFound, "team not found")
-		return
-	}
-	writeJSON(w, http.StatusOK, t)
-}
-
-func (s *Server) deleteTeam(w http.ResponseWriter, r *http.Request) {
-	if err := s.store.DeleteTeam(chi.URLParam(r, "id")); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
 func (s *Server) listTickets(w http.ResponseWriter, r *http.Request) {
 	filter := models.TicketFilter{
 		ProjectID: r.URL.Query().Get("projectId"),
-		TeamID:    r.URL.Query().Get("teamId"),
 		Status:    r.URL.Query().Get("status"),
 		Priority:  r.URL.Query().Get("priority"),
 	}

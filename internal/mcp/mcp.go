@@ -207,40 +207,6 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 		json.Unmarshal(args, &a)
 		return map[string]bool{"deleted": true}, s.store.DeleteProject(a.ID)
 
-	case "list_teams":
-		return s.store.ListTeams()
-
-	case "get_team":
-		var a struct {
-			ID string `json:"id"`
-		}
-		json.Unmarshal(args, &a)
-		t, err := s.store.GetTeam(a.ID)
-		if t == nil && err == nil {
-			return nil, fmt.Errorf("team not found")
-		}
-		return t, err
-
-	case "create_team":
-		var a models.CreateTeamRequest
-		json.Unmarshal(args, &a)
-		return s.store.CreateTeam(a)
-
-	case "update_team":
-		var a struct {
-			ID string `json:"id"`
-			models.UpdateTeamRequest
-		}
-		json.Unmarshal(args, &a)
-		return s.store.UpdateTeam(a.ID, a.UpdateTeamRequest)
-
-	case "delete_team":
-		var a struct {
-			ID string `json:"id"`
-		}
-		json.Unmarshal(args, &a)
-		return map[string]bool{"deleted": true}, s.store.DeleteTeam(a.ID)
-
 	case "list_tickets":
 		var a models.TicketFilter
 		json.Unmarshal(args, &a)
@@ -409,64 +375,14 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 				Required:   []string{"id"},
 			},
 		},
-		// --- Teams ---
-		{
-			Name:        "list_teams",
-			Description: "List all teams",
-			InputSchema: jsonSchema{Type: "object"},
-		},
-		{
-			Name:        "get_team",
-			Description: "Get detailed team information by ID",
-			InputSchema: jsonSchema{
-				Type:       "object",
-				Properties: map[string]schemaProp{"id": {Type: "string", Description: "Team ID"}},
-				Required:   []string{"id"},
-			},
-		},
-		{
-			Name:        "create_team",
-			Description: "Create a new team",
-			InputSchema: jsonSchema{
-				Type: "object",
-				Properties: map[string]schemaProp{
-					"name":  {Type: "string", Description: "Team name"},
-					"color": {Type: "string", Description: "Hex color"},
-				},
-				Required: []string{"name"},
-			},
-		},
-		{
-			Name:        "update_team",
-			Description: "Update team properties",
-			InputSchema: jsonSchema{
-				Type: "object",
-				Properties: map[string]schemaProp{
-					"id":    {Type: "string", Description: "Team ID"},
-					"name":  {Type: "string", Description: "Team name"},
-					"color": {Type: "string", Description: "Hex color"},
-				},
-				Required: []string{"id"},
-			},
-		},
-		{
-			Name:        "delete_team",
-			Description: "Delete a team",
-			InputSchema: jsonSchema{
-				Type:       "object",
-				Properties: map[string]schemaProp{"id": {Type: "string", Description: "Team ID"}},
-				Required:   []string{"id"},
-			},
-		},
 		// --- Tickets (tasks within a project) ---
 		{
 			Name:        "list_tickets",
-			Description: "List tickets with optional filters by project, team, status, and priority",
+			Description: "List tickets with optional filters by project, status, and priority",
 			InputSchema: jsonSchema{
 				Type: "object",
 				Properties: map[string]schemaProp{
 					"projectId": {Type: "string", Description: "Filter by project ID"},
-					"teamId":    {Type: "string", Description: "Filter by team ID"},
 					"status":    {Type: "string", Description: "Filter by status", Enum: []string{"todo", "in_progress", "done"}},
 					"priority":  {Type: "string", Description: "Filter by priority", Enum: []string{"urgent", "high", "medium", "low"}},
 				},
@@ -495,7 +411,6 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 					"description": {Type: "string", Description: "Rich text description"},
 					"status":      {Type: "string", Description: "Initial status", Enum: []string{"todo", "in_progress", "done"}},
 					"priority":    {Type: "string", Description: "Priority level", Enum: []string{"urgent", "high", "medium", "low"}},
-					"teamId":      {Type: "string", Description: "Team ID"},
 					"dueDate":     {Type: "string", Description: "Due date (YYYY-MM-DD)"},
 				},
 				Required: []string{"projectId", "title"},
@@ -512,7 +427,6 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 					"description": {Type: "string", Description: "Description"},
 					"status":      {Type: "string", Description: "Status", Enum: []string{"todo", "in_progress", "done"}},
 					"priority":    {Type: "string", Description: "Priority", Enum: []string{"urgent", "high", "medium", "low"}},
-					"teamId":      {Type: "string", Description: "Team ID"},
 					"dueDate":     {Type: "string", Description: "Due date (YYYY-MM-DD)"},
 				},
 				Required: []string{"id"},

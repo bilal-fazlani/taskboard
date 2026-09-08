@@ -25,7 +25,6 @@ func (s *Store) ClearData() error {
 		"subtasks",
 		"tickets",
 		"labels",
-		"teams",
 		"projects",
 	}
 
@@ -146,72 +145,6 @@ func (s *Store) DeleteProject(id string) error {
 	return err
 }
 
-func (s *Store) ListTeams() ([]models.Team, error) {
-	rows, err := s.db.Query("SELECT id, name, color, created_at FROM teams ORDER BY created_at DESC")
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var teams []models.Team
-	for rows.Next() {
-		var t models.Team
-		if err := rows.Scan(&t.ID, &t.Name, &t.Color, &t.CreatedAt); err != nil {
-			return nil, err
-		}
-		teams = append(teams, t)
-	}
-	return teams, rows.Err()
-}
-
-func (s *Store) GetTeam(id string) (*models.Team, error) {
-	var t models.Team
-	err := s.db.QueryRow("SELECT id, name, color, created_at FROM teams WHERE id = ?", id).
-		Scan(&t.ID, &t.Name, &t.Color, &t.CreatedAt)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	return &t, err
-}
-
-func (s *Store) CreateTeam(req models.CreateTeamRequest) (*models.Team, error) {
-	t := models.Team{
-		ID:        newID(),
-		Name:      req.Name,
-		Color:     req.Color,
-		CreatedAt: time.Now(),
-	}
-	if t.Color == "" {
-		t.Color = "#6366F1"
-	}
-
-	_, err := s.db.Exec("INSERT INTO teams (id, name, color, created_at) VALUES (?, ?, ?, ?)",
-		t.ID, t.Name, t.Color, t.CreatedAt)
-	return &t, err
-}
-
-func (s *Store) UpdateTeam(id string, req models.UpdateTeamRequest) (*models.Team, error) {
-	t, err := s.GetTeam(id)
-	if err != nil || t == nil {
-		return nil, err
-	}
-
-	if req.Name != nil {
-		t.Name = *req.Name
-	}
-	if req.Color != nil {
-		t.Color = *req.Color
-	}
-
-	_, err = s.db.Exec("UPDATE teams SET name=?, color=? WHERE id=?", t.Name, t.Color, t.ID)
-	return t, err
-}
-
-func (s *Store) DeleteTeam(id string) error {
-	_, err := s.db.Exec("DELETE FROM teams WHERE id = ?", id)
-	return err
-}
-
 func (s *Store) nextTicketNumber(projectID string) (int, error) {
 	var num int
 	err := s.db.QueryRow("SELECT COALESCE(MAX(number), 0) + 1 FROM tickets WHERE project_id = ?", projectID).Scan(&num)
@@ -219,7 +152,7 @@ func (s *Store) nextTicketNumber(projectID string) (int, error) {
 }
 
 func (s *Store) ListTickets(filter models.TicketFilter) ([]models.Ticket, error) {
-	query := `SELECT t.id, t.project_id, t.team_id, t.number, t.title, t.description,
+	query := `SELECT t.id, t.project_id, t.number, t.title, t.description,
 		t.status, t.priority, t.due_date, t.position, t.created_at, t.updated_at,
 		COALESCE(p.prefix, '') as project_prefix
 		FROM tickets t LEFT JOIN projects p ON t.project_id = p.id WHERE 1=1`
@@ -228,10 +161,6 @@ func (s *Store) ListTickets(filter models.TicketFilter) ([]models.Ticket, error)
 	if filter.ProjectID != "" {
 		query += " AND t.project_id = ?"
 		args = append(args, filter.ProjectID)
-	}
-	if filter.TeamID != "" {
-		query += " AND t.team_id = ?"
-		args = append(args, filter.TeamID)
 	}
 	if filter.Status != "" {
 		query += " AND t.status = ?"
@@ -252,7 +181,7 @@ func (s *Store) ListTickets(filter models.TicketFilter) ([]models.Ticket, error)
 	var tickets []models.Ticket
 	for rows.Next() {
 		var t models.Ticket
-		if err := rows.Scan(&t.ID, &t.ProjectID, &t.TeamID, &t.Number, &t.Title, &t.Description,
+		if err := rows.Scan(&t.ID, &t.ProjectID, &t.Number, &t.Title, &t.Description,
 			&t.Status, &t.Priority, &t.DueDate, &t.Position, &t.CreatedAt, &t.UpdatedAt,
 			&t.ProjectPrefix); err != nil {
 			return nil, err
@@ -275,11 +204,11 @@ func (s *Store) ListTickets(filter models.TicketFilter) ([]models.Ticket, error)
 func (s *Store) GetTicket(id string) (*models.Ticket, error) {
 	var t models.Ticket
 	err := s.db.QueryRow(
-		`SELECT t.id, t.project_id, t.team_id, t.number, t.title, t.description,
+		`SELECT t.id, t.project_id, t.number, t.title, t.description,
 		t.status, t.priority, t.due_date, t.position, t.created_at, t.updated_at,
 		COALESCE(p.prefix, '') as project_prefix
 		FROM tickets t LEFT JOIN projects p ON t.project_id = p.id WHERE t.id = ?`, id,
-	).Scan(&t.ID, &t.ProjectID, &t.TeamID, &t.Number, &t.Title, &t.Description,
+	).Scan(&t.ID, &t.ProjectID, &t.Number, &t.Title, &t.Description,
 		&t.Status, &t.Priority, &t.DueDate, &t.Position, &t.CreatedAt, &t.UpdatedAt,
 		&t.ProjectPrefix)
 	if err == sql.ErrNoRows {
@@ -314,7 +243,6 @@ func (s *Store) CreateTicket(req models.CreateTicketRequest) (*models.Ticket, er
 	t := models.Ticket{
 		ID:          newID(),
 		ProjectID:   req.ProjectID,
-		TeamID:      req.TeamID,
 		Number:      num,
 		Title:       req.Title,
 		Description: req.Description,
@@ -333,9 +261,9 @@ func (s *Store) CreateTicket(req models.CreateTicketRequest) (*models.Ticket, er
 	}
 
 	_, err = s.db.Exec(
-		`INSERT INTO tickets (id, project_id, team_id, number, title, description, status, priority, due_date, position, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		t.ID, t.ProjectID, t.TeamID, t.Number, t.Title, t.Description, t.Status, t.Priority, t.DueDate, t.Position, t.CreatedAt, t.UpdatedAt,
+		`INSERT INTO tickets (id, project_id, number, title, description, status, priority, due_date, position, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		t.ID, t.ProjectID, t.Number, t.Title, t.Description, t.Status, t.Priority, t.DueDate, t.Position, t.CreatedAt, t.UpdatedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -377,9 +305,6 @@ func (s *Store) UpdateTicket(id string, req models.UpdateTicketRequest) (*models
 	if req.Position != nil {
 		t.Position = *req.Position
 	}
-	if req.TeamID != nil {
-		t.TeamID = req.TeamID
-	}
 	if req.DueDate != nil {
 		parsed, err := time.Parse("2006-01-02", *req.DueDate)
 		if err == nil {
@@ -389,8 +314,8 @@ func (s *Store) UpdateTicket(id string, req models.UpdateTicketRequest) (*models
 	t.UpdatedAt = time.Now()
 
 	_, err = s.db.Exec(
-		`UPDATE tickets SET team_id=?, title=?, description=?, status=?, priority=?, due_date=?, position=?, updated_at=? WHERE id=?`,
-		t.TeamID, t.Title, t.Description, t.Status, t.Priority, t.DueDate, t.Position, t.UpdatedAt, t.ID,
+		`UPDATE tickets SET title=?, description=?, status=?, priority=?, due_date=?, position=?, updated_at=? WHERE id=?`,
+		t.Title, t.Description, t.Status, t.Priority, t.DueDate, t.Position, t.UpdatedAt, t.ID,
 	)
 	if err != nil {
 		return nil, err

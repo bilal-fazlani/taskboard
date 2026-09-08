@@ -45,7 +45,7 @@ func ticketCommands() *cobra.Command {
 	listCmd.Flags().StringVar(&status, "status", "", "filter by status (todo|in_progress|done)")
 	listCmd.Flags().StringVar(&priority, "priority", "", "filter by priority (urgent|high|medium|low)")
 
-	var createProject, createPriority, createDue, createTeam string
+	var createProject, createPriority, createDue string
 	createCmd := &cobra.Command{
 		Use:   "create",
 		Short: "Create a new ticket",
@@ -63,9 +63,6 @@ func ticketCommands() *cobra.Command {
 			if createDue != "" {
 				req.DueDate = &createDue
 			}
-			if createTeam != "" {
-				req.TeamID = &createTeam
-			}
 			t, err := store.CreateTicket(req)
 			if err != nil {
 				return err
@@ -80,7 +77,6 @@ func ticketCommands() *cobra.Command {
 	createCmd.MarkFlagRequired("title")
 	createCmd.Flags().StringVar(&createPriority, "priority", "medium", "priority (urgent|high|medium|low)")
 	createCmd.Flags().StringVar(&createDue, "due", "", "due date (YYYY-MM-DD)")
-	createCmd.Flags().StringVar(&createTeam, "team", "", "team ID")
 
 	var moveStatus string
 	moveCmd := &cobra.Command{

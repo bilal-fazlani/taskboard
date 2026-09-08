@@ -14,17 +14,9 @@ type Project struct {
 	UpdatedAt   time.Time `json:"updatedAt"`
 }
 
-type Team struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	Color     string    `json:"color,omitempty"`
-	CreatedAt time.Time `json:"createdAt"`
-}
-
 type Ticket struct {
 	ID          string     `json:"id"`
 	ProjectID   string     `json:"projectId"`
-	TeamID      *string    `json:"teamId,omitempty"`
 	Number      int        `json:"number"`
 	Title       string     `json:"title"`
 	Description string     `json:"description,omitempty"`
@@ -117,19 +109,8 @@ type UpdateProjectRequest struct {
 	Status      *string `json:"status,omitempty"`
 }
 
-type CreateTeamRequest struct {
-	Name  string `json:"name"`
-	Color string `json:"color,omitempty"`
-}
-
-type UpdateTeamRequest struct {
-	Name  *string `json:"name,omitempty"`
-	Color *string `json:"color,omitempty"`
-}
-
 type CreateTicketRequest struct {
 	ProjectID   string   `json:"projectId"`
-	TeamID      *string  `json:"teamId,omitempty"`
 	Title       string   `json:"title"`
 	Description string   `json:"description,omitempty"`
 	Status      string   `json:"status,omitempty"`
@@ -140,7 +121,6 @@ type CreateTicketRequest struct {
 }
 
 type UpdateTicketRequest struct {
-	TeamID      *string  `json:"teamId,omitempty"`
 	Title       *string  `json:"title,omitempty"`
 	Description *string  `json:"description,omitempty"`
 	Status      *string  `json:"status,omitempty"`
@@ -172,7 +152,6 @@ type UpdateLabelRequest struct {
 
 type TicketFilter struct {
 	ProjectID string
-	TeamID    string
 	Status    string
 	Priority  string
 }
