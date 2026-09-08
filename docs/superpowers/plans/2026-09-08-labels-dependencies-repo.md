@@ -2145,7 +2145,56 @@ keys with a +N overflow. Labels are the only chips on a card."
 
 **Interfaces:**
 - Consumes: `TicketRef`, `Label`, `Ticket` from Task 10.
-- Produces: `LabelPicker` with props `{ value: string[]; onChange: (names: string[]) => void }` and `DependencyPicker` with props `{ value: TicketRef[]; onChange: (refs: TicketRef[]) => void; excludeTicketId: string }`.
+- Produces: the `TicketWrite` type (Step 0), `LabelPicker` with props `{ value: string[]; onChange: (names: string[]) => void }`, and `DependencyPicker` with props `{ value: TicketRef[]; onChange: (refs: TicketRef[]) => void; excludeTicketId: string }`.
+
+- [ ] **Step 0: Add a ticket write type**
+
+`Partial<Ticket>` cannot describe a ticket write, and every write path currently uses it.
+A `Ticket` carries `labels: Label[]` and `dependsOn: TicketRef[]`, which are resolved
+objects, but the API accepts label NAMES and dependency IDs-or-keys as plain strings. So
+sending `{ labels: ["bug"] }` through a `Partial<Ticket>` parameter is a type error.
+
+Add to `web/src/api/client.ts`:
+
+```ts
+/**
+ * Fields accepted when creating or updating a ticket. Deliberately NOT
+ * Partial<Ticket>: the API takes label names and dependency IDs-or-keys as
+ * strings, whereas a Ticket carries resolved Label and TicketRef objects.
+ */
+export interface TicketWrite {
+  projectId?: string;
+  title?: string;
+  description?: string;
+  status?: string;
+  priority?: string;
+  dueDate?: string;
+  position?: number;
+  repo?: string;
+  labels?: string[];
+  dependsOn?: string[];
+}
+```
+
+Change the two ticket write signatures in the `api` object from `Partial<Ticket>` to
+`TicketWrite`:
+
+```ts
+    create: (data: TicketWrite) =>
+```
+
+```ts
+    update: (id: string, data: TicketWrite) =>
+```
+
+Then update every call site's annotation from `Partial<Ticket>` to `TicketWrite`:
+`handleUpdate` and `handleCreate` in `web/src/pages/Board.tsx`, `handleCreate` and
+`handleUpdate` in `web/src/pages/Tickets.tsx`, the `onCreate` prop type in
+`web/src/components/CreateTicketModal.tsx`, and the `onUpdate` prop type in
+`web/src/components/TicketPanel.tsx`. Remove the now-unused `Ticket` type import
+anywhere it becomes dead, since `noUnusedLocals` is enabled.
+
+Run `cd web && npx tsc -b` and confirm it is clean before continuing.
 
 - [ ] **Step 1: Write the label picker**
 
