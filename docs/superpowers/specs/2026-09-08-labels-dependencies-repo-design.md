@@ -53,15 +53,23 @@ databases. Reading the user's real board happens only through the HTTP API on
 
 ## Data model
 
-### Migration `003_labels_repo_drop_teams.sql`
+### Migrations 003 and 004
 
 Migrations are embedded from `internal/db/migrations/*.sql` and tracked in
-`schema_migrations` by filename, applied in lexical order. One new file:
+`schema_migrations` by filename, applied in lexical order. Two new files, split so
+that removing teams and adding repo can be reviewed and reverted independently.
+
+`003_drop_teams.sql`:
 
 ```sql
 DROP INDEX IF EXISTS idx_tickets_team_id;
 ALTER TABLE tickets DROP COLUMN team_id;
 DROP TABLE IF EXISTS teams;
+```
+
+`004_add_ticket_repo.sql`:
+
+```sql
 ALTER TABLE tickets ADD COLUMN repo TEXT DEFAULT '';
 CREATE INDEX IF NOT EXISTS idx_tickets_repo ON tickets(repo);
 CREATE INDEX IF NOT EXISTS idx_ticket_deps_blocked_by ON ticket_dependencies(blocked_by_id);
@@ -78,8 +86,13 @@ database seeded with tickets, dependencies, and labels, it preserved all rows, l
 `PRAGMA foreign_key_check` clean, and accepted new ticket inserts with foreign keys
 enabled. No table rebuild is needed.
 
-`idx_ticket_deps_blocked_by` is what makes the reverse lookup for *blocks* cheap.
-The forward index already exists.
+`idx_ticket_deps_blocked_by` is what makes the reverse lookup for *blocks* cheap,
+and it is genuinely required. The table's primary key is
+`(ticket_id, blocked_by_id)`, whose leading column is the wrong one for a query
+filtering on `blocked_by_id` alone. `EXPLAIN QUERY PLAN` confirms the difference:
+without the index the reverse lookup is `SCAN ticket_dependencies`, and with it
+`SEARCH ticket_dependencies USING INDEX idx_ticket_deps_blocked_by`. The forward
+direction is already served by the existing `idx_ticket_dependencies_ticket_id`.
 
 ### Model changes
 
