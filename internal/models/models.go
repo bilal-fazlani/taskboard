@@ -29,10 +29,20 @@ type Ticket struct {
 	UpdatedAt   time.Time  `json:"updatedAt"`
 
 	// Populated fields (not stored directly)
-	ProjectPrefix string    `json:"projectPrefix,omitempty"`
-	Labels        []Label   `json:"labels,omitempty"`
-	Subtasks      []Subtask `json:"subtasks,omitempty"`
-	BlockedBy     []string  `json:"blockedBy,omitempty"`
+	ProjectPrefix string      `json:"projectPrefix,omitempty"`
+	Labels        []Label     `json:"labels,omitempty"`
+	Subtasks      []Subtask   `json:"subtasks,omitempty"`
+	DependsOn     []TicketRef `json:"dependsOn,omitempty"`
+	Blocks        []TicketRef `json:"blocks,omitempty"`
+}
+
+// TicketRef is a lightweight pointer to another ticket, carrying enough
+// context for a client to render it without a second fetch.
+type TicketRef struct {
+	ID     string `json:"id"`
+	Key    string `json:"key"`
+	Title  string `json:"title"`
+	Status string `json:"status"`
 }
 
 // DisplayKey returns the human-readable ticket key like "AUTH-1"
@@ -77,11 +87,6 @@ type Subtask struct {
 	Position  int    `json:"position"`
 }
 
-type TicketDependency struct {
-	TicketID    string `json:"ticketId"`
-	BlockedByID string `json:"blockedById"`
-}
-
 // Board represents the kanban board view
 type Board struct {
 	ProjectID string   `json:"projectId,omitempty"`
@@ -119,7 +124,7 @@ type CreateTicketRequest struct {
 	Repo        string   `json:"repo,omitempty"`
 	DueDate     *string  `json:"dueDate,omitempty"`
 	Labels      []string `json:"labels,omitempty"`
-	BlockedBy   []string `json:"blockedBy,omitempty"`
+	DependsOn   []string `json:"dependsOn,omitempty"`
 }
 
 type UpdateTicketRequest struct {
@@ -131,7 +136,7 @@ type UpdateTicketRequest struct {
 	DueDate     *string  `json:"dueDate,omitempty"`
 	Position    *float64 `json:"position,omitempty"`
 	Labels      []string `json:"labels,omitempty"`
-	BlockedBy   []string `json:"blockedBy,omitempty"`
+	DependsOn   []string `json:"dependsOn,omitempty"`
 }
 
 type MoveTicketRequest struct {

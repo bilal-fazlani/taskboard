@@ -199,7 +199,7 @@ func (s *Store) ListTickets(filter models.TicketFilter) ([]models.Ticket, error)
 	for i := range tickets {
 		tickets[i].Labels, _ = s.getTicketLabels(tickets[i].ID)
 		tickets[i].Subtasks, _ = s.getTicketSubtasks(tickets[i].ID)
-		tickets[i].BlockedBy, _ = s.getTicketBlockedBy(tickets[i].ID)
+		tickets[i].DependsOn, _ = s.getTicketDependsOn(tickets[i].ID)
 	}
 
 	return tickets, nil
@@ -224,7 +224,12 @@ func (s *Store) GetTicket(id string) (*models.Ticket, error) {
 
 	t.Labels, _ = s.getTicketLabels(t.ID)
 	t.Subtasks, _ = s.getTicketSubtasks(t.ID)
-	t.BlockedBy, _ = s.getTicketBlockedBy(t.ID)
+	if t.DependsOn, err = s.getTicketDependsOn(t.ID); err != nil {
+		return nil, err
+	}
+	if t.Blocks, err = s.getTicketBlocks(t.ID); err != nil {
+		return nil, err
+	}
 
 	return &t, nil
 }
@@ -280,8 +285,8 @@ func (s *Store) CreateTicket(req models.CreateTicketRequest) (*models.Ticket, er
 		}
 	}
 
-	if len(req.BlockedBy) > 0 {
-		for _, blockerID := range req.BlockedBy {
+	if len(req.DependsOn) > 0 {
+		for _, blockerID := range req.DependsOn {
 			s.db.Exec("INSERT OR IGNORE INTO ticket_dependencies (ticket_id, blocked_by_id) VALUES (?, ?)", t.ID, blockerID)
 		}
 	}
@@ -336,9 +341,9 @@ func (s *Store) UpdateTicket(id string, req models.UpdateTicketRequest) (*models
 		}
 	}
 
-	if req.BlockedBy != nil {
+	if req.DependsOn != nil {
 		s.db.Exec("DELETE FROM ticket_dependencies WHERE ticket_id = ?", id)
-		for _, blockerID := range req.BlockedBy {
+		for _, blockerID := range req.DependsOn {
 			s.db.Exec("INSERT OR IGNORE INTO ticket_dependencies (ticket_id, blocked_by_id) VALUES (?, ?)", id, blockerID)
 		}
 	}
@@ -514,20 +519,43 @@ func (s *Store) getTicketSubtasks(ticketID string) ([]models.Subtask, error) {
 	return subtasks, rows.Err()
 }
 
-func (s *Store) getTicketBlockedBy(ticketID string) ([]string, error) {
-	rows, err := s.db.Query("SELECT blocked_by_id FROM ticket_dependencies WHERE ticket_id = ?", ticketID)
+const ticketRefSelect = `SELECT t.id,
+	COALESCE(p.prefix, '') || '-' || t.number AS key,
+	t.title, t.status
+	FROM tickets t LEFT JOIN projects p ON t.project_id = p.id`
+
+func scanTicketRefs(rows *sql.Rows) ([]models.TicketRef, error) {
+	defer rows.Close()
+	var refs []models.TicketRef
+	for rows.Next() {
+		var r models.TicketRef
+		if err := rows.Scan(&r.ID, &r.Key, &r.Title, &r.Status); err != nil {
+			return nil, err
+		}
+		refs = append(refs, r)
+	}
+	return refs, rows.Err()
+}
+
+// getTicketDependsOn returns the tickets this ticket declares a dependency on.
+func (s *Store) getTicketDependsOn(ticketID string) ([]models.TicketRef, error) {
+	rows, err := s.db.Query(ticketRefSelect+
+		` JOIN ticket_dependencies d ON d.blocked_by_id = t.id
+		WHERE d.ticket_id = ? ORDER BY t.number`, ticketID)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	return scanTicketRefs(rows)
+}
 
-	var ids []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		ids = append(ids, id)
+// getTicketBlocks returns the tickets that declare a dependency on this one.
+// Nothing writes this direction; it is the same table read backwards.
+func (s *Store) getTicketBlocks(ticketID string) ([]models.TicketRef, error) {
+	rows, err := s.db.Query(ticketRefSelect+
+		` JOIN ticket_dependencies d ON d.ticket_id = t.id
+		WHERE d.blocked_by_id = ? ORDER BY t.number`, ticketID)
+	if err != nil {
+		return nil, err
 	}
-	return ids, rows.Err()
+	return scanTicketRefs(rows)
 }

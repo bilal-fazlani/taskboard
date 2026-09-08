@@ -143,3 +143,99 @@ func TestListTicketsFilterByRepo(t *testing.T) {
 		t.Fatalf("repo filter returned %d tickets, want 1 (API work)", len(got))
 	}
 }
+
+func TestDependencyDirections(t *testing.T) {
+	s := newTestStore(t)
+	p := seedProject(t, s, "Billing", "BILL")
+	blocker := seedTicket(t, s, p.ID, "Subscription lifecycle")
+	dependent, err := s.CreateTicket(models.CreateTicketRequest{
+		ProjectID: p.ID,
+		Title:     "Portal UI",
+		DependsOn: []string{blocker.ID},
+	})
+	if err != nil {
+		t.Fatalf("CreateTicket: %v", err)
+	}
+
+	// Forward direction on the ticket that declared the dependency.
+	got, err := s.GetTicket(dependent.ID)
+	if err != nil {
+		t.Fatalf("GetTicket(dependent): %v", err)
+	}
+	if len(got.DependsOn) != 1 {
+		t.Fatalf("dependsOn = %d refs, want 1", len(got.DependsOn))
+	}
+	ref := got.DependsOn[0]
+	if ref.ID != blocker.ID {
+		t.Fatalf("dependsOn[0].ID = %q, want %q", ref.ID, blocker.ID)
+	}
+	if ref.Key != "BILL-1" {
+		t.Fatalf("dependsOn[0].Key = %q, want BILL-1", ref.Key)
+	}
+	if ref.Title != "Subscription lifecycle" {
+		t.Fatalf("dependsOn[0].Title = %q", ref.Title)
+	}
+	if ref.Status != "todo" {
+		t.Fatalf("dependsOn[0].Status = %q, want todo", ref.Status)
+	}
+
+	// Reverse direction appears on the blocker without any write to it.
+	back, err := s.GetTicket(blocker.ID)
+	if err != nil {
+		t.Fatalf("GetTicket(blocker): %v", err)
+	}
+	if len(back.Blocks) != 1 || back.Blocks[0].ID != dependent.ID {
+		t.Fatalf("blocks = %+v, want one ref to the dependent ticket", back.Blocks)
+	}
+	if len(back.DependsOn) != 0 {
+		t.Fatalf("blocker should depend on nothing, got %d", len(back.DependsOn))
+	}
+}
+
+func TestDependencyStatusReflectsBlocker(t *testing.T) {
+	s := newTestStore(t)
+	p := seedProject(t, s, "Billing", "BILL")
+	blocker := seedTicket(t, s, p.ID, "Blocker")
+	dependent, err := s.CreateTicket(models.CreateTicketRequest{
+		ProjectID: p.ID, Title: "Dependent", DependsOn: []string{blocker.ID},
+	})
+	if err != nil {
+		t.Fatalf("CreateTicket: %v", err)
+	}
+
+	if _, err := s.MoveTicket(blocker.ID, models.MoveTicketRequest{Status: "done"}); err != nil {
+		t.Fatalf("MoveTicket: %v", err)
+	}
+
+	got, err := s.GetTicket(dependent.ID)
+	if err != nil {
+		t.Fatalf("GetTicket: %v", err)
+	}
+	if got.DependsOn[0].Status != "done" {
+		t.Fatalf("status = %q, want done", got.DependsOn[0].Status)
+	}
+}
+
+func TestDeletingBlockerRemovesReverseLink(t *testing.T) {
+	s := newTestStore(t)
+	p := seedProject(t, s, "Billing", "BILL")
+	blocker := seedTicket(t, s, p.ID, "Blocker")
+	dependent, err := s.CreateTicket(models.CreateTicketRequest{
+		ProjectID: p.ID, Title: "Dependent", DependsOn: []string{blocker.ID},
+	})
+	if err != nil {
+		t.Fatalf("CreateTicket: %v", err)
+	}
+
+	if err := s.DeleteTicket(blocker.ID); err != nil {
+		t.Fatalf("DeleteTicket: %v", err)
+	}
+
+	got, err := s.GetTicket(dependent.ID)
+	if err != nil {
+		t.Fatalf("GetTicket: %v", err)
+	}
+	if len(got.DependsOn) != 0 {
+		t.Fatalf("dependsOn = %d, want 0 after the blocker was deleted", len(got.DependsOn))
+	}
+}
