@@ -1428,6 +1428,9 @@ func (s *Store) attachListDetails(tickets []models.Ticket) error {
 		return err
 	}
 
+	// The key expression MUST stay character-identical to the one in
+	// ticketRefSelect (Task 3). Both have a known cosmetic flaw for an empty
+	// project prefix; keeping them identical means that is one fix, not two.
 	depRows, err := s.db.Query(
 		`SELECT d.ticket_id, t.id,
 		COALESCE(p.prefix, '') || '-' || t.number, t.title, t.status
