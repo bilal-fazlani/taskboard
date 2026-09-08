@@ -74,9 +74,10 @@ func itoa(i int) string {
 }
 
 type Label struct {
-	ID    string `json:"id"`
-	Name  string `json:"name"`
-	Color string `json:"color"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Color       string `json:"color"`
+	TicketCount int    `json:"ticketCount"`
 }
 
 type Subtask struct {

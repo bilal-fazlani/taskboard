@@ -686,7 +686,11 @@ func (s *Store) lookupTicketRef(ref string) (string, error) {
 }
 
 func (s *Store) ListLabels() ([]models.Label, error) {
-	rows, err := s.db.Query("SELECT id, name, color FROM labels ORDER BY name")
+	rows, err := s.db.Query(
+		`SELECT l.id, l.name, l.color, COUNT(tl.ticket_id)
+		FROM labels l LEFT JOIN ticket_labels tl ON tl.label_id = l.id
+		GROUP BY l.id, l.name, l.color
+		ORDER BY l.name`)
 	if err != nil {
 		return nil, err
 	}
@@ -695,7 +699,7 @@ func (s *Store) ListLabels() ([]models.Label, error) {
 	var labels []models.Label
 	for rows.Next() {
 		var l models.Label
-		if err := rows.Scan(&l.ID, &l.Name, &l.Color); err != nil {
+		if err := rows.Scan(&l.ID, &l.Name, &l.Color, &l.TicketCount); err != nil {
 			return nil, err
 		}
 		labels = append(labels, l)

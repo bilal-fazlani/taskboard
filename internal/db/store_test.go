@@ -539,3 +539,61 @@ func TestListTicketsEmptyResultDoesNotQuery(t *testing.T) {
 		t.Fatalf("tickets = %d, want 0", len(got))
 	}
 }
+
+func TestListLabelsIncludesTicketCount(t *testing.T) {
+	s := newTestStore(t)
+	p := seedProject(t, s, "Billing", "BILL")
+	if _, err := s.CreateTicket(models.CreateTicketRequest{
+		ProjectID: p.ID, Title: "One", Labels: []string{"bug", "backend"},
+	}); err != nil {
+		t.Fatalf("CreateTicket: %v", err)
+	}
+	if _, err := s.CreateTicket(models.CreateTicketRequest{
+		ProjectID: p.ID, Title: "Two", Labels: []string{"bug"},
+	}); err != nil {
+		t.Fatalf("CreateTicket: %v", err)
+	}
+
+	labels, err := s.ListLabels()
+	if err != nil {
+		t.Fatalf("ListLabels: %v", err)
+	}
+
+	counts := map[string]int{}
+	for _, l := range labels {
+		counts[l.Name] = l.TicketCount
+	}
+	if counts["bug"] != 2 {
+		t.Fatalf("bug count = %d, want 2", counts["bug"])
+	}
+	if counts["backend"] != 1 {
+		t.Fatalf("backend count = %d, want 1", counts["backend"])
+	}
+}
+
+func TestDeletingLabelDetachesItFromTickets(t *testing.T) {
+	s := newTestStore(t)
+	p := seedProject(t, s, "Billing", "BILL")
+	tk, err := s.CreateTicket(models.CreateTicketRequest{
+		ProjectID: p.ID, Title: "Tagged", Labels: []string{"bug"},
+	})
+	if err != nil {
+		t.Fatalf("CreateTicket: %v", err)
+	}
+
+	labels, err := s.ListLabels()
+	if err != nil {
+		t.Fatalf("ListLabels: %v", err)
+	}
+	if err := s.DeleteLabel(labels[0].ID); err != nil {
+		t.Fatalf("DeleteLabel: %v", err)
+	}
+
+	got, err := s.GetTicket(tk.ID)
+	if err != nil {
+		t.Fatalf("GetTicket: %v", err)
+	}
+	if len(got.Labels) != 0 {
+		t.Fatalf("labels = %d, want 0 after the label was deleted", len(got.Labels))
+	}
+}

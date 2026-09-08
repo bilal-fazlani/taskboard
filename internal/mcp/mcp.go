@@ -212,6 +212,9 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 		json.Unmarshal(args, &a)
 		return s.store.ListTickets(a)
 
+	case "list_labels":
+		return s.store.ListLabels()
+
 	case "get_ticket":
 		var a struct {
 			ID string `json:"id"`
@@ -375,6 +378,12 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 				Required:   []string{"id"},
 			},
 		},
+		// --- Labels (global, informational tags on tickets) ---
+		{
+			Name:        "list_labels",
+			Description: "List all labels with the number of tickets carrying each. Labels are global across projects.",
+			InputSchema: jsonSchema{Type: "object", Properties: map[string]schemaProp{}},
+		},
 		// --- Tickets (tasks within a project) ---
 		{
 			Name:        "list_tickets",
@@ -386,12 +395,13 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 					"status":    {Type: "string", Description: "Filter by status", Enum: []string{"todo", "in_progress", "done"}},
 					"priority":  {Type: "string", Description: "Filter by priority", Enum: []string{"urgent", "high", "medium", "low"}},
 					"repo":      {Type: "string", Description: "Filter by exact repo string"},
+					"label":     {Type: "string", Description: "Filter by label name, case-insensitive"},
 				},
 			},
 		},
 		{
 			Name:        "get_ticket",
-			Description: "Get detailed ticket information including subtasks, labels, and dependencies",
+			Description: "Get detailed ticket information including subtasks, labels, the tickets it depends on, and the tickets it blocks",
 			InputSchema: jsonSchema{
 				Type:       "object",
 				Properties: map[string]schemaProp{"id": {Type: "string", Description: "Ticket ID"}},
@@ -414,6 +424,16 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 					"priority":    {Type: "string", Description: "Priority level", Enum: []string{"urgent", "high", "medium", "low"}},
 					"repo":        {Type: "string", Description: "Free-form repository identifier, for example acme/billing-api"},
 					"dueDate":     {Type: "string", Description: "Due date (YYYY-MM-DD)"},
+					"labels": {
+						Type:        "array",
+						Description: "Label names. Matched case-insensitively; unknown names are created automatically.",
+						Items:       &jsonSchema{Type: "string"},
+					},
+					"dependsOn": {
+						Type:        "array",
+						Description: "Ticket IDs or display keys like BILL-2 that this ticket depends on. Informational only: dependencies never block a status change.",
+						Items:       &jsonSchema{Type: "string"},
+					},
 				},
 				Required: []string{"projectId", "title"},
 			},
@@ -431,6 +451,16 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 					"priority":    {Type: "string", Description: "Priority", Enum: []string{"urgent", "high", "medium", "low"}},
 					"repo":        {Type: "string", Description: "Free-form repository identifier, for example acme/billing-api"},
 					"dueDate":     {Type: "string", Description: "Due date (YYYY-MM-DD)"},
+					"labels": {
+						Type:        "array",
+						Description: "Label names. Matched case-insensitively; unknown names are created automatically.",
+						Items:       &jsonSchema{Type: "string"},
+					},
+					"dependsOn": {
+						Type:        "array",
+						Description: "Ticket IDs or display keys like BILL-2 that this ticket depends on. Informational only: dependencies never block a status change.",
+						Items:       &jsonSchema{Type: "string"},
+					},
 				},
 				Required: []string{"id"},
 			},
