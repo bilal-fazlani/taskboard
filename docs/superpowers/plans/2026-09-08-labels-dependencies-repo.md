@@ -1647,25 +1647,23 @@ Add `labels` and `dependsOn` to the `create_ticket` and `update_ticket` schemas:
 "labels": {
 	Type:        "array",
 	Description: "Label names. Matched case-insensitively; unknown names are created automatically.",
-	Items:       &schemaProp{Type: "string"},
+	Items:       &jsonSchema{Type: "string"},
 },
 "dependsOn": {
 	Type:        "array",
 	Description: "Ticket IDs or display keys like BILL-2 that this ticket depends on. Informational only: dependencies never block a status change.",
-	Items:       &schemaProp{Type: "string"},
+	Items:       &jsonSchema{Type: "string"},
 },
 ```
+
+**Note the element type.** `schemaProp` already has an `Items` field, and it is typed
+`*jsonSchema`, not `*schemaProp`. Use `&jsonSchema{Type: "string"}` exactly as written
+above. `&schemaProp{...}` does not compile.
 
 Add to the `list_tickets` schema:
 
 ```go
 "label": {Type: "string", Description: "Filter by label name, case-insensitive"},
-```
-
-**If `schemaProp` has no `Items` field,** add it:
-
-```go
-Items *schemaProp `json:"items,omitempty"`
 ```
 
 Update the `get_ticket` description to `"Get detailed ticket information including subtasks, labels, the tickets it depends on, and the tickets it blocks"`.
@@ -2781,7 +2779,13 @@ tickets lose the label."
 
 Run: `grep -c 'Name:' internal/mcp/mcp.go`
 
-Expected: 18. If the number differs, the README table and every count reference must match whatever the code actually registers. Reconcile before editing prose.
+Expected: 17. Trust the grep over this number, and over the README.
+
+The published count has been wrong since before this project: the README claims 22 in
+two places, but its own table has only 21 rows and the code defined 21 tools. The
+arithmetic is 21, minus the 5 team tools removed in Task 1, plus `list_labels` added in
+Task 7, giving 17. If the grep disagrees, the grep wins and every count reference in the
+README must match it.
 
 - [ ] **Step 2: Update the README**
 
@@ -2793,7 +2797,9 @@ Remove the five team rows and the `**Teams**` section header from the MCP tool t
 | `list_labels`           | List all labels with ticket counts               |
 ```
 
-Change both occurrences of `22` in the tool count, in the features list and the `#### Available MCP Tools (22)` heading, to the verified number.
+Change both occurrences of `22` in the tool count, in the features list and the
+`#### Available MCP Tools (22)` heading, to the number Step 1 counted. Do not assume the
+old `22` was ever right; it was not.
 
 In the features list, remove the `**Teams** — assign tickets to teams` bullet. Change the Tickets bullet to:
 

@@ -202,7 +202,9 @@ returns 400 with the offending value in the message.
 
 ## MCP
 
-Teams costs five tools. Labels adds one. The count goes from 22 to 18.
+Teams costs five tools. Labels adds one. The code defines 21 tools today, so the count
+goes 21 to 16 to 17. The README's published figure of 22 was already wrong before this
+work: its own table lists 21 rows.
 
 - **Removed:** `list_teams`, `get_team`, `create_team`, `update_team`, `delete_team`.
 - **Added:** `list_labels`, returning every label with its ticket count.
@@ -313,6 +315,6 @@ built binary against a scratch database.
 ## Documentation
 
 `README.md` needs the teams rows removed from the MCP tool table, the count changed
-from 22 to 18, the features list updated, and the CLI examples reworked. The
+from 22 to 17, the features list updated, and the CLI examples reworked. The
 `Data Hierarchy` section stays accurate. Screenshots show teams and will be stale;
 they are regenerated at the end against a scratch database with seeded demo data.
