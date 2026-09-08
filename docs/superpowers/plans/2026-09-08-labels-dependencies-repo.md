@@ -1496,10 +1496,14 @@ ticket is not returned twice."
 ### Task 7: Label counts and the label surfaces on HTTP, MCP, and CLI
 
 **Files:**
-- Modify: `internal/models/models.go`, `internal/db/store.go`, `internal/server/server.go`, `internal/mcp/mcp.go`
+- Modify: `internal/models/models.go`, `internal/db/store.go`, `internal/mcp/mcp.go`
 - Create: `internal/cli/label.go`
-- Modify: `internal/cli/root.go`, `internal/cli/ticket.go`
+- Modify: `internal/cli/root.go`
 - Test: `internal/db/store_test.go`
+
+Do not edit `internal/server/server.go` in this task: the label ticket count reaches
+HTTP through the existing `listLabels` handler unchanged. Do not edit
+`internal/cli/ticket.go` either; Task 8 owns that file.
 
 **Interfaces:**
 - Consumes: `resolveLabelNames` from Task 4.
