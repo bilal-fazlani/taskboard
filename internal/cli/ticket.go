@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/tcarac/taskboard/internal/models"
@@ -13,7 +14,7 @@ func ticketCommands() *cobra.Command {
 		Short: "Manage tickets",
 	}
 
-	var projectID, status, priority, listRepo string
+	var projectID, status, priority, listRepo, listLabel string
 	listCmd := &cobra.Command{
 		Use:   "list",
 		Short: "List tickets",
@@ -27,6 +28,7 @@ func ticketCommands() *cobra.Command {
 				Status:    status,
 				Priority:  priority,
 				Repo:      listRepo,
+				Label:     listLabel,
 			})
 			if err != nil {
 				return err
@@ -36,8 +38,26 @@ func ticketCommands() *cobra.Command {
 				return nil
 			}
 			for _, t := range tickets {
-				key := t.DisplayKey()
-				fmt.Printf("[%s] %s - %s (%s, %s)\n", key, t.Title, t.Status, t.Priority, t.ID)
+				line := fmt.Sprintf("[%s] %s - %s (%s", t.DisplayKey(), t.Title, t.Status, t.Priority)
+				if t.Repo != "" {
+					line += ", " + t.Repo
+				}
+				line += ")"
+				if len(t.Labels) > 0 {
+					names := make([]string, len(t.Labels))
+					for i, l := range t.Labels {
+						names[i] = l.Name
+					}
+					line += " [" + strings.Join(names, ", ") + "]"
+				}
+				if len(t.DependsOn) > 0 {
+					keys := make([]string, len(t.DependsOn))
+					for i, d := range t.DependsOn {
+						keys[i] = d.Key
+					}
+					line += " depends on " + strings.Join(keys, ", ")
+				}
+				fmt.Printf("%s  (%s)\n", line, t.ID)
 			}
 			return nil
 		},
@@ -46,8 +66,10 @@ func ticketCommands() *cobra.Command {
 	listCmd.Flags().StringVar(&status, "status", "", "filter by status (todo|in_progress|done)")
 	listCmd.Flags().StringVar(&priority, "priority", "", "filter by priority (urgent|high|medium|low)")
 	listCmd.Flags().StringVar(&listRepo, "repo", "", "filter by repo")
+	listCmd.Flags().StringVar(&listLabel, "label", "", "filter by label name")
 
 	var createProject, createPriority, createDue, createRepo string
+	var createLabels, createDependsOn []string
 	createCmd := &cobra.Command{
 		Use:   "create",
 		Short: "Create a new ticket",
@@ -66,6 +88,8 @@ func ticketCommands() *cobra.Command {
 			if createDue != "" {
 				req.DueDate = &createDue
 			}
+			req.Labels = createLabels
+			req.DependsOn = createDependsOn
 			t, err := store.CreateTicket(req)
 			if err != nil {
 				return err
@@ -81,6 +105,8 @@ func ticketCommands() *cobra.Command {
 	createCmd.Flags().StringVar(&createPriority, "priority", "medium", "priority (urgent|high|medium|low)")
 	createCmd.Flags().StringVar(&createDue, "due", "", "due date (YYYY-MM-DD)")
 	createCmd.Flags().StringVar(&createRepo, "repo", "", "repository identifier")
+	createCmd.Flags().StringSliceVar(&createLabels, "label", nil, "label name (repeatable)")
+	createCmd.Flags().StringSliceVar(&createDependsOn, "depends-on", nil, "ticket ID or key this depends on (repeatable)")
 
 	var moveStatus string
 	moveCmd := &cobra.Command{
@@ -123,6 +149,74 @@ func ticketCommands() *cobra.Command {
 		},
 	}
 
-	cmd.AddCommand(listCmd, createCmd, moveCmd, deleteCmd)
+	var (
+		updTitle, updDescription, updStatus, updPriority, updDue, updRepo string
+		updLabels, updDependsOn                                           []string
+	)
+	updateCmd := &cobra.Command{
+		Use:   "update [id]",
+		Short: "Update ticket fields",
+		Long: "Update ticket fields. --labels and --depends-on replace the existing " +
+			"set; omit a flag to leave that field untouched.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			store, err := openStore()
+			if err != nil {
+				return err
+			}
+
+			var req models.UpdateTicketRequest
+			if cmd.Flags().Changed("title") {
+				req.Title = &updTitle
+			}
+			if cmd.Flags().Changed("description") {
+				req.Description = &updDescription
+			}
+			if cmd.Flags().Changed("status") {
+				req.Status = &updStatus
+			}
+			if cmd.Flags().Changed("priority") {
+				req.Priority = &updPriority
+			}
+			if cmd.Flags().Changed("due") {
+				req.DueDate = &updDue
+			}
+			if cmd.Flags().Changed("repo") {
+				req.Repo = &updRepo
+			}
+			if cmd.Flags().Changed("labels") {
+				req.Labels = updLabels
+				if req.Labels == nil {
+					req.Labels = []string{}
+				}
+			}
+			if cmd.Flags().Changed("depends-on") {
+				req.DependsOn = updDependsOn
+				if req.DependsOn == nil {
+					req.DependsOn = []string{}
+				}
+			}
+
+			t, err := store.UpdateTicket(args[0], req)
+			if err != nil {
+				return err
+			}
+			if t == nil {
+				return fmt.Errorf("ticket not found")
+			}
+			fmt.Printf("Updated %s: %s\n", t.DisplayKey(), t.Title)
+			return nil
+		},
+	}
+	updateCmd.Flags().StringVar(&updTitle, "title", "", "new title")
+	updateCmd.Flags().StringVar(&updDescription, "description", "", "new description")
+	updateCmd.Flags().StringVar(&updStatus, "status", "", "status (todo|in_progress|done)")
+	updateCmd.Flags().StringVar(&updPriority, "priority", "", "priority (urgent|high|medium|low)")
+	updateCmd.Flags().StringVar(&updDue, "due", "", "due date (YYYY-MM-DD)")
+	updateCmd.Flags().StringVar(&updRepo, "repo", "", "repository identifier")
+	updateCmd.Flags().StringSliceVar(&updLabels, "labels", nil, "replace labels (comma separated)")
+	updateCmd.Flags().StringSliceVar(&updDependsOn, "depends-on", nil, "replace dependencies (comma separated)")
+
+	cmd.AddCommand(listCmd, createCmd, moveCmd, deleteCmd, updateCmd)
 	return cmd
 }
