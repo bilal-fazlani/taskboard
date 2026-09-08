@@ -163,4 +163,5 @@ type TicketFilter struct {
 	Status    string
 	Priority  string
 	Repo      string
+	Label     string
 }

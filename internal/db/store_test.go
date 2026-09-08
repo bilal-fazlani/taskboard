@@ -463,3 +463,79 @@ func TestDependencyDuplicatesCollapse(t *testing.T) {
 		t.Fatalf("dependsOn = %d, want 1 after duplicates collapse", len(got.DependsOn))
 	}
 }
+
+func TestListTicketsCarriesLabelsAndDependenciesButNotBlocks(t *testing.T) {
+	s := newTestStore(t)
+	p := seedProject(t, s, "Billing", "BILL")
+	blocker := seedTicket(t, s, p.ID, "Blocker")
+	if _, err := s.CreateTicket(models.CreateTicketRequest{
+		ProjectID: p.ID,
+		Title:     "Dependent",
+		Labels:    []string{"frontend"},
+		DependsOn: []string{blocker.ID},
+	}); err != nil {
+		t.Fatalf("CreateTicket: %v", err)
+	}
+
+	list, err := s.ListTickets(models.TicketFilter{})
+	if err != nil {
+		t.Fatalf("ListTickets: %v", err)
+	}
+	if len(list) != 2 {
+		t.Fatalf("tickets = %d, want 2", len(list))
+	}
+
+	var dependent, blockerRow models.Ticket
+	for _, tk := range list {
+		switch tk.Title {
+		case "Dependent":
+			dependent = tk
+		case "Blocker":
+			blockerRow = tk
+		}
+	}
+
+	if len(dependent.Labels) != 1 || dependent.Labels[0].Name != "frontend" {
+		t.Fatalf("labels on list = %+v, want [frontend]", dependent.Labels)
+	}
+	if len(dependent.DependsOn) != 1 || dependent.DependsOn[0].Key != "BILL-1" {
+		t.Fatalf("dependsOn on list = %+v, want [BILL-1]", dependent.DependsOn)
+	}
+	if len(blockerRow.Blocks) != 0 {
+		t.Fatalf("blocks must not be populated on list results, got %+v", blockerRow.Blocks)
+	}
+}
+
+func TestListTicketsFilterByLabel(t *testing.T) {
+	s := newTestStore(t)
+	p := seedProject(t, s, "Billing", "BILL")
+	if _, err := s.CreateTicket(models.CreateTicketRequest{
+		ProjectID: p.ID, Title: "Tagged", Labels: []string{"bug"},
+	}); err != nil {
+		t.Fatalf("CreateTicket: %v", err)
+	}
+	if _, err := s.CreateTicket(models.CreateTicketRequest{
+		ProjectID: p.ID, Title: "Untagged",
+	}); err != nil {
+		t.Fatalf("CreateTicket: %v", err)
+	}
+
+	got, err := s.ListTickets(models.TicketFilter{Label: "BUG"})
+	if err != nil {
+		t.Fatalf("ListTickets: %v", err)
+	}
+	if len(got) != 1 || got[0].Title != "Tagged" {
+		t.Fatalf("label filter returned %d tickets, want 1 (Tagged)", len(got))
+	}
+}
+
+func TestListTicketsEmptyResultDoesNotQuery(t *testing.T) {
+	s := newTestStore(t)
+	got, err := s.ListTickets(models.TicketFilter{})
+	if err != nil {
+		t.Fatalf("ListTickets on an empty database: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("tickets = %d, want 0", len(got))
+	}
+}

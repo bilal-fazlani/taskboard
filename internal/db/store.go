@@ -176,6 +176,12 @@ func (s *Store) ListTickets(filter models.TicketFilter) ([]models.Ticket, error)
 		query += " AND t.repo = ?"
 		args = append(args, filter.Repo)
 	}
+	if filter.Label != "" {
+		query += ` AND EXISTS (
+			SELECT 1 FROM ticket_labels tl JOIN labels l ON l.id = tl.label_id
+			WHERE tl.ticket_id = t.id AND LOWER(l.name) = LOWER(?))`
+		args = append(args, filter.Label)
+	}
 	query += " ORDER BY t.position ASC, t.created_at DESC"
 
 	rows, err := s.db.Query(query, args...)
@@ -198,13 +204,101 @@ func (s *Store) ListTickets(filter models.TicketFilter) ([]models.Ticket, error)
 		return nil, err
 	}
 
-	for i := range tickets {
-		tickets[i].Labels, _ = s.getTicketLabels(tickets[i].ID)
-		tickets[i].Subtasks, _ = s.getTicketSubtasks(tickets[i].ID)
-		tickets[i].DependsOn, _ = s.getTicketDependsOn(tickets[i].ID)
+	if err := s.attachListDetails(tickets); err != nil {
+		return nil, err
 	}
 
 	return tickets, nil
+}
+
+// attachListDetails fills Labels, Subtasks, and DependsOn for a page of tickets
+// using one query per relation rather than one per ticket. Blocks is not filled;
+// no list view renders it.
+func (s *Store) attachListDetails(tickets []models.Ticket) error {
+	if len(tickets) == 0 {
+		return nil
+	}
+
+	ids := make([]any, len(tickets))
+	index := make(map[string]int, len(tickets))
+	for i, t := range tickets {
+		ids[i] = t.ID
+		index[t.ID] = i
+		tickets[i].Labels = nil
+		tickets[i].Subtasks = nil
+		tickets[i].DependsOn = nil
+	}
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
+
+	labelRows, err := s.db.Query(
+		`SELECT tl.ticket_id, l.id, l.name, l.color
+		FROM ticket_labels tl JOIN labels l ON l.id = tl.label_id
+		WHERE tl.ticket_id IN (`+placeholders+`) ORDER BY l.name`, ids...)
+	if err != nil {
+		return fmt.Errorf("loading labels: %w", err)
+	}
+	for labelRows.Next() {
+		var ticketID string
+		var l models.Label
+		if err := labelRows.Scan(&ticketID, &l.ID, &l.Name, &l.Color); err != nil {
+			labelRows.Close()
+			return err
+		}
+		if i, ok := index[ticketID]; ok {
+			tickets[i].Labels = append(tickets[i].Labels, l)
+		}
+	}
+	labelRows.Close()
+	if err := labelRows.Err(); err != nil {
+		return err
+	}
+
+	subtaskRows, err := s.db.Query(
+		`SELECT id, ticket_id, title, completed, position FROM subtasks
+		WHERE ticket_id IN (`+placeholders+`) ORDER BY position`, ids...)
+	if err != nil {
+		return fmt.Errorf("loading subtasks: %w", err)
+	}
+	for subtaskRows.Next() {
+		var st models.Subtask
+		if err := subtaskRows.Scan(&st.ID, &st.TicketID, &st.Title, &st.Completed, &st.Position); err != nil {
+			subtaskRows.Close()
+			return err
+		}
+		if i, ok := index[st.TicketID]; ok {
+			tickets[i].Subtasks = append(tickets[i].Subtasks, st)
+		}
+	}
+	subtaskRows.Close()
+	if err := subtaskRows.Err(); err != nil {
+		return err
+	}
+
+	// The key expression MUST stay character-identical to the one in
+	// ticketRefSelect (Task 3). Both have a known cosmetic flaw for an empty
+	// project prefix; keeping them identical means that is one fix, not two.
+	depRows, err := s.db.Query(
+		`SELECT d.ticket_id, t.id,
+		COALESCE(p.prefix, '') || '-' || t.number, t.title, t.status
+		FROM ticket_dependencies d
+		JOIN tickets t ON t.id = d.blocked_by_id
+		LEFT JOIN projects p ON p.id = t.project_id
+		WHERE d.ticket_id IN (`+placeholders+`) ORDER BY t.number`, ids...)
+	if err != nil {
+		return fmt.Errorf("loading dependencies: %w", err)
+	}
+	defer depRows.Close()
+	for depRows.Next() {
+		var ticketID string
+		var r models.TicketRef
+		if err := depRows.Scan(&ticketID, &r.ID, &r.Key, &r.Title, &r.Status); err != nil {
+			return err
+		}
+		if i, ok := index[ticketID]; ok {
+			tickets[i].DependsOn = append(tickets[i].DependsOn, r)
+		}
+	}
+	return depRows.Err()
 }
 
 func (s *Store) GetTicket(id string) (*models.Ticket, error) {
