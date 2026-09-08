@@ -1985,7 +1985,7 @@ In `web/src/components/CreateTicketModal.tsx`: remove the `teams` prop, the team
 
 In `web/src/pages/Board.tsx`: remove the `teams` state and its `api.teams.list()` fetch, remove `teams` from the props passed to `TicketPanel` and `CreateTicketModal`, delete the `const team = teams.find(...)` line, and delete the team `<span>` chip from the card. Update the surrounding condition `{(project || team) && (` to `{project && (`.
 
-In `web/src/pages/Tickets.tsx`: remove the `teams` state and fetch, the Team column header and cell, and any team filter.
+In `web/src/pages/Tickets.tsx`: remove the `teams` state and fetch. This table has no Team column or team filter to remove, despite what an earlier draft of this plan implied.
 
 - [ ] **Step 4: Verify the build**
 
@@ -2649,7 +2649,11 @@ In `web/src/components/Layout.tsx`, add to `navItems` in the slot Teams vacated,
 
 - [ ] **Step 3: Update the Tickets page**
 
-In `web/src/pages/Tickets.tsx`, add `Labels` and `Repo` column headers where Team used to be, and render the cells:
+In `web/src/pages/Tickets.tsx`, ADD `Labels` and `Repo` columns. Note: this table never
+had a Team column, so there is nothing to replace. The existing headers are Key, Title,
+Status, Priority, Due, plus a narrow trailing action column. Insert the two new headers
+immediately after Title, giving Key, Title, Labels, Repo, Status, Priority, Due. Add the
+matching cells in the same position in the body row:
 
 ```tsx
 <td className="px-4 py-3">

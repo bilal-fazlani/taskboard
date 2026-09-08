@@ -277,7 +277,8 @@ Project moves here as a static line, since it left the card.
 
 ### Tickets page
 
-The Team column is replaced by Labels and Repo columns. A dependency note appears
+Labels and Repo columns are added after Title; the table never carried a Team
+column, so nothing is replaced. A dependency note appears
 under the title. Label and repo filters join the existing status and priority
 filters.
 
