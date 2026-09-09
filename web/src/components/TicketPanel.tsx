@@ -3,6 +3,7 @@ import { X, Trash2, CheckCircle2, Circle, Pencil, Eye } from "lucide-react";
 import Markdown from "react-markdown";
 import { api, type Ticket, type Project, type Subtask, type TicketWrite } from "../api/client";
 import LabelPicker from "./LabelPicker";
+import RepoPicker from "./RepoPicker";
 import DependencyPicker from "./DependencyPicker";
 
 const STATUSES = ["todo", "in_progress", "done"];
@@ -32,7 +33,7 @@ export default function TicketPanel({
   const [status, setStatus] = useState(ticket.status);
   const [priority, setPriority] = useState(ticket.priority);
   const [dueDate, setDueDate] = useState(ticket.dueDate || "");
-  const [repo, setRepo] = useState(ticket.repo || "");
+  const [repos, setRepos] = useState<string[]>(ticket.repos || []);
   const [labels, setLabels] = useState<string[]>((ticket.labels || []).map((l) => l.name));
   const [dependsOn, setDependsOn] = useState(ticket.dependsOn || []);
   const [subtasks, setSubtasks] = useState<Subtask[]>(ticket.subtasks || []);
@@ -55,6 +56,7 @@ export default function TicketPanel({
         setDetail(full);
         // Never overwrite edits the user made while the fetch was in flight.
         if (dirtyRef.current) return;
+        setRepos(full.repos || []);
         setLabels((full.labels || []).map((l) => l.name));
         setDependsOn(full.dependsOn || []);
         setSubtasks(full.subtasks || []);
@@ -79,7 +81,7 @@ export default function TicketPanel({
       status,
       priority,
       dueDate: dueDate || undefined,
-      repo,
+      repos,
       labels,
       dependsOn: dependsOn.map((d) => d.id),
     });
@@ -248,18 +250,6 @@ export default function TicketPanel({
               />
             </div>
             <div>
-              <label className="block text-xs font-medium text-slate-500 mb-1.5">Repo</label>
-              <input
-                value={repo}
-                onChange={(e) => {
-                  setRepo(e.target.value);
-                  markDirty();
-                }}
-                placeholder="acme/billing-web"
-                className="w-full bg-slate-800 border border-slate-700 rounded-md px-3 py-2 text-sm font-mono text-slate-200 focus:outline-none focus:border-slate-600"
-              />
-            </div>
-            <div>
               <label className="block text-xs font-medium text-slate-500 mb-1.5">
                 Project
               </label>
@@ -277,6 +267,19 @@ export default function TicketPanel({
               Save Changes
             </button>
           )}
+
+          <div>
+            <h3 className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-2.5">
+              Repos
+            </h3>
+            <RepoPicker
+              value={repos}
+              onChange={(next) => {
+                setRepos(next);
+                markDirty();
+              }}
+            />
+          </div>
 
           <div>
             <h3 className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-2.5">

@@ -204,7 +204,7 @@ export default function Tickets() {
                 <th className="text-left px-6 py-3 font-medium">Key</th>
                 <th className="text-left px-6 py-3 font-medium">Title</th>
                 <th className="text-left px-4 py-3 font-medium">Labels</th>
-                <th className="text-left px-4 py-3 font-medium">Repo</th>
+                <th className="text-left px-4 py-3 font-medium">Repos</th>
                 <th className="text-left px-6 py-3 font-medium">Status</th>
                 <th className="text-left px-6 py-3 font-medium">Priority</th>
                 <th className="text-left px-6 py-3 font-medium">Due</th>
@@ -255,8 +255,17 @@ export default function Tickets() {
                       ))}
                     </div>
                   </td>
-                  <td className="px-4 py-3 font-mono text-[11px] text-slate-400">
-                    {ticket.repo || ""}
+                  <td className="px-4 py-3">
+                    <div className="flex flex-wrap gap-1">
+                      {(ticket.repos || []).map((repo) => (
+                        <span
+                          key={repo}
+                          className="inline-flex items-center rounded bg-slate-800 px-1.5 py-0.5 font-mono text-[10.5px] text-slate-400"
+                        >
+                          {repo}
+                        </span>
+                      ))}
+                    </div>
                   </td>
                   <td className="px-6 py-3">
                     <StatusBadge status={ticket.status} />

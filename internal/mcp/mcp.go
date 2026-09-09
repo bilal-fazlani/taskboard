@@ -394,7 +394,7 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 					"projectId": {Type: "string", Description: "Filter by project ID"},
 					"status":    {Type: "string", Description: "Filter by status", Enum: []string{"todo", "in_progress", "done"}},
 					"priority":  {Type: "string", Description: "Filter by priority", Enum: []string{"urgent", "high", "medium", "low"}},
-					"repo":      {Type: "string", Description: "Filter by exact repo string"},
+					"repo":      {Type: "string", Description: "Filter to tickets attached to this repo, matched exactly"},
 					"label":     {Type: "string", Description: "Filter by label name, case-insensitive"},
 				},
 			},
@@ -422,8 +422,12 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 					"description": {Type: "string", Description: "Rich text description"},
 					"status":      {Type: "string", Description: "Initial status", Enum: []string{"todo", "in_progress", "done"}},
 					"priority":    {Type: "string", Description: "Priority level", Enum: []string{"urgent", "high", "medium", "low"}},
-					"repo":        {Type: "string", Description: "Free-form repository identifier, for example acme/billing-api"},
-					"dueDate":     {Type: "string", Description: "Due date (YYYY-MM-DD)"},
+					"repos": {
+						Type:        "array",
+						Description: "Free-form repository identifiers, for example acme/billing-api. Matched exactly, so case matters.",
+						Items:       &jsonSchema{Type: "string"},
+					},
+					"dueDate": {Type: "string", Description: "Due date (YYYY-MM-DD)"},
 					"labels": {
 						Type:        "array",
 						Description: "Label names. Matched case-insensitively; unknown names are created automatically.",
@@ -449,8 +453,12 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 					"description": {Type: "string", Description: "Description"},
 					"status":      {Type: "string", Description: "Status", Enum: []string{"todo", "in_progress", "done"}},
 					"priority":    {Type: "string", Description: "Priority", Enum: []string{"urgent", "high", "medium", "low"}},
-					"repo":        {Type: "string", Description: "Free-form repository identifier, for example acme/billing-api"},
-					"dueDate":     {Type: "string", Description: "Due date (YYYY-MM-DD)"},
+					"repos": {
+						Type:        "array",
+						Description: "Free-form repository identifiers, for example acme/billing-api. Matched exactly, so case matters.",
+						Items:       &jsonSchema{Type: "string"},
+					},
+					"dueDate": {Type: "string", Description: "Due date (YYYY-MM-DD)"},
 					"labels": {
 						Type:        "array",
 						Description: "Label names. Matched case-insensitively; unknown names are created automatically.",

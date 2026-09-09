@@ -45,7 +45,7 @@ export interface Ticket {
   createdAt: string;
   updatedAt: string;
   projectPrefix: string;
-  repo?: string;
+  repos?: string[];
   labels: Label[];
   subtasks: Subtask[];
   dependsOn?: TicketRef[];
@@ -65,7 +65,7 @@ export interface TicketWrite {
   priority?: string;
   dueDate?: string;
   position?: number;
-  repo?: string;
+  repos?: string[];
   labels?: string[];
   dependsOn?: string[];
 }

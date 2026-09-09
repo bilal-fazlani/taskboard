@@ -39,8 +39,8 @@ func ticketCommands() *cobra.Command {
 			}
 			for _, t := range tickets {
 				line := fmt.Sprintf("[%s] %s - %s (%s", t.DisplayKey(), t.Title, t.Status, t.Priority)
-				if t.Repo != "" {
-					line += ", " + t.Repo
+				if len(t.Repos) > 0 {
+					line += ", " + strings.Join(t.Repos, " ")
 				}
 				line += ")"
 				if len(t.Labels) > 0 {
@@ -68,8 +68,8 @@ func ticketCommands() *cobra.Command {
 	listCmd.Flags().StringVar(&listRepo, "repo", "", "filter by repo")
 	listCmd.Flags().StringVar(&listLabel, "label", "", "filter by label name")
 
-	var createProject, createPriority, createDue, createRepo string
-	var createLabels, createDependsOn []string
+	var createProject, createPriority, createDue string
+	var createRepos, createLabels, createDependsOn []string
 	createCmd := &cobra.Command{
 		Use:   "create",
 		Short: "Create a new ticket",
@@ -83,7 +83,7 @@ func ticketCommands() *cobra.Command {
 				ProjectID: createProject,
 				Title:     title,
 				Priority:  createPriority,
-				Repo:      createRepo,
+				Repos:     createRepos,
 			}
 			if createDue != "" {
 				req.DueDate = &createDue
@@ -104,7 +104,7 @@ func ticketCommands() *cobra.Command {
 	createCmd.MarkFlagRequired("title")
 	createCmd.Flags().StringVar(&createPriority, "priority", "medium", "priority (urgent|high|medium|low)")
 	createCmd.Flags().StringVar(&createDue, "due", "", "due date (YYYY-MM-DD)")
-	createCmd.Flags().StringVar(&createRepo, "repo", "", "repository identifier")
+	createCmd.Flags().StringSliceVar(&createRepos, "repo", nil, "repository identifier; comma-separated or repeated")
 	createCmd.Flags().StringSliceVar(&createLabels, "label", nil, "label name; comma-separated or repeated")
 	createCmd.Flags().StringSliceVar(&createDependsOn, "depends-on", nil, "ticket ID or key this depends on; comma-separated or repeated")
 
@@ -150,15 +150,15 @@ func ticketCommands() *cobra.Command {
 	}
 
 	var (
-		updTitle, updDescription, updStatus, updPriority, updDue, updRepo string
-		updLabels, updLabelAlias, updDependsOn                            []string
+		updTitle, updDescription, updStatus, updPriority, updDue string
+		updRepos, updLabels, updLabelAlias, updDependsOn         []string
 	)
 	updateCmd := &cobra.Command{
 		Use:   "update [id]",
 		Short: "Update ticket fields",
 		Long: "Update ticket fields.\n\n" +
-			"Omitting a flag leaves that field untouched. Passing --labels or " +
-			"--depends-on replaces the existing set, so passing one with an empty " +
+			"Omitting a flag leaves that field untouched. Passing --repo, --labels " +
+			"or --depends-on replaces the existing set, so passing one with an empty " +
 			"value clears it. --label is accepted as an alias for --labels, matching " +
 			"the spelling used by 'ticket create' and 'ticket list'.",
 		Args: cobra.ExactArgs(1),
@@ -184,8 +184,13 @@ func ticketCommands() *cobra.Command {
 			if cmd.Flags().Changed("due") {
 				req.DueDate = &updDue
 			}
+			// Like --labels, a non-nil slice replaces the set, so --repo=""
+			// clears it.
 			if cmd.Flags().Changed("repo") {
-				req.Repo = &updRepo
+				req.Repos = updRepos
+				if req.Repos == nil {
+					req.Repos = []string{}
+				}
 			}
 			// --label is an alias for --labels; either spelling (or both) yields a
 			// non-nil slice, which is what makes an empty value clear the set.
@@ -218,7 +223,7 @@ func ticketCommands() *cobra.Command {
 	updateCmd.Flags().StringVar(&updStatus, "status", "", "status (todo|in_progress|done)")
 	updateCmd.Flags().StringVar(&updPriority, "priority", "", "priority (urgent|high|medium|low)")
 	updateCmd.Flags().StringVar(&updDue, "due", "", "due date (YYYY-MM-DD)")
-	updateCmd.Flags().StringVar(&updRepo, "repo", "", "repository identifier")
+	updateCmd.Flags().StringSliceVar(&updRepos, "repo", nil, "replace repos; comma-separated or repeated, empty value clears")
 	updateCmd.Flags().StringSliceVar(&updLabels, "labels", nil, "replace labels; comma-separated or repeated, empty value clears")
 	updateCmd.Flags().StringSliceVar(&updLabelAlias, "label", nil, "alias for --labels")
 	updateCmd.Flags().StringSliceVar(&updDependsOn, "depends-on", nil, "replace dependencies; comma-separated or repeated, empty value clears")

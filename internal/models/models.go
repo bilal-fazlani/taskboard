@@ -22,7 +22,6 @@ type Ticket struct {
 	Description string     `json:"description,omitempty"`
 	Status      string     `json:"status"`
 	Priority    string     `json:"priority"`
-	Repo        string     `json:"repo,omitempty"`
 	DueDate     *time.Time `json:"dueDate,omitempty"`
 	Position    float64    `json:"position"`
 	CreatedAt   time.Time  `json:"createdAt"`
@@ -30,6 +29,7 @@ type Ticket struct {
 
 	// Populated fields (not stored directly)
 	ProjectPrefix string      `json:"projectPrefix,omitempty"`
+	Repos         []string    `json:"repos,omitempty"`
 	Labels        []Label     `json:"labels,omitempty"`
 	Subtasks      []Subtask   `json:"subtasks,omitempty"`
 	DependsOn     []TicketRef `json:"dependsOn,omitempty"`
@@ -122,7 +122,7 @@ type CreateTicketRequest struct {
 	Description string   `json:"description,omitempty"`
 	Status      string   `json:"status,omitempty"`
 	Priority    string   `json:"priority,omitempty"`
-	Repo        string   `json:"repo,omitempty"`
+	Repos       []string `json:"repos,omitempty"`
 	DueDate     *string  `json:"dueDate,omitempty"`
 	Labels      []string `json:"labels,omitempty"`
 	DependsOn   []string `json:"dependsOn,omitempty"`
@@ -133,7 +133,7 @@ type UpdateTicketRequest struct {
 	Description *string  `json:"description,omitempty"`
 	Status      *string  `json:"status,omitempty"`
 	Priority    *string  `json:"priority,omitempty"`
-	Repo        *string  `json:"repo,omitempty"`
+	Repos       []string `json:"repos,omitempty"`
 	DueDate     *string  `json:"dueDate,omitempty"`
 	Position    *float64 `json:"position,omitempty"`
 	Labels      []string `json:"labels,omitempty"`

@@ -165,7 +165,7 @@ func nextTicketNumber(q dbtx, projectID string) (int, error) {
 
 func (s *Store) ListTickets(filter models.TicketFilter) ([]models.Ticket, error) {
 	query := `SELECT t.id, t.project_id, t.number, t.title, t.description,
-		t.status, t.priority, t.repo, t.due_date, t.position, t.created_at, t.updated_at,
+		t.status, t.priority, t.due_date, t.position, t.created_at, t.updated_at,
 		COALESCE(p.prefix, '') as project_prefix
 		FROM tickets t LEFT JOIN projects p ON t.project_id = p.id WHERE 1=1`
 	args := []any{}
@@ -183,7 +183,11 @@ func (s *Store) ListTickets(filter models.TicketFilter) ([]models.Ticket, error)
 		args = append(args, filter.Priority)
 	}
 	if filter.Repo != "" {
-		query += " AND t.repo = ?"
+		// EXISTS rather than a join: a ticket carrying several repos must
+		// still come back once.
+		query += ` AND EXISTS (
+			SELECT 1 FROM ticket_repos tr
+			WHERE tr.ticket_id = t.id AND tr.repo = ?)`
 		args = append(args, filter.Repo)
 	}
 	if filter.Label != "" {
@@ -215,7 +219,7 @@ func (s *Store) ListTickets(filter models.TicketFilter) ([]models.Ticket, error)
 	for rows.Next() {
 		var t models.Ticket
 		if err := rows.Scan(&t.ID, &t.ProjectID, &t.Number, &t.Title, &t.Description,
-			&t.Status, &t.Priority, &t.Repo, &t.DueDate, &t.Position, &t.CreatedAt, &t.UpdatedAt,
+			&t.Status, &t.Priority, &t.DueDate, &t.Position, &t.CreatedAt, &t.UpdatedAt,
 			&t.ProjectPrefix); err != nil {
 			return nil, err
 		}
@@ -245,11 +249,33 @@ func (s *Store) attachListDetails(tickets []models.Ticket) error {
 	for i, t := range tickets {
 		ids[i] = t.ID
 		index[t.ID] = i
+		tickets[i].Repos = nil
 		tickets[i].Labels = nil
 		tickets[i].Subtasks = nil
 		tickets[i].DependsOn = nil
 	}
 	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
+
+	repoRows, err := s.db.Query(
+		`SELECT ticket_id, repo FROM ticket_repos
+		WHERE ticket_id IN (`+placeholders+`) ORDER BY repo`, ids...)
+	if err != nil {
+		return fmt.Errorf("loading repos: %w", err)
+	}
+	for repoRows.Next() {
+		var ticketID, repo string
+		if err := repoRows.Scan(&ticketID, &repo); err != nil {
+			repoRows.Close()
+			return err
+		}
+		if i, ok := index[ticketID]; ok {
+			tickets[i].Repos = append(tickets[i].Repos, repo)
+		}
+	}
+	repoRows.Close()
+	if err := repoRows.Err(); err != nil {
+		return err
+	}
 
 	labelRows, err := s.db.Query(
 		`SELECT tl.ticket_id, l.id, l.name, l.color
@@ -326,11 +352,11 @@ func (s *Store) GetTicket(id string) (*models.Ticket, error) {
 	var t models.Ticket
 	err := s.db.QueryRow(
 		`SELECT t.id, t.project_id, t.number, t.title, t.description,
-		t.status, t.priority, t.repo, t.due_date, t.position, t.created_at, t.updated_at,
+		t.status, t.priority, t.due_date, t.position, t.created_at, t.updated_at,
 		COALESCE(p.prefix, '') as project_prefix
 		FROM tickets t LEFT JOIN projects p ON t.project_id = p.id WHERE t.id = ?`, id,
 	).Scan(&t.ID, &t.ProjectID, &t.Number, &t.Title, &t.Description,
-		&t.Status, &t.Priority, &t.Repo, &t.DueDate, &t.Position, &t.CreatedAt, &t.UpdatedAt,
+		&t.Status, &t.Priority, &t.DueDate, &t.Position, &t.CreatedAt, &t.UpdatedAt,
 		&t.ProjectPrefix)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -339,6 +365,9 @@ func (s *Store) GetTicket(id string) (*models.Ticket, error) {
 		return nil, err
 	}
 
+	if t.Repos, err = s.getTicketRepos(t.ID); err != nil {
+		return nil, err
+	}
 	if t.Labels, err = s.getTicketLabels(t.ID); err != nil {
 		return nil, err
 	}
@@ -388,7 +417,7 @@ func (s *Store) CreateTicket(req models.CreateTicketRequest) (*models.Ticket, er
 		Description: req.Description,
 		Status:      status,
 		Priority:    priority,
-		Repo:        req.Repo,
+		Repos:       normalizeRepos(req.Repos),
 		Position:    float64(num) * 1000,
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
@@ -417,10 +446,14 @@ func (s *Store) CreateTicket(req models.CreateTicketRequest) (*models.Ticket, er
 	}
 
 	if _, err = tx.Exec(
-		`INSERT INTO tickets (id, project_id, number, title, description, status, priority, repo, due_date, position, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		t.ID, t.ProjectID, t.Number, t.Title, t.Description, t.Status, t.Priority, t.Repo, t.DueDate, t.Position, t.CreatedAt, t.UpdatedAt,
+		`INSERT INTO tickets (id, project_id, number, title, description, status, priority, due_date, position, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		t.ID, t.ProjectID, t.Number, t.Title, t.Description, t.Status, t.Priority, t.DueDate, t.Position, t.CreatedAt, t.UpdatedAt,
 	); err != nil {
+		return nil, err
+	}
+
+	if err := insertTicketRepos(tx, t.ID, t.Repos); err != nil {
 		return nil, err
 	}
 
@@ -488,9 +521,6 @@ func (s *Store) UpdateTicket(id string, req models.UpdateTicketRequest) (*models
 	if req.Priority != nil {
 		t.Priority = *req.Priority
 	}
-	if req.Repo != nil {
-		t.Repo = *req.Repo
-	}
 	if req.Position != nil {
 		t.Position = *req.Position
 	}
@@ -503,14 +533,24 @@ func (s *Store) UpdateTicket(id string, req models.UpdateTicketRequest) (*models
 	t.UpdatedAt = time.Now()
 
 	if _, err = tx.Exec(
-		`UPDATE tickets SET title=?, description=?, status=?, priority=?, repo=?, due_date=?, position=?, updated_at=? WHERE id=?`,
-		t.Title, t.Description, t.Status, t.Priority, t.Repo, t.DueDate, t.Position, t.UpdatedAt, t.ID,
+		`UPDATE tickets SET title=?, description=?, status=?, priority=?, due_date=?, position=?, updated_at=? WHERE id=?`,
+		t.Title, t.Description, t.Status, t.Priority, t.DueDate, t.Position, t.UpdatedAt, t.ID,
 	); err != nil {
 		return nil, err
 	}
 
 	// A nil slice leaves the set untouched; a non-nil one replaces it, so an
 	// empty non-nil slice clears it.
+	if req.Repos != nil {
+		t.Repos = normalizeRepos(req.Repos)
+		if _, err := tx.Exec("DELETE FROM ticket_repos WHERE ticket_id = ?", id); err != nil {
+			return nil, fmt.Errorf("clearing repos: %w", err)
+		}
+		if err := insertTicketRepos(tx, id, t.Repos); err != nil {
+			return nil, err
+		}
+	}
+
 	if req.Labels != nil {
 		if _, err := tx.Exec("DELETE FROM ticket_labels WHERE ticket_id = ?", id); err != nil {
 			return nil, fmt.Errorf("clearing labels: %w", err)
@@ -894,6 +934,53 @@ func (s *Store) ToggleSubtask(id string) (*models.Subtask, error) {
 func (s *Store) DeleteSubtask(id string) error {
 	_, err := s.db.Exec("DELETE FROM subtasks WHERE id = ?", id)
 	return err
+}
+
+// normalizeRepos trims each entry and drops blanks, so a stray "  " never
+// becomes a repo. Deduplication and ordering are left to the database:
+// ticket_repos is keyed on (ticket_id, repo), every read is ORDER BY repo, and
+// both writers re-read the ticket before returning it. Matching is exact --
+// unlike label names, repo identifiers are case-sensitive, because a
+// case-sensitive host can serve both acme/API and acme/api.
+func normalizeRepos(repos []string) []string {
+	var out []string
+	for _, r := range repos {
+		if r = strings.TrimSpace(r); r != "" {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+func insertTicketRepos(q dbtx, ticketID string, repos []string) error {
+	for _, repo := range repos {
+		if _, err := q.Exec(
+			"INSERT OR IGNORE INTO ticket_repos (ticket_id, repo) VALUES (?, ?)",
+			ticketID, repo,
+		); err != nil {
+			return fmt.Errorf("attaching repo: %w", err)
+		}
+	}
+	return nil
+}
+
+func (s *Store) getTicketRepos(ticketID string) ([]string, error) {
+	rows, err := s.db.Query(
+		"SELECT repo FROM ticket_repos WHERE ticket_id = ? ORDER BY repo", ticketID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var repos []string
+	for rows.Next() {
+		var repo string
+		if err := rows.Scan(&repo); err != nil {
+			return nil, err
+		}
+		repos = append(repos, repo)
+	}
+	return repos, rows.Err()
 }
 
 func (s *Store) getTicketLabels(ticketID string) ([]models.Label, error) {

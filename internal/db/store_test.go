@@ -1,6 +1,7 @@
 package db
 
 import (
+	"database/sql"
 	"errors"
 	"path/filepath"
 	"strings"
@@ -67,6 +68,99 @@ func TestMigrationsDropTeams(t *testing.T) {
 	}
 }
 
+// openLegacyDB builds a database at the state it would have been in just
+// before migration `upTo` ran, so a migration's effect on existing data can be
+// exercised rather than assumed.
+func openLegacyDB(t *testing.T, path string, upTo string) *sql.DB {
+	t.Helper()
+	raw, err := sql.Open("sqlite", path+"?_pragma=foreign_keys(1)")
+	if err != nil {
+		t.Fatalf("opening legacy database: %v", err)
+	}
+	if _, err := raw.Exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
+		version TEXT PRIMARY KEY,
+		applied_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	)`); err != nil {
+		t.Fatalf("creating schema_migrations: %v", err)
+	}
+
+	entries, err := migrationsFS.ReadDir(migrations)
+	if err != nil {
+		t.Fatalf("reading migrations: %v", err)
+	}
+	applied := 0
+	for _, entry := range entries {
+		if entry.Name() >= upTo {
+			break
+		}
+		content, err := migrationsFS.ReadFile(filepath.Join(migrations, entry.Name()))
+		if err != nil {
+			t.Fatalf("reading migration %s: %v", entry.Name(), err)
+		}
+		if _, err := raw.Exec(string(content)); err != nil {
+			t.Fatalf("executing migration %s: %v", entry.Name(), err)
+		}
+		if _, err := raw.Exec("INSERT INTO schema_migrations (version) VALUES (?)", entry.Name()); err != nil {
+			t.Fatalf("recording migration %s: %v", entry.Name(), err)
+		}
+		applied++
+	}
+	if applied == 0 {
+		t.Fatalf("no migrations applied before %s; is the filename right?", upTo)
+	}
+	return raw
+}
+
+func TestMigrationBackfillsRepoColumnIntoTicketRepos(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "legacy.db")
+
+	legacy := openLegacyDB(t, path, "005_ticket_repos.sql")
+	if _, err := legacy.Exec(
+		`INSERT INTO projects (id, name, prefix) VALUES ('p1', 'Billing', 'BILL')`,
+	); err != nil {
+		t.Fatalf("seeding legacy project: %v", err)
+	}
+	if _, err := legacy.Exec(
+		`INSERT INTO tickets (id, project_id, number, title, repo)
+		 VALUES ('t1', 'p1', 1, 'Has a repo', 'acme/billing-api'),
+		        ('t2', 'p1', 2, 'Has no repo', '')`,
+	); err != nil {
+		t.Fatalf("seeding legacy tickets: %v", err)
+	}
+	if err := legacy.Close(); err != nil {
+		t.Fatalf("closing legacy database: %v", err)
+	}
+
+	database, err := OpenAt(path)
+	if err != nil {
+		t.Fatalf("migrating legacy database: %v", err)
+	}
+	t.Cleanup(func() { database.Close() })
+	s := NewStore(database)
+
+	withRepo, err := s.GetTicket("t1")
+	if err != nil {
+		t.Fatalf("GetTicket t1: %v", err)
+	}
+	assertRepos(t, "backfilled ticket", withRepo.Repos, []string{"acme/billing-api"})
+
+	withoutRepo, err := s.GetTicket("t2")
+	if err != nil {
+		t.Fatalf("GetTicket t2: %v", err)
+	}
+	assertRepos(t, "ticket with an empty repo", withoutRepo.Repos, nil)
+
+	var col int
+	if err := database.QueryRow(
+		`SELECT COUNT(*) FROM pragma_table_info('tickets') WHERE name='repo'`,
+	).Scan(&col); err != nil {
+		t.Fatalf("querying pragma_table_info: %v", err)
+	}
+	if col != 0 {
+		t.Fatal("tickets.repo still exists after migration 005")
+	}
+}
+
 func TestTicketRoundTripAfterTeamsRemoval(t *testing.T) {
 	s := newTestStore(t)
 	p := seedProject(t, s, "Billing", "BILL")
@@ -87,53 +181,200 @@ func TestTicketRoundTripAfterTeamsRemoval(t *testing.T) {
 	}
 }
 
-func TestTicketRepoRoundTrip(t *testing.T) {
+// assertRepos compares a ticket's repos against the exact sequence wanted,
+// order included: repos come back sorted by name.
+func assertRepos(t *testing.T, context string, got, want []string) {
+	t.Helper()
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("%s: repos = %v, want %v", context, got, want)
+	}
+}
+
+func TestCreateTicketStoresMultipleRepos(t *testing.T) {
 	s := newTestStore(t)
 	p := seedProject(t, s, "Billing", "BILL")
 
 	tk, err := s.CreateTicket(models.CreateTicketRequest{
 		ProjectID: p.ID,
 		Title:     "Invoice export",
-		Repo:      "acme/billing-api",
+		Repos:     []string{"acme/billing-web", "acme/billing-api"},
 	})
 	if err != nil {
 		t.Fatalf("CreateTicket: %v", err)
 	}
-	if tk.Repo != "acme/billing-api" {
-		t.Fatalf("repo after create = %q, want acme/billing-api", tk.Repo)
+	assertRepos(t, "after create", tk.Repos, []string{"acme/billing-api", "acme/billing-web"})
+}
+
+func TestGetTicketReturnsRepos(t *testing.T) {
+	s := newTestStore(t)
+	p := seedProject(t, s, "Billing", "BILL")
+
+	tk, err := s.CreateTicket(models.CreateTicketRequest{
+		ProjectID: p.ID,
+		Title:     "Invoice export",
+		Repos:     []string{"acme/billing-api", "acme/billing-web"},
+	})
+	if err != nil {
+		t.Fatalf("CreateTicket: %v", err)
 	}
 
-	newRepo := "acme/billing-web"
-	updated, err := s.UpdateTicket(tk.ID, models.UpdateTicketRequest{Repo: &newRepo})
+	got, err := s.GetTicket(tk.ID)
+	if err != nil {
+		t.Fatalf("GetTicket: %v", err)
+	}
+	assertRepos(t, "GetTicket", got.Repos, []string{"acme/billing-api", "acme/billing-web"})
+}
+
+func TestListTicketsReturnsRepos(t *testing.T) {
+	s := newTestStore(t)
+	p := seedProject(t, s, "Billing", "BILL")
+
+	if _, err := s.CreateTicket(models.CreateTicketRequest{
+		ProjectID: p.ID,
+		Title:     "Invoice export",
+		Repos:     []string{"acme/billing-api", "acme/billing-web"},
+	}); err != nil {
+		t.Fatalf("CreateTicket: %v", err)
+	}
+
+	got, err := s.ListTickets(models.TicketFilter{ProjectID: p.ID})
+	if err != nil {
+		t.Fatalf("ListTickets: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("ListTickets returned %d tickets, want 1", len(got))
+	}
+	assertRepos(t, "ListTickets", got[0].Repos, []string{"acme/billing-api", "acme/billing-web"})
+}
+
+func TestCreateTicketTrimsAndDedupesRepos(t *testing.T) {
+	s := newTestStore(t)
+	p := seedProject(t, s, "Billing", "BILL")
+
+	tk, err := s.CreateTicket(models.CreateTicketRequest{
+		ProjectID: p.ID,
+		Title:     "Invoice export",
+		Repos:     []string{"  acme/billing-api  ", "acme/billing-api", "", "   "},
+	})
+	if err != nil {
+		t.Fatalf("CreateTicket: %v", err)
+	}
+	assertRepos(t, "after create", tk.Repos, []string{"acme/billing-api"})
+}
+
+// Repos are matched exactly, unlike labels: two hosts can legitimately
+// disagree about case, so acme/API is not acme/api.
+func TestCreateTicketTreatsRepoCaseAsSignificant(t *testing.T) {
+	s := newTestStore(t)
+	p := seedProject(t, s, "Billing", "BILL")
+
+	tk, err := s.CreateTicket(models.CreateTicketRequest{
+		ProjectID: p.ID,
+		Title:     "Invoice export",
+		Repos:     []string{"acme/API", "acme/api"},
+	})
+	if err != nil {
+		t.Fatalf("CreateTicket: %v", err)
+	}
+	assertRepos(t, "after create", tk.Repos, []string{"acme/API", "acme/api"})
+}
+
+func TestUpdateTicketReplacesRepos(t *testing.T) {
+	s := newTestStore(t)
+	p := seedProject(t, s, "Billing", "BILL")
+
+	tk, err := s.CreateTicket(models.CreateTicketRequest{
+		ProjectID: p.ID, Title: "Invoice export",
+		Repos: []string{"acme/billing-api"},
+	})
+	if err != nil {
+		t.Fatalf("CreateTicket: %v", err)
+	}
+
+	updated, err := s.UpdateTicket(tk.ID, models.UpdateTicketRequest{
+		Repos: []string{"acme/billing-web", "acme/billing-worker"},
+	})
 	if err != nil {
 		t.Fatalf("UpdateTicket: %v", err)
 	}
-	if updated.Repo != "acme/billing-web" {
-		t.Fatalf("repo after update = %q, want acme/billing-web", updated.Repo)
+	assertRepos(t, "after update", updated.Repos, []string{"acme/billing-web", "acme/billing-worker"})
+}
+
+func TestUpdateTicketWithNilReposLeavesThemAlone(t *testing.T) {
+	s := newTestStore(t)
+	p := seedProject(t, s, "Billing", "BILL")
+
+	tk, err := s.CreateTicket(models.CreateTicketRequest{
+		ProjectID: p.ID, Title: "Invoice export",
+		Repos: []string{"acme/billing-api", "acme/billing-web"},
+	})
+	if err != nil {
+		t.Fatalf("CreateTicket: %v", err)
 	}
 
-	// A nil Repo must leave the existing value alone.
 	title := "Renamed"
 	untouched, err := s.UpdateTicket(tk.ID, models.UpdateTicketRequest{Title: &title})
 	if err != nil {
 		t.Fatalf("UpdateTicket (title only): %v", err)
 	}
-	if untouched.Repo != "acme/billing-web" {
-		t.Fatalf("repo was cleared by an unrelated update: %q", untouched.Repo)
-	}
+	assertRepos(t, "after unrelated update", untouched.Repos,
+		[]string{"acme/billing-api", "acme/billing-web"})
 }
 
-func TestListTicketsFilterByRepo(t *testing.T) {
+func TestUpdateTicketWithEmptyReposClearsThem(t *testing.T) {
+	s := newTestStore(t)
+	p := seedProject(t, s, "Billing", "BILL")
+
+	tk, err := s.CreateTicket(models.CreateTicketRequest{
+		ProjectID: p.ID, Title: "Invoice export",
+		Repos: []string{"acme/billing-api"},
+	})
+	if err != nil {
+		t.Fatalf("CreateTicket: %v", err)
+	}
+
+	cleared, err := s.UpdateTicket(tk.ID, models.UpdateTicketRequest{Repos: []string{}})
+	if err != nil {
+		t.Fatalf("UpdateTicket: %v", err)
+	}
+	assertRepos(t, "after clearing", cleared.Repos, nil)
+}
+
+func TestListTicketsFilterByRepoMatchesOneOfSeveral(t *testing.T) {
 	s := newTestStore(t)
 	p := seedProject(t, s, "Billing", "BILL")
 
 	if _, err := s.CreateTicket(models.CreateTicketRequest{
-		ProjectID: p.ID, Title: "API work", Repo: "acme/billing-api",
+		ProjectID: p.ID, Title: "Cross-cutting work",
+		Repos: []string{"acme/billing-api", "acme/billing-web"},
 	}); err != nil {
 		t.Fatalf("CreateTicket: %v", err)
 	}
 	if _, err := s.CreateTicket(models.CreateTicketRequest{
-		ProjectID: p.ID, Title: "Web work", Repo: "acme/billing-web",
+		ProjectID: p.ID, Title: "Worker work",
+		Repos: []string{"acme/billing-worker"},
+	}); err != nil {
+		t.Fatalf("CreateTicket: %v", err)
+	}
+
+	got, err := s.ListTickets(models.TicketFilter{Repo: "acme/billing-web"})
+	if err != nil {
+		t.Fatalf("ListTickets: %v", err)
+	}
+	if len(got) != 1 || got[0].Title != "Cross-cutting work" {
+		t.Fatalf("repo filter returned %d tickets, want 1 (Cross-cutting work)", len(got))
+	}
+}
+
+// A ticket that lists the same repo twice must appear once, not once per row
+// of the join table.
+func TestListTicketsFilterByRepoDoesNotDuplicateTickets(t *testing.T) {
+	s := newTestStore(t)
+	p := seedProject(t, s, "Billing", "BILL")
+
+	if _, err := s.CreateTicket(models.CreateTicketRequest{
+		ProjectID: p.ID, Title: "API work",
+		Repos: []string{"acme/billing-api", "acme/billing-web"},
 	}); err != nil {
 		t.Fatalf("CreateTicket: %v", err)
 	}
@@ -142,8 +383,8 @@ func TestListTicketsFilterByRepo(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListTickets: %v", err)
 	}
-	if len(got) != 1 || got[0].Title != "API work" {
-		t.Fatalf("repo filter returned %d tickets, want 1 (API work)", len(got))
+	if len(got) != 1 {
+		t.Fatalf("repo filter returned %d tickets, want 1", len(got))
 	}
 }
 

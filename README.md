@@ -14,7 +14,7 @@ Single binary. SQLite-backed. No Docker, no external database, no runtime depend
 
 - **Kanban Board** — drag-and-drop ticket management across Todo, In Progress, and Done columns
 - **Projects** — organize work with customizable projects (icons, colors, prefixes)
-- **Tickets** — priority levels, due dates, labels, subtasks, dependencies, and a repo field
+- **Tickets** — priority levels, due dates, labels, subtasks, dependencies, and one or more repos
 - **Embedded Terminal** — run AI coding agents (opencode, Claude Code) directly from the web UI
 - **CLI** — manage everything from the terminal
 - **MCP Server** — 17 tools for AI-native project management via Model Context Protocol
@@ -65,8 +65,10 @@ taskboard label create bug --color "#ef4444"
 taskboard label list
 
 taskboard ticket create --project <ID> --title "Implement login" --priority high \
-  --label backend --repo acme/auth-api
+  --label backend --repo acme/auth-api --repo acme/auth-web
 taskboard ticket update <ID> --labels backend,urgent --depends-on AUTH-1
+taskboard ticket update <ID> --repo acme/auth-api,acme/auth-web  # replaces the set
+taskboard ticket list --repo acme/auth-api                       # tickets touching that repo
 ```
 
 ### MCP Server (for AI assistants)
