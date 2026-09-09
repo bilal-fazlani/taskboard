@@ -9,7 +9,7 @@ import {
   Calendar,
   Ticket as TicketIcon,
 } from "lucide-react";
-import { api, type Ticket, type Project, type TicketWrite } from "../api/client";
+import { api, type Ticket, type Project, type TicketWrite, type Label } from "../api/client";
 import TicketPanel from "../components/TicketPanel";
 import CreateTicketModal from "../components/CreateTicketModal";
 
@@ -71,11 +71,13 @@ export default function Tickets() {
   const [filterProject, setFilterProject] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
   const [filterPriority, setFilterPriority] = useState("");
+  const [labelFilter, setLabelFilter] = useState("");
+  const [allLabels, setAllLabels] = useState<Label[]>([]);
 
   const load = useCallback(async () => {
     try {
       const [t, p] = await Promise.all([
-        api.tickets.list(),
+        api.tickets.list({ label: labelFilter || undefined }),
         api.projects.list(),
       ]);
       setTickets(t || []);
@@ -85,11 +87,15 @@ export default function Tickets() {
       setProjects([]);
     }
     setLoading(false);
-  }, []);
+  }, [labelFilter]);
 
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    api.labels.list().then(setAllLabels).catch(() => setAllLabels([]));
+  }, []);
 
   const filtered = tickets.filter((t) => {
     if (filterProject && t.projectId !== filterProject) return false;
@@ -164,6 +170,18 @@ export default function Tickets() {
             </option>
           ))}
         </select>
+        <select
+          value={labelFilter}
+          onChange={(e) => setLabelFilter(e.target.value)}
+          className="bg-slate-800 border border-slate-700 rounded-md px-3 py-1.5 text-sm text-slate-300"
+        >
+          <option value="">All labels</option>
+          {allLabels.map((l) => (
+            <option key={l.id} value={l.name}>
+              {l.name}
+            </option>
+          ))}
+        </select>
         <span className="text-xs text-slate-600 ml-auto">
           {filtered.length} ticket{filtered.length !== 1 ? "s" : ""}
         </span>
@@ -185,6 +203,8 @@ export default function Tickets() {
               <tr className="border-b border-slate-800 text-xs text-slate-500 uppercase tracking-wider">
                 <th className="text-left px-6 py-3 font-medium">Key</th>
                 <th className="text-left px-6 py-3 font-medium">Title</th>
+                <th className="text-left px-4 py-3 font-medium">Labels</th>
+                <th className="text-left px-4 py-3 font-medium">Repo</th>
                 <th className="text-left px-6 py-3 font-medium">Status</th>
                 <th className="text-left px-6 py-3 font-medium">Priority</th>
                 <th className="text-left px-6 py-3 font-medium">Due</th>
@@ -207,6 +227,36 @@ export default function Tickets() {
                     <span className="text-sm text-slate-200">
                       {ticket.title}
                     </span>
+                    {ticket.dependsOn && ticket.dependsOn.length > 0 && (
+                      <div
+                        className={`text-[10.5px] mt-0.5 ${
+                          ticket.dependsOn.some((d) => d.status !== "done")
+                            ? "text-red-400"
+                            : "text-slate-500"
+                        }`}
+                      >
+                        depends on{" "}
+                        <span className="font-mono">
+                          {ticket.dependsOn.map((d) => d.key).join(", ")}
+                        </span>
+                      </div>
+                    )}
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="flex flex-wrap gap-1">
+                      {(ticket.labels || []).map((l) => (
+                        <span
+                          key={l.id}
+                          className="inline-flex items-center rounded px-1.5 py-0.5 text-[10.5px] font-medium"
+                          style={{ backgroundColor: l.color + "1f", color: l.color }}
+                        >
+                          {l.name}
+                        </span>
+                      ))}
+                    </div>
+                  </td>
+                  <td className="px-4 py-3 font-mono text-[11px] text-slate-400">
+                    {ticket.repo || ""}
                   </td>
                   <td className="px-6 py-3">
                     <StatusBadge status={ticket.status} />

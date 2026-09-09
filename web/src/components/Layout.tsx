@@ -4,6 +4,7 @@ import {
   LayoutDashboard,
   FolderKanban,
   Ticket,
+  Tag,
   Zap,
   TerminalSquare,
 } from "lucide-react";
@@ -13,6 +14,7 @@ const navItems = [
   { to: "/", icon: LayoutDashboard, label: "Board" },
   { to: "/projects", icon: FolderKanban, label: "Projects" },
   { to: "/tickets", icon: Ticket, label: "Tickets" },
+  { to: "/labels", icon: Tag, label: "Labels" },
 ];
 
 export default function Layout() {

@@ -112,7 +112,18 @@ export const api = {
   },
 
   tickets: {
-    list: () => request<Ticket[]>("/api/tickets"),
+    list: (params?: {
+      projectId?: string;
+      status?: string;
+      priority?: string;
+      label?: string;
+      repo?: string;
+    }) => {
+      const qs = new URLSearchParams(
+        Object.entries(params ?? {}).filter(([, v]) => v) as [string, string][]
+      ).toString();
+      return request<Ticket[]>(`/api/tickets${qs ? `?${qs}` : ""}`);
+    },
     get: (id: string) => request<Ticket>(`/api/tickets/${id}`),
     create: (data: TicketWrite) =>
       request<Ticket>("/api/tickets", {
