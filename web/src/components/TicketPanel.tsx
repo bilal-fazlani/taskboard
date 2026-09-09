@@ -1,7 +1,9 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { X, Trash2, CheckCircle2, Circle, Pencil, Eye } from "lucide-react";
 import Markdown from "react-markdown";
-import { api, type Ticket, type Project, type Team, type Subtask } from "../api/client";
+import { api, type Ticket, type Project, type Subtask, type TicketWrite } from "../api/client";
+import LabelPicker from "./LabelPicker";
+import DependencyPicker from "./DependencyPicker";
 
 const STATUSES = ["todo", "in_progress", "done"];
 const PRIORITIES = ["urgent", "high", "medium", "low"];
@@ -15,16 +17,14 @@ const STATUS_LABELS: Record<string, string> = {
 export default function TicketPanel({
   ticket,
   projects,
-  teams,
   onClose,
   onUpdate,
   onDelete,
 }: {
   ticket: Ticket;
   projects: Project[];
-  teams: Team[];
   onClose: () => void;
-  onUpdate: (id: string, data: Partial<Ticket>) => void;
+  onUpdate: (id: string, data: TicketWrite) => void;
   onDelete: (id: string) => void;
 }) {
   const [title, setTitle] = useState(ticket.title);
@@ -32,13 +32,45 @@ export default function TicketPanel({
   const [status, setStatus] = useState(ticket.status);
   const [priority, setPriority] = useState(ticket.priority);
   const [dueDate, setDueDate] = useState(ticket.dueDate || "");
-  const [teamId, setTeamId] = useState(ticket.teamId || "");
+  const [repo, setRepo] = useState(ticket.repo || "");
+  const [labels, setLabels] = useState<string[]>((ticket.labels || []).map((l) => l.name));
+  const [dependsOn, setDependsOn] = useState(ticket.dependsOn || []);
   const [subtasks, setSubtasks] = useState<Subtask[]>(ticket.subtasks || []);
   const [newSubtask, setNewSubtask] = useState("");
   const [dirty, setDirty] = useState(false);
   const [descMode, setDescMode] = useState<"preview" | "write">(description ? "preview" : "write");
 
-  const markDirty = () => setDirty(true);
+  // List responses deliberately omit `blocks`, so the panel fetches the full
+  // ticket itself. Until that resolves it renders the ticket it was handed, so
+  // the panel still opens instantly.
+  const [detail, setDetail] = useState<Ticket>(ticket);
+  const dirtyRef = useRef(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    api.tickets
+      .get(ticket.id)
+      .then((full) => {
+        if (cancelled) return;
+        setDetail(full);
+        // Never overwrite edits the user made while the fetch was in flight.
+        if (dirtyRef.current) return;
+        setLabels((full.labels || []).map((l) => l.name));
+        setDependsOn(full.dependsOn || []);
+        setSubtasks(full.subtasks || []);
+      })
+      .catch(() => {
+        // A failed detail fetch just leaves the passed-in ticket on screen.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [ticket.id]);
+
+  const markDirty = () => {
+    dirtyRef.current = true;
+    setDirty(true);
+  };
 
   const handleSave = () => {
     onUpdate(ticket.id, {
@@ -47,8 +79,11 @@ export default function TicketPanel({
       status,
       priority,
       dueDate: dueDate || undefined,
-      teamId: teamId || undefined,
+      repo,
+      labels,
+      dependsOn: dependsOn.map((d) => d.id),
     });
+    dirtyRef.current = false;
     setDirty(false);
   };
 
@@ -213,24 +248,16 @@ export default function TicketPanel({
               />
             </div>
             <div>
-              <label className="block text-xs font-medium text-slate-500 mb-1.5">
-                Team
-              </label>
-              <select
-                value={teamId}
+              <label className="block text-xs font-medium text-slate-500 mb-1.5">Repo</label>
+              <input
+                value={repo}
                 onChange={(e) => {
-                  setTeamId(e.target.value);
+                  setRepo(e.target.value);
                   markDirty();
                 }}
-                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
-              >
-                <option value="">None</option>
-                {teams.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.name}
-                  </option>
-                ))}
-              </select>
+                placeholder="acme/billing-web"
+                className="w-full bg-slate-800 border border-slate-700 rounded-md px-3 py-2 text-sm font-mono text-slate-200 focus:outline-none focus:border-slate-600"
+              />
             </div>
             <div>
               <label className="block text-xs font-medium text-slate-500 mb-1.5">
@@ -249,6 +276,56 @@ export default function TicketPanel({
             >
               Save Changes
             </button>
+          )}
+
+          <div>
+            <h3 className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-2.5">
+              Labels
+            </h3>
+            <LabelPicker
+              value={labels}
+              onChange={(next) => {
+                setLabels(next);
+                markDirty();
+              }}
+            />
+          </div>
+
+          <div>
+            <h3 className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-2.5">
+              Depends on
+            </h3>
+            <DependencyPicker
+              value={dependsOn}
+              excludeTicketId={ticket.id}
+              onChange={(next) => {
+                setDependsOn(next);
+                markDirty();
+              }}
+            />
+          </div>
+
+          {detail.blocks && detail.blocks.length > 0 && (
+            <div>
+              <h3 className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-2.5">
+                Blocks
+              </h3>
+              {detail.blocks.map((ref) => (
+                <div
+                  key={ref.id}
+                  className="flex items-center gap-2 rounded-md border border-slate-800 bg-slate-900/60 px-2.5 py-1.5 mb-1.5 opacity-75"
+                >
+                  <span className="font-mono text-[11px] text-slate-400 min-w-[52px]">{ref.key}</span>
+                  <span className="flex-1 text-[12.5px] text-slate-300 truncate">{ref.title}</span>
+                  <span className="rounded-full bg-slate-800 px-2 py-0.5 text-[10px] text-slate-400">
+                    {ref.status.replace("_", " ")}
+                  </span>
+                </div>
+              ))}
+              <p className="text-[11px] text-slate-600 mt-1">
+                Read only. Derived from other tickets that depend on this one.
+              </p>
+            </div>
           )}
 
           <div>

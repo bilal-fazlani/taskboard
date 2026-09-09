@@ -4,6 +4,8 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/oklog/ulid/v2"
@@ -18,6 +20,16 @@ func NewStore(database *sql.DB) *Store {
 	return &Store{db: database}
 }
 
+// dbtx is the subset of *sql.DB and *sql.Tx that the query helpers below need.
+// Taking it lets one helper serve both a plain read and a step inside a
+// transaction, which is what CreateTicket and UpdateTicket rely on to resolve
+// label names and ticket references without leaving half-written rows behind.
+type dbtx interface {
+	Exec(query string, args ...any) (sql.Result, error)
+	Query(query string, args ...any) (*sql.Rows, error)
+	QueryRow(query string, args ...any) *sql.Row
+}
+
 func (s *Store) ClearData() error {
 	tables := []string{
 		"ticket_dependencies",
@@ -25,7 +37,6 @@ func (s *Store) ClearData() error {
 		"subtasks",
 		"tickets",
 		"labels",
-		"teams",
 		"projects",
 	}
 
@@ -146,81 +157,15 @@ func (s *Store) DeleteProject(id string) error {
 	return err
 }
 
-func (s *Store) ListTeams() ([]models.Team, error) {
-	rows, err := s.db.Query("SELECT id, name, color, created_at FROM teams ORDER BY created_at DESC")
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var teams []models.Team
-	for rows.Next() {
-		var t models.Team
-		if err := rows.Scan(&t.ID, &t.Name, &t.Color, &t.CreatedAt); err != nil {
-			return nil, err
-		}
-		teams = append(teams, t)
-	}
-	return teams, rows.Err()
-}
-
-func (s *Store) GetTeam(id string) (*models.Team, error) {
-	var t models.Team
-	err := s.db.QueryRow("SELECT id, name, color, created_at FROM teams WHERE id = ?", id).
-		Scan(&t.ID, &t.Name, &t.Color, &t.CreatedAt)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	return &t, err
-}
-
-func (s *Store) CreateTeam(req models.CreateTeamRequest) (*models.Team, error) {
-	t := models.Team{
-		ID:        newID(),
-		Name:      req.Name,
-		Color:     req.Color,
-		CreatedAt: time.Now(),
-	}
-	if t.Color == "" {
-		t.Color = "#6366F1"
-	}
-
-	_, err := s.db.Exec("INSERT INTO teams (id, name, color, created_at) VALUES (?, ?, ?, ?)",
-		t.ID, t.Name, t.Color, t.CreatedAt)
-	return &t, err
-}
-
-func (s *Store) UpdateTeam(id string, req models.UpdateTeamRequest) (*models.Team, error) {
-	t, err := s.GetTeam(id)
-	if err != nil || t == nil {
-		return nil, err
-	}
-
-	if req.Name != nil {
-		t.Name = *req.Name
-	}
-	if req.Color != nil {
-		t.Color = *req.Color
-	}
-
-	_, err = s.db.Exec("UPDATE teams SET name=?, color=? WHERE id=?", t.Name, t.Color, t.ID)
-	return t, err
-}
-
-func (s *Store) DeleteTeam(id string) error {
-	_, err := s.db.Exec("DELETE FROM teams WHERE id = ?", id)
-	return err
-}
-
-func (s *Store) nextTicketNumber(projectID string) (int, error) {
+func nextTicketNumber(q dbtx, projectID string) (int, error) {
 	var num int
-	err := s.db.QueryRow("SELECT COALESCE(MAX(number), 0) + 1 FROM tickets WHERE project_id = ?", projectID).Scan(&num)
+	err := q.QueryRow("SELECT COALESCE(MAX(number), 0) + 1 FROM tickets WHERE project_id = ?", projectID).Scan(&num)
 	return num, err
 }
 
 func (s *Store) ListTickets(filter models.TicketFilter) ([]models.Ticket, error) {
-	query := `SELECT t.id, t.project_id, t.team_id, t.number, t.title, t.description,
-		t.status, t.priority, t.due_date, t.position, t.created_at, t.updated_at,
+	query := `SELECT t.id, t.project_id, t.number, t.title, t.description,
+		t.status, t.priority, t.repo, t.due_date, t.position, t.created_at, t.updated_at,
 		COALESCE(p.prefix, '') as project_prefix
 		FROM tickets t LEFT JOIN projects p ON t.project_id = p.id WHERE 1=1`
 	args := []any{}
@@ -229,10 +174,6 @@ func (s *Store) ListTickets(filter models.TicketFilter) ([]models.Ticket, error)
 		query += " AND t.project_id = ?"
 		args = append(args, filter.ProjectID)
 	}
-	if filter.TeamID != "" {
-		query += " AND t.team_id = ?"
-		args = append(args, filter.TeamID)
-	}
 	if filter.Status != "" {
 		query += " AND t.status = ?"
 		args = append(args, filter.Status)
@@ -240,6 +181,27 @@ func (s *Store) ListTickets(filter models.TicketFilter) ([]models.Ticket, error)
 	if filter.Priority != "" {
 		query += " AND t.priority = ?"
 		args = append(args, filter.Priority)
+	}
+	if filter.Repo != "" {
+		query += " AND t.repo = ?"
+		args = append(args, filter.Repo)
+	}
+	if filter.Label != "" {
+		// Resolve the name through the same Unicode-aware path writes use.
+		// SQLite's LOWER() is ASCII-only, so filtering with it would miss a
+		// ticket tagged "étude" for ?label=ÉTUDE even though
+		// resolveLabelNames treats those as one label.
+		labelID, err := findLabelIDByName(s.db, filter.Label)
+		if err != nil {
+			return nil, err
+		}
+		if labelID == "" {
+			return nil, nil
+		}
+		query += ` AND EXISTS (
+			SELECT 1 FROM ticket_labels tl
+			WHERE tl.ticket_id = t.id AND tl.label_id = ?)`
+		args = append(args, labelID)
 	}
 	query += " ORDER BY t.position ASC, t.created_at DESC"
 
@@ -252,8 +214,8 @@ func (s *Store) ListTickets(filter models.TicketFilter) ([]models.Ticket, error)
 	var tickets []models.Ticket
 	for rows.Next() {
 		var t models.Ticket
-		if err := rows.Scan(&t.ID, &t.ProjectID, &t.TeamID, &t.Number, &t.Title, &t.Description,
-			&t.Status, &t.Priority, &t.DueDate, &t.Position, &t.CreatedAt, &t.UpdatedAt,
+		if err := rows.Scan(&t.ID, &t.ProjectID, &t.Number, &t.Title, &t.Description,
+			&t.Status, &t.Priority, &t.Repo, &t.DueDate, &t.Position, &t.CreatedAt, &t.UpdatedAt,
 			&t.ProjectPrefix); err != nil {
 			return nil, err
 		}
@@ -263,24 +225,112 @@ func (s *Store) ListTickets(filter models.TicketFilter) ([]models.Ticket, error)
 		return nil, err
 	}
 
-	for i := range tickets {
-		tickets[i].Labels, _ = s.getTicketLabels(tickets[i].ID)
-		tickets[i].Subtasks, _ = s.getTicketSubtasks(tickets[i].ID)
-		tickets[i].BlockedBy, _ = s.getTicketBlockedBy(tickets[i].ID)
+	if err := s.attachListDetails(tickets); err != nil {
+		return nil, err
 	}
 
 	return tickets, nil
 }
 
+// attachListDetails fills Labels, Subtasks, and DependsOn for a page of tickets
+// using one query per relation rather than one per ticket. Blocks is not filled;
+// no list view renders it.
+func (s *Store) attachListDetails(tickets []models.Ticket) error {
+	if len(tickets) == 0 {
+		return nil
+	}
+
+	ids := make([]any, len(tickets))
+	index := make(map[string]int, len(tickets))
+	for i, t := range tickets {
+		ids[i] = t.ID
+		index[t.ID] = i
+		tickets[i].Labels = nil
+		tickets[i].Subtasks = nil
+		tickets[i].DependsOn = nil
+	}
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
+
+	labelRows, err := s.db.Query(
+		`SELECT tl.ticket_id, l.id, l.name, l.color
+		FROM ticket_labels tl JOIN labels l ON l.id = tl.label_id
+		WHERE tl.ticket_id IN (`+placeholders+`) ORDER BY l.name`, ids...)
+	if err != nil {
+		return fmt.Errorf("loading labels: %w", err)
+	}
+	for labelRows.Next() {
+		var ticketID string
+		var l models.Label
+		if err := labelRows.Scan(&ticketID, &l.ID, &l.Name, &l.Color); err != nil {
+			labelRows.Close()
+			return err
+		}
+		if i, ok := index[ticketID]; ok {
+			tickets[i].Labels = append(tickets[i].Labels, l)
+		}
+	}
+	labelRows.Close()
+	if err := labelRows.Err(); err != nil {
+		return err
+	}
+
+	subtaskRows, err := s.db.Query(
+		`SELECT id, ticket_id, title, completed, position FROM subtasks
+		WHERE ticket_id IN (`+placeholders+`) ORDER BY position`, ids...)
+	if err != nil {
+		return fmt.Errorf("loading subtasks: %w", err)
+	}
+	for subtaskRows.Next() {
+		var st models.Subtask
+		if err := subtaskRows.Scan(&st.ID, &st.TicketID, &st.Title, &st.Completed, &st.Position); err != nil {
+			subtaskRows.Close()
+			return err
+		}
+		if i, ok := index[st.TicketID]; ok {
+			tickets[i].Subtasks = append(tickets[i].Subtasks, st)
+		}
+	}
+	subtaskRows.Close()
+	if err := subtaskRows.Err(); err != nil {
+		return err
+	}
+
+	// The key expression MUST stay character-identical to the one in
+	// ticketRefSelect (Task 3). Both have a known cosmetic flaw for an empty
+	// project prefix; keeping them identical means that is one fix, not two.
+	depRows, err := s.db.Query(
+		`SELECT d.ticket_id, t.id,
+		COALESCE(p.prefix, '') || '-' || t.number, t.title, t.status
+		FROM ticket_dependencies d
+		JOIN tickets t ON t.id = d.blocked_by_id
+		LEFT JOIN projects p ON p.id = t.project_id
+		WHERE d.ticket_id IN (`+placeholders+`) ORDER BY t.number`, ids...)
+	if err != nil {
+		return fmt.Errorf("loading dependencies: %w", err)
+	}
+	defer depRows.Close()
+	for depRows.Next() {
+		var ticketID string
+		var r models.TicketRef
+		if err := depRows.Scan(&ticketID, &r.ID, &r.Key, &r.Title, &r.Status); err != nil {
+			return err
+		}
+		if i, ok := index[ticketID]; ok {
+			tickets[i].DependsOn = append(tickets[i].DependsOn, r)
+		}
+	}
+	return depRows.Err()
+}
+
 func (s *Store) GetTicket(id string) (*models.Ticket, error) {
 	var t models.Ticket
 	err := s.db.QueryRow(
-		`SELECT t.id, t.project_id, t.team_id, t.number, t.title, t.description,
-		t.status, t.priority, t.due_date, t.position, t.created_at, t.updated_at,
+		`SELECT t.id, t.project_id, t.number, t.title, t.description,
+		t.status, t.priority, t.repo, t.due_date, t.position, t.created_at, t.updated_at,
 		COALESCE(p.prefix, '') as project_prefix
 		FROM tickets t LEFT JOIN projects p ON t.project_id = p.id WHERE t.id = ?`, id,
-	).Scan(&t.ID, &t.ProjectID, &t.TeamID, &t.Number, &t.Title, &t.Description,
-		&t.Status, &t.Priority, &t.DueDate, &t.Position, &t.CreatedAt, &t.UpdatedAt,
+	).Scan(&t.ID, &t.ProjectID, &t.Number, &t.Title, &t.Description,
+		&t.Status, &t.Priority, &t.Repo, &t.DueDate, &t.Position, &t.CreatedAt, &t.UpdatedAt,
 		&t.ProjectPrefix)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -289,15 +339,34 @@ func (s *Store) GetTicket(id string) (*models.Ticket, error) {
 		return nil, err
 	}
 
-	t.Labels, _ = s.getTicketLabels(t.ID)
-	t.Subtasks, _ = s.getTicketSubtasks(t.ID)
-	t.BlockedBy, _ = s.getTicketBlockedBy(t.ID)
+	if t.Labels, err = s.getTicketLabels(t.ID); err != nil {
+		return nil, err
+	}
+	if t.Subtasks, err = s.getTicketSubtasks(t.ID); err != nil {
+		return nil, err
+	}
+	if t.DependsOn, err = s.getTicketDependsOn(t.ID); err != nil {
+		return nil, err
+	}
+	if t.Blocks, err = s.getTicketBlocks(t.ID); err != nil {
+		return nil, err
+	}
 
 	return &t, nil
 }
 
 func (s *Store) CreateTicket(req models.CreateTicketRequest) (*models.Ticket, error) {
-	num, err := s.nextTicketNumber(req.ProjectID)
+	// Everything up to the commit runs in one transaction, and every
+	// caller-supplied name or reference is resolved before the first write. An
+	// unresolvable label or dependency therefore leaves no ticket, no label and
+	// no join row behind, which is what the 400 the caller sees implies.
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, fmt.Errorf("beginning transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	num, err := nextTicketNumber(tx, req.ProjectID)
 	if err != nil {
 		return nil, fmt.Errorf("getting next ticket number: %w", err)
 	}
@@ -314,12 +383,12 @@ func (s *Store) CreateTicket(req models.CreateTicketRequest) (*models.Ticket, er
 	t := models.Ticket{
 		ID:          newID(),
 		ProjectID:   req.ProjectID,
-		TeamID:      req.TeamID,
 		Number:      num,
 		Title:       req.Title,
 		Description: req.Description,
 		Status:      status,
 		Priority:    priority,
+		Repo:        req.Repo,
 		Position:    float64(num) * 1000,
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
@@ -332,25 +401,49 @@ func (s *Store) CreateTicket(req models.CreateTicketRequest) (*models.Ticket, er
 		}
 	}
 
-	_, err = s.db.Exec(
-		`INSERT INTO tickets (id, project_id, team_id, number, title, description, status, priority, due_date, position, created_at, updated_at)
+	var labelIDs []string
+	if len(req.Labels) > 0 {
+		if labelIDs, err = resolveLabelNames(tx, req.Labels); err != nil {
+			return nil, err
+		}
+	}
+	// t.ID is already assigned above, so the self-reference check still applies
+	// even though the row itself is not inserted yet.
+	var depIDs []string
+	if len(req.DependsOn) > 0 {
+		if depIDs, err = resolveTicketRefs(tx, t.ID, req.DependsOn); err != nil {
+			return nil, err
+		}
+	}
+
+	if _, err = tx.Exec(
+		`INSERT INTO tickets (id, project_id, number, title, description, status, priority, repo, due_date, position, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		t.ID, t.ProjectID, t.TeamID, t.Number, t.Title, t.Description, t.Status, t.Priority, t.DueDate, t.Position, t.CreatedAt, t.UpdatedAt,
-	)
-	if err != nil {
+		t.ID, t.ProjectID, t.Number, t.Title, t.Description, t.Status, t.Priority, t.Repo, t.DueDate, t.Position, t.CreatedAt, t.UpdatedAt,
+	); err != nil {
 		return nil, err
 	}
 
-	if len(req.Labels) > 0 {
-		for _, labelID := range req.Labels {
-			s.db.Exec("INSERT OR IGNORE INTO ticket_labels (ticket_id, label_id) VALUES (?, ?)", t.ID, labelID)
+	for _, labelID := range labelIDs {
+		if _, err := tx.Exec(
+			"INSERT OR IGNORE INTO ticket_labels (ticket_id, label_id) VALUES (?, ?)",
+			t.ID, labelID,
+		); err != nil {
+			return nil, fmt.Errorf("attaching label: %w", err)
 		}
 	}
 
-	if len(req.BlockedBy) > 0 {
-		for _, blockerID := range req.BlockedBy {
-			s.db.Exec("INSERT OR IGNORE INTO ticket_dependencies (ticket_id, blocked_by_id) VALUES (?, ?)", t.ID, blockerID)
+	for _, depID := range depIDs {
+		if _, err := tx.Exec(
+			"INSERT OR IGNORE INTO ticket_dependencies (ticket_id, blocked_by_id) VALUES (?, ?)",
+			t.ID, depID,
+		); err != nil {
+			return nil, fmt.Errorf("attaching dependency: %w", err)
 		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("committing ticket: %w", err)
 	}
 
 	return s.GetTicket(t.ID)
@@ -360,6 +453,27 @@ func (s *Store) UpdateTicket(id string, req models.UpdateTicketRequest) (*models
 	t, err := s.GetTicket(id)
 	if err != nil || t == nil {
 		return nil, err
+	}
+
+	// Same contract as CreateTicket: resolve first, write once, commit at the
+	// end, so a rejected label name or dependency key applies nothing at all.
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, fmt.Errorf("beginning transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	var labelIDs []string
+	if req.Labels != nil {
+		if labelIDs, err = resolveLabelNames(tx, req.Labels); err != nil {
+			return nil, err
+		}
+	}
+	var depIDs []string
+	if req.DependsOn != nil {
+		if depIDs, err = resolveTicketRefs(tx, id, req.DependsOn); err != nil {
+			return nil, err
+		}
 	}
 
 	if req.Title != nil {
@@ -374,11 +488,11 @@ func (s *Store) UpdateTicket(id string, req models.UpdateTicketRequest) (*models
 	if req.Priority != nil {
 		t.Priority = *req.Priority
 	}
+	if req.Repo != nil {
+		t.Repo = *req.Repo
+	}
 	if req.Position != nil {
 		t.Position = *req.Position
-	}
-	if req.TeamID != nil {
-		t.TeamID = req.TeamID
 	}
 	if req.DueDate != nil {
 		parsed, err := time.Parse("2006-01-02", *req.DueDate)
@@ -388,26 +502,45 @@ func (s *Store) UpdateTicket(id string, req models.UpdateTicketRequest) (*models
 	}
 	t.UpdatedAt = time.Now()
 
-	_, err = s.db.Exec(
-		`UPDATE tickets SET team_id=?, title=?, description=?, status=?, priority=?, due_date=?, position=?, updated_at=? WHERE id=?`,
-		t.TeamID, t.Title, t.Description, t.Status, t.Priority, t.DueDate, t.Position, t.UpdatedAt, t.ID,
-	)
-	if err != nil {
+	if _, err = tx.Exec(
+		`UPDATE tickets SET title=?, description=?, status=?, priority=?, repo=?, due_date=?, position=?, updated_at=? WHERE id=?`,
+		t.Title, t.Description, t.Status, t.Priority, t.Repo, t.DueDate, t.Position, t.UpdatedAt, t.ID,
+	); err != nil {
 		return nil, err
 	}
 
+	// A nil slice leaves the set untouched; a non-nil one replaces it, so an
+	// empty non-nil slice clears it.
 	if req.Labels != nil {
-		s.db.Exec("DELETE FROM ticket_labels WHERE ticket_id = ?", id)
-		for _, labelID := range req.Labels {
-			s.db.Exec("INSERT OR IGNORE INTO ticket_labels (ticket_id, label_id) VALUES (?, ?)", id, labelID)
+		if _, err := tx.Exec("DELETE FROM ticket_labels WHERE ticket_id = ?", id); err != nil {
+			return nil, fmt.Errorf("clearing labels: %w", err)
+		}
+		for _, labelID := range labelIDs {
+			if _, err := tx.Exec(
+				"INSERT OR IGNORE INTO ticket_labels (ticket_id, label_id) VALUES (?, ?)",
+				id, labelID,
+			); err != nil {
+				return nil, fmt.Errorf("attaching label: %w", err)
+			}
 		}
 	}
 
-	if req.BlockedBy != nil {
-		s.db.Exec("DELETE FROM ticket_dependencies WHERE ticket_id = ?", id)
-		for _, blockerID := range req.BlockedBy {
-			s.db.Exec("INSERT OR IGNORE INTO ticket_dependencies (ticket_id, blocked_by_id) VALUES (?, ?)", id, blockerID)
+	if req.DependsOn != nil {
+		if _, err := tx.Exec("DELETE FROM ticket_dependencies WHERE ticket_id = ?", id); err != nil {
+			return nil, fmt.Errorf("clearing dependencies: %w", err)
 		}
+		for _, depID := range depIDs {
+			if _, err := tx.Exec(
+				"INSERT OR IGNORE INTO ticket_dependencies (ticket_id, blocked_by_id) VALUES (?, ?)",
+				id, depID,
+			); err != nil {
+				return nil, fmt.Errorf("attaching dependency: %w", err)
+			}
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("committing ticket: %w", err)
 	}
 
 	return s.GetTicket(id)
@@ -465,8 +598,190 @@ func (s *Store) GetBoard(projectID string) (*models.Board, error) {
 	return board, nil
 }
 
+const defaultLabelColor = "#6B7280"
+
+type labelRef struct {
+	id   string
+	name string
+}
+
+// loadLabelRefs reads every label's id and name. Callers fold the name in Go
+// with strings.EqualFold rather than in SQL, because SQLite's LOWER() is
+// ASCII-only and would treat "Étude" and "étude" as different labels.
+func loadLabelRefs(q dbtx) ([]labelRef, error) {
+	rows, err := q.Query("SELECT id, name FROM labels")
+	if err != nil {
+		return nil, fmt.Errorf("loading labels: %w", err)
+	}
+	defer rows.Close()
+
+	var refs []labelRef
+	for rows.Next() {
+		var lr labelRef
+		if err := rows.Scan(&lr.id, &lr.name); err != nil {
+			return nil, fmt.Errorf("scanning label: %w", err)
+		}
+		refs = append(refs, lr)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("loading labels: %w", err)
+	}
+	return refs, nil
+}
+
+// findLabelIDByName returns the id of the label whose name matches name
+// case-insensitively, or "" when no label matches. It never creates one.
+func findLabelIDByName(q dbtx, name string) (string, error) {
+	trimmed := strings.TrimSpace(name)
+	if trimmed == "" {
+		return "", nil
+	}
+	refs, err := loadLabelRefs(q)
+	if err != nil {
+		return "", err
+	}
+	for _, r := range refs {
+		if strings.EqualFold(r.name, trimmed) {
+			return r.id, nil
+		}
+	}
+	return "", nil
+}
+
+// resolveLabelNames maps label names to label IDs, matching case-insensitively
+// (Unicode-aware, via strings.EqualFold — SQLite's LOWER() is ASCII-only, so the
+// fold happens entirely in Go). Names with no existing label are created with the
+// default color, keeping the caller's original casing. This is what lets an agent
+// pass ["bug"] without a lookup round trip.
+func resolveLabelNames(q dbtx, names []string) ([]string, error) {
+	candidates, err := loadLabelRefs(q)
+	if err != nil {
+		return nil, err
+	}
+
+	ids := make([]string, 0, len(names))
+	seenIDs := make(map[string]bool, len(names))
+
+	for _, name := range names {
+		trimmed := strings.TrimSpace(name)
+		if trimmed == "" {
+			continue
+		}
+
+		var id string
+		for _, c := range candidates {
+			if strings.EqualFold(c.name, trimmed) {
+				id = c.id
+				break
+			}
+		}
+		if id == "" {
+			id = newID()
+			if _, err := q.Exec(
+				"INSERT INTO labels (id, name, color) VALUES (?, ?, ?)",
+				id, trimmed, defaultLabelColor,
+			); err != nil {
+				return nil, fmt.Errorf("creating label %q: %w", trimmed, err)
+			}
+			// Make the new label visible to later names in this same call, so a
+			// name repeated with different casing still resolves to one label.
+			candidates = append(candidates, labelRef{id: id, name: trimmed})
+		}
+
+		if seenIDs[id] {
+			continue
+		}
+		seenIDs[id] = true
+		ids = append(ids, id)
+	}
+	return ids, nil
+}
+
+// ErrInvalidInput marks a caller-supplied value that could not be resolved, as
+// opposed to an internal failure. The HTTP layer maps it to 400.
+type ErrInvalidInput struct{ Msg string }
+
+func (e *ErrInvalidInput) Error() string { return e.Msg }
+
+func invalidInput(format string, a ...any) error {
+	return &ErrInvalidInput{Msg: fmt.Sprintf(format, a...)}
+}
+
+// resolveTicketRefs maps ticket IDs or display keys like "BILL-2" to ticket IDs.
+// Keys are unique per project, so a key resolves on prefix and number together,
+// which is what allows dependencies to cross projects. selfID is the ticket
+// declaring the dependency and may be empty when it has no ID yet.
+func resolveTicketRefs(q dbtx, selfID string, refs []string) ([]string, error) {
+	ids := make([]string, 0, len(refs))
+	seen := make(map[string]bool, len(refs))
+
+	for _, ref := range refs {
+		trimmed := strings.TrimSpace(ref)
+		if trimmed == "" {
+			continue
+		}
+
+		id, err := lookupTicketRef(q, trimmed)
+		if err != nil {
+			return nil, err
+		}
+		if selfID != "" && id == selfID {
+			return nil, invalidInput("ticket %q cannot depend on itself", trimmed)
+		}
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		ids = append(ids, id)
+	}
+	return ids, nil
+}
+
+// lookupTicketRef resolves a single reference, trying a raw ID first and then a
+// PREFIX-NUMBER display key.
+func lookupTicketRef(q dbtx, ref string) (string, error) {
+	var id string
+	err := q.QueryRow("SELECT id FROM tickets WHERE id = ?", ref).Scan(&id)
+	if err == nil {
+		return id, nil
+	}
+	if err != sql.ErrNoRows {
+		return "", fmt.Errorf("looking up ticket %q: %w", ref, err)
+	}
+
+	// Split at the LAST hyphen: a project prefix may itself contain one, so
+	// "MY-APP-2" is prefix "MY-APP" and number 2, not prefix "MY".
+	cut := strings.LastIndex(ref, "-")
+	if cut < 0 {
+		return "", invalidInput("no ticket matches %q", ref)
+	}
+	prefix, numStr := ref[:cut], ref[cut+1:]
+	number, convErr := strconv.Atoi(numStr)
+	if convErr != nil {
+		return "", invalidInput("no ticket matches %q", ref)
+	}
+
+	err = q.QueryRow(
+		`SELECT t.id FROM tickets t
+		JOIN projects p ON t.project_id = p.id
+		WHERE LOWER(p.prefix) = LOWER(?) AND t.number = ?`,
+		prefix, number,
+	).Scan(&id)
+	if err == sql.ErrNoRows {
+		return "", invalidInput("no ticket matches %q", ref)
+	}
+	if err != nil {
+		return "", fmt.Errorf("looking up ticket %q: %w", ref, err)
+	}
+	return id, nil
+}
+
 func (s *Store) ListLabels() ([]models.Label, error) {
-	rows, err := s.db.Query("SELECT id, name, color FROM labels ORDER BY name")
+	rows, err := s.db.Query(
+		`SELECT l.id, l.name, l.color, COUNT(tl.ticket_id)
+		FROM labels l LEFT JOIN ticket_labels tl ON tl.label_id = l.id
+		GROUP BY l.id, l.name, l.color
+		ORDER BY l.name`)
 	if err != nil {
 		return nil, err
 	}
@@ -475,7 +790,7 @@ func (s *Store) ListLabels() ([]models.Label, error) {
 	var labels []models.Label
 	for rows.Next() {
 		var l models.Label
-		if err := rows.Scan(&l.ID, &l.Name, &l.Color); err != nil {
+		if err := rows.Scan(&l.ID, &l.Name, &l.Color, &l.TicketCount); err != nil {
 			return nil, err
 		}
 		labels = append(labels, l)
@@ -483,19 +798,59 @@ func (s *Store) ListLabels() ([]models.Label, error) {
 	return labels, rows.Err()
 }
 
+// nameTakenBy reports whether a label other than exceptID already carries name,
+// folding case the same Unicode-aware way resolveLabelNames does. Labels are
+// global, so two rows differing only in case would split a name's tickets in two.
+func nameTakenBy(q dbtx, name, exceptID string) (bool, error) {
+	trimmed := strings.TrimSpace(name)
+	if trimmed == "" {
+		return false, nil
+	}
+	refs, err := loadLabelRefs(q)
+	if err != nil {
+		return false, err
+	}
+	for _, r := range refs {
+		if r.id != exceptID && strings.EqualFold(r.name, trimmed) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func (s *Store) CreateLabel(req models.CreateLabelRequest) (*models.Label, error) {
+	taken, err := nameTakenBy(s.db, req.Name, "")
+	if err != nil {
+		return nil, err
+	}
+	if taken {
+		return nil, invalidInput("a label named %q already exists", strings.TrimSpace(req.Name))
+	}
+
 	l := models.Label{ID: newID(), Name: req.Name, Color: req.Color}
-	_, err := s.db.Exec("INSERT INTO labels (id, name, color) VALUES (?, ?, ?)", l.ID, l.Name, l.Color)
+	_, err = s.db.Exec("INSERT INTO labels (id, name, color) VALUES (?, ?, ?)", l.ID, l.Name, l.Color)
 	return &l, err
 }
 
+// UpdateLabel returns (nil, nil) for an unknown id, matching UpdateTicket and
+// UpdateProject, so the HTTP layer can turn it into a 404 rather than a 500.
 func (s *Store) UpdateLabel(id string, req models.UpdateLabelRequest) (*models.Label, error) {
 	var l models.Label
 	err := s.db.QueryRow("SELECT id, name, color FROM labels WHERE id = ?", id).Scan(&l.ID, &l.Name, &l.Color)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, err
 	}
 	if req.Name != nil {
+		taken, err := nameTakenBy(s.db, *req.Name, l.ID)
+		if err != nil {
+			return nil, err
+		}
+		if taken {
+			return nil, invalidInput("a label named %q already exists", strings.TrimSpace(*req.Name))
+		}
 		l.Name = *req.Name
 	}
 	if req.Color != nil {
@@ -581,20 +936,43 @@ func (s *Store) getTicketSubtasks(ticketID string) ([]models.Subtask, error) {
 	return subtasks, rows.Err()
 }
 
-func (s *Store) getTicketBlockedBy(ticketID string) ([]string, error) {
-	rows, err := s.db.Query("SELECT blocked_by_id FROM ticket_dependencies WHERE ticket_id = ?", ticketID)
+const ticketRefSelect = `SELECT t.id,
+	COALESCE(p.prefix, '') || '-' || t.number AS key,
+	t.title, t.status
+	FROM tickets t LEFT JOIN projects p ON t.project_id = p.id`
+
+func scanTicketRefs(rows *sql.Rows) ([]models.TicketRef, error) {
+	defer rows.Close()
+	var refs []models.TicketRef
+	for rows.Next() {
+		var r models.TicketRef
+		if err := rows.Scan(&r.ID, &r.Key, &r.Title, &r.Status); err != nil {
+			return nil, err
+		}
+		refs = append(refs, r)
+	}
+	return refs, rows.Err()
+}
+
+// getTicketDependsOn returns the tickets this ticket declares a dependency on.
+func (s *Store) getTicketDependsOn(ticketID string) ([]models.TicketRef, error) {
+	rows, err := s.db.Query(ticketRefSelect+
+		` JOIN ticket_dependencies d ON d.blocked_by_id = t.id
+		WHERE d.ticket_id = ? ORDER BY t.number`, ticketID)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	return scanTicketRefs(rows)
+}
 
-	var ids []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		ids = append(ids, id)
+// getTicketBlocks returns the tickets that declare a dependency on this one.
+// Nothing writes this direction; it is the same table read backwards.
+func (s *Store) getTicketBlocks(ticketID string) ([]models.TicketRef, error) {
+	rows, err := s.db.Query(ticketRefSelect+
+		` JOIN ticket_dependencies d ON d.ticket_id = t.id
+		WHERE d.blocked_by_id = ? ORDER BY t.number`, ticketID)
+	if err != nil {
+		return nil, err
 	}
-	return ids, rows.Err()
+	return scanTicketRefs(rows)
 }

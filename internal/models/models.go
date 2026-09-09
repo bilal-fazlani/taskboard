@@ -14,32 +14,35 @@ type Project struct {
 	UpdatedAt   time.Time `json:"updatedAt"`
 }
 
-type Team struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	Color     string    `json:"color,omitempty"`
-	CreatedAt time.Time `json:"createdAt"`
-}
-
 type Ticket struct {
 	ID          string     `json:"id"`
 	ProjectID   string     `json:"projectId"`
-	TeamID      *string    `json:"teamId,omitempty"`
 	Number      int        `json:"number"`
 	Title       string     `json:"title"`
 	Description string     `json:"description,omitempty"`
 	Status      string     `json:"status"`
 	Priority    string     `json:"priority"`
+	Repo        string     `json:"repo,omitempty"`
 	DueDate     *time.Time `json:"dueDate,omitempty"`
 	Position    float64    `json:"position"`
 	CreatedAt   time.Time  `json:"createdAt"`
 	UpdatedAt   time.Time  `json:"updatedAt"`
 
 	// Populated fields (not stored directly)
-	ProjectPrefix string    `json:"projectPrefix,omitempty"`
-	Labels        []Label   `json:"labels,omitempty"`
-	Subtasks      []Subtask `json:"subtasks,omitempty"`
-	BlockedBy     []string  `json:"blockedBy,omitempty"`
+	ProjectPrefix string      `json:"projectPrefix,omitempty"`
+	Labels        []Label     `json:"labels,omitempty"`
+	Subtasks      []Subtask   `json:"subtasks,omitempty"`
+	DependsOn     []TicketRef `json:"dependsOn,omitempty"`
+	Blocks        []TicketRef `json:"blocks,omitempty"`
+}
+
+// TicketRef is a lightweight pointer to another ticket, carrying enough
+// context for a client to render it without a second fetch.
+type TicketRef struct {
+	ID     string `json:"id"`
+	Key    string `json:"key"`
+	Title  string `json:"title"`
+	Status string `json:"status"`
 }
 
 // DisplayKey returns the human-readable ticket key like "AUTH-1"
@@ -71,9 +74,10 @@ func itoa(i int) string {
 }
 
 type Label struct {
-	ID    string `json:"id"`
-	Name  string `json:"name"`
-	Color string `json:"color"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Color       string `json:"color"`
+	TicketCount int    `json:"ticketCount"`
 }
 
 type Subtask struct {
@@ -82,11 +86,6 @@ type Subtask struct {
 	Title     string `json:"title"`
 	Completed bool   `json:"completed"`
 	Position  int    `json:"position"`
-}
-
-type TicketDependency struct {
-	TicketID    string `json:"ticketId"`
-	BlockedByID string `json:"blockedById"`
 }
 
 // Board represents the kanban board view
@@ -117,38 +116,28 @@ type UpdateProjectRequest struct {
 	Status      *string `json:"status,omitempty"`
 }
 
-type CreateTeamRequest struct {
-	Name  string `json:"name"`
-	Color string `json:"color,omitempty"`
-}
-
-type UpdateTeamRequest struct {
-	Name  *string `json:"name,omitempty"`
-	Color *string `json:"color,omitempty"`
-}
-
 type CreateTicketRequest struct {
 	ProjectID   string   `json:"projectId"`
-	TeamID      *string  `json:"teamId,omitempty"`
 	Title       string   `json:"title"`
 	Description string   `json:"description,omitempty"`
 	Status      string   `json:"status,omitempty"`
 	Priority    string   `json:"priority,omitempty"`
+	Repo        string   `json:"repo,omitempty"`
 	DueDate     *string  `json:"dueDate,omitempty"`
 	Labels      []string `json:"labels,omitempty"`
-	BlockedBy   []string `json:"blockedBy,omitempty"`
+	DependsOn   []string `json:"dependsOn,omitempty"`
 }
 
 type UpdateTicketRequest struct {
-	TeamID      *string  `json:"teamId,omitempty"`
 	Title       *string  `json:"title,omitempty"`
 	Description *string  `json:"description,omitempty"`
 	Status      *string  `json:"status,omitempty"`
 	Priority    *string  `json:"priority,omitempty"`
+	Repo        *string  `json:"repo,omitempty"`
 	DueDate     *string  `json:"dueDate,omitempty"`
 	Position    *float64 `json:"position,omitempty"`
 	Labels      []string `json:"labels,omitempty"`
-	BlockedBy   []string `json:"blockedBy,omitempty"`
+	DependsOn   []string `json:"dependsOn,omitempty"`
 }
 
 type MoveTicketRequest struct {
@@ -172,7 +161,8 @@ type UpdateLabelRequest struct {
 
 type TicketFilter struct {
 	ProjectID string
-	TeamID    string
 	Status    string
 	Priority  string
+	Repo      string
+	Label     string
 }

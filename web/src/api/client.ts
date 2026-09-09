@@ -10,17 +10,18 @@ export interface Project {
   updatedAt: string;
 }
 
-export interface Team {
-  id: string;
-  name: string;
-  color: string;
-  createdAt: string;
-}
-
 export interface Label {
   id: string;
   name: string;
   color: string;
+  ticketCount: number;
+}
+
+export interface TicketRef {
+  id: string;
+  key: string;
+  title: string;
+  status: string;
 }
 
 export interface Subtask {
@@ -34,7 +35,6 @@ export interface Subtask {
 export interface Ticket {
   id: string;
   projectId: string;
-  teamId?: string;
   number: number;
   title: string;
   description: string;
@@ -45,9 +45,29 @@ export interface Ticket {
   createdAt: string;
   updatedAt: string;
   projectPrefix: string;
+  repo?: string;
   labels: Label[];
   subtasks: Subtask[];
-  blockedBy: string[];
+  dependsOn?: TicketRef[];
+  blocks?: TicketRef[];
+}
+
+/**
+ * Fields accepted when creating or updating a ticket. Deliberately NOT
+ * Partial<Ticket>: the API takes label names and dependency IDs-or-keys as
+ * strings, whereas a Ticket carries resolved Label and TicketRef objects.
+ */
+export interface TicketWrite {
+  projectId?: string;
+  title?: string;
+  description?: string;
+  status?: string;
+  priority?: string;
+  dueDate?: string;
+  position?: number;
+  repo?: string;
+  labels?: string[];
+  dependsOn?: string[];
 }
 
 export interface BoardColumn {
@@ -91,32 +111,26 @@ export const api = {
       request<void>(`/api/projects/${id}`, { method: "DELETE" }),
   },
 
-  teams: {
-    list: () => request<Team[]>("/api/teams"),
-    get: (id: string) => request<Team>(`/api/teams/${id}`),
-    create: (data: Partial<Team>) =>
-      request<Team>("/api/teams", {
-        method: "POST",
-        body: JSON.stringify(data),
-      }),
-    update: (id: string, data: Partial<Team>) =>
-      request<Team>(`/api/teams/${id}`, {
-        method: "PUT",
-        body: JSON.stringify(data),
-      }),
-    delete: (id: string) =>
-      request<void>(`/api/teams/${id}`, { method: "DELETE" }),
-  },
-
   tickets: {
-    list: () => request<Ticket[]>("/api/tickets"),
+    list: (params?: {
+      projectId?: string;
+      status?: string;
+      priority?: string;
+      label?: string;
+      repo?: string;
+    }) => {
+      const qs = new URLSearchParams(
+        Object.entries(params ?? {}).filter(([, v]) => v) as [string, string][]
+      ).toString();
+      return request<Ticket[]>(`/api/tickets${qs ? `?${qs}` : ""}`);
+    },
     get: (id: string) => request<Ticket>(`/api/tickets/${id}`),
-    create: (data: Partial<Ticket>) =>
+    create: (data: TicketWrite) =>
       request<Ticket>("/api/tickets", {
         method: "POST",
         body: JSON.stringify(data),
       }),
-    update: (id: string, data: Partial<Ticket>) =>
+    update: (id: string, data: TicketWrite) =>
       request<Ticket>(`/api/tickets/${id}`, {
         method: "PUT",
         body: JSON.stringify(data),

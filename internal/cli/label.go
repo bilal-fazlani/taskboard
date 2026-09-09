@@ -7,30 +7,30 @@ import (
 	"github.com/tcarac/taskboard/internal/models"
 )
 
-func teamCommands() *cobra.Command {
+func labelCommands() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "team",
-		Short: "Manage teams",
+		Use:   "label",
+		Short: "Manage labels",
 	}
 
 	listCmd := &cobra.Command{
 		Use:   "list",
-		Short: "List all teams",
+		Short: "List labels",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			store, err := openStore()
 			if err != nil {
 				return err
 			}
-			teams, err := store.ListTeams()
+			labels, err := store.ListLabels()
 			if err != nil {
 				return err
 			}
-			if len(teams) == 0 {
-				fmt.Println("No teams found.")
+			if len(labels) == 0 {
+				fmt.Println("No labels found.")
 				return nil
 			}
-			for _, t := range teams {
-				fmt.Printf("%s (%s)\n", t.Name, t.ID)
+			for _, l := range labels {
+				fmt.Printf("%-20s %-8s %d tickets (%s)\n", l.Name, l.Color, l.TicketCount, l.ID)
 			}
 			return nil
 		},
@@ -39,39 +39,36 @@ func teamCommands() *cobra.Command {
 	var color string
 	createCmd := &cobra.Command{
 		Use:   "create [name]",
-		Short: "Create a new team",
+		Short: "Create a label",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			store, err := openStore()
 			if err != nil {
 				return err
 			}
-			t, err := store.CreateTeam(models.CreateTeamRequest{
-				Name:  args[0],
-				Color: color,
-			})
+			l, err := store.CreateLabel(models.CreateLabelRequest{Name: args[0], Color: color})
 			if err != nil {
 				return err
 			}
-			fmt.Printf("Created team %s (%s)\n", t.Name, t.ID)
+			fmt.Printf("Created label %s (%s)\n", l.Name, l.ID)
 			return nil
 		},
 	}
-	createCmd.Flags().StringVar(&color, "color", "#6366F1", "hex color")
+	createCmd.Flags().StringVar(&color, "color", "#6B7280", "hex color")
 
 	deleteCmd := &cobra.Command{
 		Use:   "delete [id]",
-		Short: "Delete a team",
+		Short: "Delete a label and remove it from all tickets",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			store, err := openStore()
 			if err != nil {
 				return err
 			}
-			if err := store.DeleteTeam(args[0]); err != nil {
+			if err := store.DeleteLabel(args[0]); err != nil {
 				return err
 			}
-			fmt.Println("Team deleted.")
+			fmt.Println("Label deleted.")
 			return nil
 		},
 	}

@@ -1,6 +1,6 @@
 # Taskboard
 
-A local, self-hosted project management tool with a Kanban UI, full CLI, and a built-in [MCP](https://modelcontextprotocol.io/) server that lets AI assistants manage your projects, tickets, and teams directly.
+A local, self-hosted project management tool with a Kanban UI, full CLI, and a built-in [MCP](https://modelcontextprotocol.io/) server that lets AI assistants manage your projects, tickets, and labels directly.
 
 Single binary. SQLite-backed. No Docker, no external database, no runtime dependencies.
 
@@ -14,11 +14,10 @@ Single binary. SQLite-backed. No Docker, no external database, no runtime depend
 
 - **Kanban Board** — drag-and-drop ticket management across Todo, In Progress, and Done columns
 - **Projects** — organize work with customizable projects (icons, colors, prefixes)
-- **Teams** — assign tickets to teams
-- **Tickets** — priority levels, due dates, labels, subtasks, dependencies (blocked by)
+- **Tickets** — priority levels, due dates, labels, subtasks, dependencies, and a repo field
 - **Embedded Terminal** — run AI coding agents (opencode, Claude Code) directly from the web UI
 - **CLI** — manage everything from the terminal
-- **MCP Server** — 22 tools for AI-native project management via Model Context Protocol
+- **MCP Server** — 17 tools for AI-native project management via Model Context Protocol
 - **Self-Hosted** — your data stays on your machine in a SQLite database
 - **Single Binary** — one `brew install` and you're running
 
@@ -62,8 +61,12 @@ taskboard ticket create --project <ID> --title "Implement login" --priority high
 taskboard ticket list --project <ID> --status todo
 taskboard ticket move <ID> --status done
 
-taskboard team create "Backend"
-taskboard team list
+taskboard label create bug --color "#ef4444"
+taskboard label list
+
+taskboard ticket create --project <ID> --title "Implement login" --priority high \
+  --label backend --repo acme/auth-api
+taskboard ticket update <ID> --labels backend,urgent --depends-on AUTH-1
 ```
 
 ### MCP Server (for AI assistants)
@@ -104,7 +107,16 @@ Project → Ticket → Subtask
 - **Tickets** are concrete, actionable tasks within a project. Don't create "epic" tickets — use projects.
 - **Subtasks** are checklist steps within a ticket, for breaking work into verifiable pieces.
 
-#### Available MCP Tools (22)
+#### Dependencies
+
+A ticket can declare that it depends on other tickets, by ID or by display key
+such as `AUTH-1`. Dependencies may cross projects. They are informational: a
+ticket whose dependencies are unfinished can still be moved to any status.
+
+The reverse direction is derived, not stored. When `BILL-5` depends on `BILL-2`,
+`BILL-2` lists `BILL-5` under *blocks* automatically, and that list is read-only.
+
+#### Available MCP Tools (17)
 
 | Tool                    | Description                                      |
 | ----------------------- | ------------------------------------------------ |
@@ -114,12 +126,8 @@ Project → Ticket → Subtask
 | `create_project`        | Create a new project (use for epics/initiatives) |
 | `update_project`        | Update project properties                        |
 | `delete_project`        | Delete a project and all its tickets             |
-| **Teams**               |                                                  |
-| `list_teams`            | List all teams                                   |
-| `get_team`              | Get team details by ID                           |
-| `create_team`           | Create a new team                                |
-| `update_team`           | Update team properties                           |
-| `delete_team`           | Delete a team                                    |
+| **Labels**              |                                                  |
+| `list_labels`           | List all labels with ticket counts               |
 | **Tickets**             |                                                  |
 | `list_tickets`          | List tickets with filters                        |
 | `get_ticket`            | Get ticket details with subtasks and labels      |
@@ -192,7 +200,7 @@ taskboard --db /path/to/other.db ticket list
 
 ### Clearing Data
 
-To wipe all projects, tickets, teams, and labels while keeping the schema intact:
+To wipe all projects, tickets, and labels while keeping the schema intact:
 
 ```bash
 taskboard clear        # prompts for confirmation

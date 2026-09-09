@@ -1,28 +1,27 @@
 import { useState } from "react";
 import { X } from "lucide-react";
-import type { Ticket, Project, Team } from "../api/client";
+import type { TicketWrite, Project } from "../api/client";
+import LabelPicker from "./LabelPicker";
 
 const PRIORITIES = ["urgent", "high", "medium", "low"];
 
 export default function CreateTicketModal({
   projects,
-  teams,
   defaultStatus,
   onClose,
   onCreate,
 }: {
   projects: Project[];
-  teams: Team[];
   defaultStatus?: string;
   onClose: () => void;
-  onCreate: (data: Partial<Ticket>) => void;
+  onCreate: (data: TicketWrite) => void;
 }) {
   const [projectId, setProjectId] = useState(projects[0]?.id || "");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [priority, setPriority] = useState("medium");
   const [dueDate, setDueDate] = useState("");
-  const [teamId, setTeamId] = useState("");
+  const [labels, setLabels] = useState<string[]>([]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -34,8 +33,9 @@ export default function CreateTicketModal({
       priority,
       status: defaultStatus || "todo",
       dueDate: dueDate || undefined,
-      teamId: teamId || undefined,
+      labels,
     });
+    setLabels([]);
   };
 
   return (
@@ -101,7 +101,7 @@ export default function CreateTicketModal({
             />
           </div>
 
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-medium text-slate-400 mb-1.5">
                 Priority
@@ -129,23 +129,11 @@ export default function CreateTicketModal({
                 className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
               />
             </div>
-            <div>
-              <label className="block text-xs font-medium text-slate-400 mb-1.5">
-                Team
-              </label>
-              <select
-                value={teamId}
-                onChange={(e) => setTeamId(e.target.value)}
-                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
-              >
-                <option value="">None</option>
-                {teams.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.name}
-                  </option>
-                ))}
-              </select>
-            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-slate-400 mb-1.5">Labels</label>
+            <LabelPicker value={labels} onChange={setLabels} />
           </div>
         </div>
 

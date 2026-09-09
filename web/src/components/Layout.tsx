@@ -3,8 +3,8 @@ import { NavLink, Outlet } from "react-router-dom";
 import {
   LayoutDashboard,
   FolderKanban,
-  Users,
   Ticket,
+  Tag,
   Zap,
   TerminalSquare,
 } from "lucide-react";
@@ -13,8 +13,8 @@ import TerminalPanel from "./TerminalPanel";
 const navItems = [
   { to: "/", icon: LayoutDashboard, label: "Board" },
   { to: "/projects", icon: FolderKanban, label: "Projects" },
-  { to: "/teams", icon: Users, label: "Teams" },
   { to: "/tickets", icon: Ticket, label: "Tickets" },
+  { to: "/labels", icon: Tag, label: "Labels" },
 ];
 
 export default function Layout() {

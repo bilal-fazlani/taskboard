@@ -31,3 +31,7 @@ Thumbs.db
 .vscode/
 *.swp
 *.swo
+
+.superpowers/
+
+.tmp/
