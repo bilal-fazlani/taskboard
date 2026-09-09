@@ -2903,13 +2903,40 @@ blocks direction is derived rather than stored."
 
 ---
 
-## Screenshots
+## Screenshots (part of Task 13, required)
 
-The four screenshots in `screenshots/` show the Teams nav item and team chips, so they are stale after Task 9. Regenerating them is optional and cosmetic, but if done:
+All FIVE screenshots in `screenshots/` show the deleted Teams feature: a Teams entry in
+the sidebar and team chips on every card. Two of them, `board.png` and
+`ticket-detail.png`, are the first thing a reader sees in the README. Shipping
+documentation whose hero images advertise a removed feature is a defect, not a cosmetic
+nit, so regeneration is required rather than optional.
 
-1. Seed a scratch database: `./taskboard --db ./.tmp/demo.db ...` with a handful of projects, tickets, labels, and dependencies.
-2. Run `./taskboard --db ./.tmp/demo.db start --port 3999 --foreground`.
-3. Capture `board.png`, `ticket-detail.png`, `tickets.png`, and `project.png` at 1440x900.
+Procedure, all against a scratch database on port 3999:
+
+1. `mkdir -p .tmp && rm -f ./.tmp/demo.db`, then `make build`.
+2. Seed one project with a handful of tickets that exercise the new features: several
+   labels with distinct colors, at least one ticket with unfinished dependencies, one
+   whose dependencies are all done, one with none, and repo values on most.
+3. Run `./taskboard --db ./.tmp/demo.db start --port 3999 --foreground`, exactly one
+   server at a time. A second server on 3999 silently loses the bind and you will
+   screenshot the wrong instance.
+4. Capture with headless Chrome at 1440x900:
+   `"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless --disable-gpu --screenshot=OUT.png --window-size=1440,900 --hide-scrollbars --virtual-time-budget=4000 URL`
+   - `board.png` from `/`
+   - `tickets.png` from `/tickets`
+   - `project.png` from `/projects`
+5. `ticket-detail.png` and `terminal.png` need UI state that no URL reaches. Use this
+   procedure and follow it exactly:
+   - `cp web/src/pages/Board.tsx /tmp/Board.tsx.orig`
+   - Temporarily make the panel open on load (or the terminal panel start open), rebuild
+     with `make build`, capture, then restore with
+     `cp /tmp/Board.tsx.orig web/src/pages/Board.tsx` and rebuild again.
+   - **Then run `git status --short web/` and confirm it is EMPTY.** Leaving the temporary
+     hook in the tree is a Critical defect. Report the output of that command.
+   - If the headless terminal capture cannot show a usable shell session, keep the existing
+     `terminal.png`, say so plainly in your report, and note that it still shows the old
+     sidebar so the user can recapture it manually.
+6. Kill the server and confirm port 3999 is released.
 
 **Never point the screenshot run at the default database.**
 
