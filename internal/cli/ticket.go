@@ -105,8 +105,8 @@ func ticketCommands() *cobra.Command {
 	createCmd.Flags().StringVar(&createPriority, "priority", "medium", "priority (urgent|high|medium|low)")
 	createCmd.Flags().StringVar(&createDue, "due", "", "due date (YYYY-MM-DD)")
 	createCmd.Flags().StringVar(&createRepo, "repo", "", "repository identifier")
-	createCmd.Flags().StringSliceVar(&createLabels, "label", nil, "label name (repeatable)")
-	createCmd.Flags().StringSliceVar(&createDependsOn, "depends-on", nil, "ticket ID or key this depends on (repeatable)")
+	createCmd.Flags().StringSliceVar(&createLabels, "label", nil, "label name; comma-separated or repeated")
+	createCmd.Flags().StringSliceVar(&createDependsOn, "depends-on", nil, "ticket ID or key this depends on; comma-separated or repeated")
 
 	var moveStatus string
 	moveCmd := &cobra.Command{
@@ -151,13 +151,16 @@ func ticketCommands() *cobra.Command {
 
 	var (
 		updTitle, updDescription, updStatus, updPriority, updDue, updRepo string
-		updLabels, updDependsOn                                           []string
+		updLabels, updLabelAlias, updDependsOn                            []string
 	)
 	updateCmd := &cobra.Command{
 		Use:   "update [id]",
 		Short: "Update ticket fields",
-		Long: "Update ticket fields. --labels and --depends-on replace the existing " +
-			"set; omit a flag to leave that field untouched.",
+		Long: "Update ticket fields.\n\n" +
+			"Omitting a flag leaves that field untouched. Passing --labels or " +
+			"--depends-on replaces the existing set, so passing one with an empty " +
+			"value clears it. --label is accepted as an alias for --labels, matching " +
+			"the spelling used by 'ticket create' and 'ticket list'.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			store, err := openStore()
@@ -184,11 +187,13 @@ func ticketCommands() *cobra.Command {
 			if cmd.Flags().Changed("repo") {
 				req.Repo = &updRepo
 			}
-			if cmd.Flags().Changed("labels") {
-				req.Labels = updLabels
-				if req.Labels == nil {
-					req.Labels = []string{}
-				}
+			// --label is an alias for --labels; either spelling (or both) yields a
+			// non-nil slice, which is what makes an empty value clear the set.
+			if cmd.Flags().Changed("labels") || cmd.Flags().Changed("label") {
+				combined := []string{}
+				combined = append(combined, updLabels...)
+				combined = append(combined, updLabelAlias...)
+				req.Labels = combined
 			}
 			if cmd.Flags().Changed("depends-on") {
 				req.DependsOn = updDependsOn
@@ -214,8 +219,9 @@ func ticketCommands() *cobra.Command {
 	updateCmd.Flags().StringVar(&updPriority, "priority", "", "priority (urgent|high|medium|low)")
 	updateCmd.Flags().StringVar(&updDue, "due", "", "due date (YYYY-MM-DD)")
 	updateCmd.Flags().StringVar(&updRepo, "repo", "", "repository identifier")
-	updateCmd.Flags().StringSliceVar(&updLabels, "labels", nil, "replace labels (comma separated)")
-	updateCmd.Flags().StringSliceVar(&updDependsOn, "depends-on", nil, "replace dependencies (comma separated)")
+	updateCmd.Flags().StringSliceVar(&updLabels, "labels", nil, "replace labels; comma-separated or repeated, empty value clears")
+	updateCmd.Flags().StringSliceVar(&updLabelAlias, "label", nil, "alias for --labels")
+	updateCmd.Flags().StringSliceVar(&updDependsOn, "depends-on", nil, "replace dependencies; comma-separated or repeated, empty value clears")
 
 	cmd.AddCommand(listCmd, createCmd, moveCmd, deleteCmd, updateCmd)
 	return cmd
