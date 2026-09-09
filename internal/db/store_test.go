@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tcarac/taskboard/internal/models"
 )
@@ -806,5 +807,63 @@ func TestGetTicketPropagatesRelationErrors(t *testing.T) {
 				t.Fatalf("GetTicket returned no error after %s became unreadable", table)
 			}
 		})
+	}
+}
+
+// SQLite permits one writer at a time, and CreateTicket/UpdateTicket hold a
+// transaction across label and dependency resolution. Without an explicit
+// busy_timeout the driver installs no busy handler at all, so a second writer
+// fails immediately with SQLITE_BUSY rather than waiting. This asserts the
+// pragma in the DSN actually reaches the connection.
+func TestBusyTimeoutIsSet(t *testing.T) {
+	s := newTestStore(t)
+
+	var ms int
+	if err := s.db.QueryRow("PRAGMA busy_timeout").Scan(&ms); err != nil {
+		t.Fatalf("querying busy_timeout: %v", err)
+	}
+	if ms != 5000 {
+		t.Fatalf("busy_timeout = %d ms, want 5000; a blocked writer would fail instantly", ms)
+	}
+}
+
+// A second connection must WAIT for an open write transaction instead of
+// failing immediately. Without busy_timeout this write returns SQLITE_BUSY
+// right away; with it, the write succeeds once the transaction commits.
+func TestConcurrentWriterWaitsRatherThanFailing(t *testing.T) {
+	s := newTestStore(t)
+	p := seedProject(t, s, "Billing", "BILL")
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	if _, err := tx.Exec(
+		"INSERT INTO labels (id, name, color) VALUES (?, ?, ?)", newID(), "holder", "#6B7280",
+	); err != nil {
+		tx.Rollback()
+		t.Fatalf("write inside tx: %v", err)
+	}
+
+	// Release the lock shortly, from another goroutine, while the write below
+	// is already blocked on it.
+	done := make(chan error, 1)
+	go func() {
+		time.Sleep(150 * time.Millisecond)
+		done <- tx.Commit()
+	}()
+
+	start := time.Now()
+	_, err = s.CreateTicket(models.CreateTicketRequest{ProjectID: p.ID, Title: "Waits for the lock"})
+	elapsed := time.Since(start)
+
+	if commitErr := <-done; commitErr != nil {
+		t.Fatalf("commit: %v", commitErr)
+	}
+	if err != nil {
+		t.Fatalf("second writer failed instead of waiting after %v: %v", elapsed, err)
+	}
+	if elapsed < 100*time.Millisecond {
+		t.Fatalf("second writer returned in %v, so it never actually contended for the lock", elapsed)
 	}
 }
