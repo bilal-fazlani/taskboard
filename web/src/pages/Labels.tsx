@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Pencil, Trash2 } from "lucide-react";
 import { api, type Label } from "../api/client";
 
@@ -8,6 +8,12 @@ export default function Labels() {
   const [color, setColor] = useState("#6B7280");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
+  // Guards against the duplicate PUT that Enter would otherwise cause:
+  // committing exits edit mode, which unmounts the still-focused <input>,
+  // which fires a native blur that React redelivers to onBlur before this
+  // function's own request has settled. While a commit for a given label
+  // id is in flight, a re-entrant call for that same id is a no-op.
+  const savingLabelId = useRef<string | null>(null);
 
   const load = () => api.labels.list().then(setLabels).catch(() => setLabels([]));
   useEffect(() => {
@@ -34,11 +40,19 @@ export default function Labels() {
   };
 
   const saveEdit = async (l: Label) => {
-    if (editName.trim() && editName !== l.name) {
-      await api.labels.update(l.id, { name: editName.trim() });
-    }
+    if (savingLabelId.current === l.id) return;
+    savingLabelId.current = l.id;
+    // Exit edit mode before the request so the resulting unmount (and its
+    // cascading blur) happens while the guard above is still set.
     setEditingId(null);
-    load();
+    try {
+      if (editName.trim() && editName !== l.name) {
+        await api.labels.update(l.id, { name: editName.trim() });
+      }
+      load();
+    } finally {
+      savingLabelId.current = null;
+    }
   };
 
   return (
