@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { X, Trash2, CheckCircle2, Circle, Pencil, Eye } from "lucide-react";
 import Markdown from "react-markdown";
 import { api, type Ticket, type Project, type Subtask, type TicketWrite } from "../api/client";
@@ -40,7 +40,37 @@ export default function TicketPanel({
   const [dirty, setDirty] = useState(false);
   const [descMode, setDescMode] = useState<"preview" | "write">(description ? "preview" : "write");
 
-  const markDirty = () => setDirty(true);
+  // List responses deliberately omit `blocks`, so the panel fetches the full
+  // ticket itself. Until that resolves it renders the ticket it was handed, so
+  // the panel still opens instantly.
+  const [detail, setDetail] = useState<Ticket>(ticket);
+  const dirtyRef = useRef(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    api.tickets
+      .get(ticket.id)
+      .then((full) => {
+        if (cancelled) return;
+        setDetail(full);
+        // Never overwrite edits the user made while the fetch was in flight.
+        if (dirtyRef.current) return;
+        setLabels((full.labels || []).map((l) => l.name));
+        setDependsOn(full.dependsOn || []);
+        setSubtasks(full.subtasks || []);
+      })
+      .catch(() => {
+        // A failed detail fetch just leaves the passed-in ticket on screen.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [ticket.id]);
+
+  const markDirty = () => {
+    dirtyRef.current = true;
+    setDirty(true);
+  };
 
   const handleSave = () => {
     onUpdate(ticket.id, {
@@ -53,6 +83,7 @@ export default function TicketPanel({
       labels,
       dependsOn: dependsOn.map((d) => d.id),
     });
+    dirtyRef.current = false;
     setDirty(false);
   };
 
@@ -274,12 +305,12 @@ export default function TicketPanel({
             />
           </div>
 
-          {ticket.blocks && ticket.blocks.length > 0 && (
+          {detail.blocks && detail.blocks.length > 0 && (
             <div>
               <h3 className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-2.5">
                 Blocks
               </h3>
-              {ticket.blocks.map((ref) => (
+              {detail.blocks.map((ref) => (
                 <div
                   key={ref.id}
                   className="flex items-center gap-2 rounded-md border border-slate-800 bg-slate-900/60 px-2.5 py-1.5 mb-1.5 opacity-75"
