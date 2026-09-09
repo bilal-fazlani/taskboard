@@ -200,6 +200,7 @@ func (s *Server) listTickets(w http.ResponseWriter, r *http.Request) {
 		Status:    r.URL.Query().Get("status"),
 		Priority:  r.URL.Query().Get("priority"),
 		Repo:      r.URL.Query().Get("repo"),
+		Label:     r.URL.Query().Get("label"),
 	}
 	tickets, err := s.store.ListTickets(filter)
 	if err != nil {
