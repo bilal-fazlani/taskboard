@@ -1,6 +1,7 @@
 package db
 
 import (
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -595,5 +596,215 @@ func TestDeletingLabelDetachesItFromTickets(t *testing.T) {
 	}
 	if len(got.Labels) != 0 {
 		t.Fatalf("labels = %d, want 0 after the label was deleted", len(got.Labels))
+	}
+}
+
+// A create that fails resolution must leave nothing behind. Before the fix the
+// ticket row and the auto-created label were already committed by the time the
+// unresolvable dependency key produced the error the caller sees as a 400.
+func TestFailedCreateTicketWritesNothing(t *testing.T) {
+	s := newTestStore(t)
+	p := seedProject(t, s, "Billing", "BILL")
+
+	_, err := s.CreateTicket(models.CreateTicketRequest{
+		ProjectID: p.ID,
+		Title:     "Half written",
+		Labels:    []string{"newthing"},
+		DependsOn: []string{"NOPE-9"},
+	})
+	if err == nil {
+		t.Fatal("expected an error for an unresolvable dependency")
+	}
+
+	tickets, err := s.ListTickets(models.TicketFilter{})
+	if err != nil {
+		t.Fatalf("ListTickets: %v", err)
+	}
+	if len(tickets) != 0 {
+		t.Fatalf("tickets = %d, want 0; a failed create must not leave a ticket", len(tickets))
+	}
+
+	labels, err := s.ListLabels()
+	if err != nil {
+		t.Fatalf("ListLabels: %v", err)
+	}
+	if len(labels) != 0 {
+		t.Fatalf("labels = %d, want 0; a failed create must not leave a label", len(labels))
+	}
+}
+
+// The update equivalent: the scalar fields must not commit when the dependency
+// list that came in the same request cannot be resolved.
+func TestFailedUpdateTicketWritesNothing(t *testing.T) {
+	s := newTestStore(t)
+	p := seedProject(t, s, "Billing", "BILL")
+	tk := seedTicket(t, s, p.ID, "Original")
+
+	newTitle := "Renamed"
+	_, err := s.UpdateTicket(tk.ID, models.UpdateTicketRequest{
+		Title:     &newTitle,
+		Labels:    []string{"newthing"},
+		DependsOn: []string{"NOPE-9"},
+	})
+	if err == nil {
+		t.Fatal("expected an error for an unresolvable dependency")
+	}
+
+	got, err := s.GetTicket(tk.ID)
+	if err != nil {
+		t.Fatalf("GetTicket: %v", err)
+	}
+	if got.Title != "Original" {
+		t.Fatalf("title = %q, want %q; a failed update must not half-apply", got.Title, "Original")
+	}
+	if len(got.Labels) != 0 {
+		t.Fatalf("labels = %d, want 0 after a failed update", len(got.Labels))
+	}
+	labels, err := s.ListLabels()
+	if err != nil {
+		t.Fatalf("ListLabels: %v", err)
+	}
+	if len(labels) != 0 {
+		t.Fatalf("labels = %d, want 0; a failed update must not create one", len(labels))
+	}
+}
+
+func TestCreateLabelRejectsCaseInsensitiveDuplicate(t *testing.T) {
+	s := newTestStore(t)
+	p := seedProject(t, s, "Billing", "BILL")
+
+	// Auto-created through a ticket, the way an agent would make it.
+	if _, err := s.CreateTicket(models.CreateTicketRequest{
+		ProjectID: p.ID, Title: "Tagged", Labels: []string{"bug"},
+	}); err != nil {
+		t.Fatalf("CreateTicket: %v", err)
+	}
+
+	if _, err := s.CreateLabel(models.CreateLabelRequest{Name: "Bug", Color: "#FF0000"}); err == nil {
+		t.Fatal("expected an error creating Bug while bug exists")
+	} else if !errors.As(err, new(*ErrInvalidInput)) {
+		t.Fatalf("error %v should be an ErrInvalidInput so the HTTP layer returns 400", err)
+	}
+
+	labels, err := s.ListLabels()
+	if err != nil {
+		t.Fatalf("ListLabels: %v", err)
+	}
+	if len(labels) != 1 {
+		t.Fatalf("labels = %d, want 1; casing must not split one label in two", len(labels))
+	}
+}
+
+func TestUpdateLabelRejectsRenameOntoAnotherName(t *testing.T) {
+	s := newTestStore(t)
+
+	bug, err := s.CreateLabel(models.CreateLabelRequest{Name: "bug", Color: "#FF0000"})
+	if err != nil {
+		t.Fatalf("CreateLabel(bug): %v", err)
+	}
+	chore, err := s.CreateLabel(models.CreateLabelRequest{Name: "chore", Color: "#00FF00"})
+	if err != nil {
+		t.Fatalf("CreateLabel(chore): %v", err)
+	}
+
+	name := "BUG"
+	if _, err := s.UpdateLabel(chore.ID, models.UpdateLabelRequest{Name: &name}); err == nil {
+		t.Fatal("expected an error renaming chore onto bug")
+	} else if !errors.As(err, new(*ErrInvalidInput)) {
+		t.Fatalf("error %v should be an ErrInvalidInput so the HTTP layer returns 400", err)
+	}
+
+	// Renaming a label onto its own name, differing only in case, still works.
+	sameName := "Bug"
+	updated, err := s.UpdateLabel(bug.ID, models.UpdateLabelRequest{Name: &sameName})
+	if err != nil {
+		t.Fatalf("renaming a label onto its own name: %v", err)
+	}
+	if updated == nil || updated.Name != "Bug" {
+		t.Fatalf("updated label = %+v, want name Bug", updated)
+	}
+}
+
+func TestUpdateLabelUnknownIDReturnsNilWithoutError(t *testing.T) {
+	s := newTestStore(t)
+
+	name := "anything"
+	l, err := s.UpdateLabel("MISSING", models.UpdateLabelRequest{Name: &name})
+	if err != nil {
+		t.Fatalf("UpdateLabel on an unknown id returned %v, want nil so the handler can send 404", err)
+	}
+	if l != nil {
+		t.Fatalf("label = %+v, want nil for an unknown id", l)
+	}
+}
+
+func TestListTicketsFilterByLabelIsUnicodeCaseInsensitive(t *testing.T) {
+	s := newTestStore(t)
+	p := seedProject(t, s, "Billing", "BILL")
+
+	if _, err := s.CreateTicket(models.CreateTicketRequest{
+		ProjectID: p.ID, Title: "Tagged", Labels: []string{"Étude"},
+	}); err != nil {
+		t.Fatalf("CreateTicket: %v", err)
+	}
+	if _, err := s.CreateTicket(models.CreateTicketRequest{
+		ProjectID: p.ID, Title: "Untagged",
+	}); err != nil {
+		t.Fatalf("CreateTicket: %v", err)
+	}
+
+	// SQLite's LOWER() leaves É alone, so all three spellings must go through
+	// the same Go-side fold that resolveLabelNames uses.
+	for _, name := range []string{"Étude", "étude", "ÉTUDE"} {
+		got, err := s.ListTickets(models.TicketFilter{Label: name})
+		if err != nil {
+			t.Fatalf("ListTickets(label=%q): %v", name, err)
+		}
+		if len(got) != 1 || got[0].Title != "Tagged" {
+			t.Fatalf("label filter %q returned %d tickets, want 1 (Tagged)", name, len(got))
+		}
+	}
+
+	none, err := s.ListTickets(models.TicketFilter{Label: "nosuchlabel"})
+	if err != nil {
+		t.Fatalf("ListTickets(label=nosuchlabel): %v", err)
+	}
+	if len(none) != 0 {
+		t.Fatalf("unknown label returned %d tickets, want 0", len(none))
+	}
+}
+
+func TestDependencyResolvesKeyWithHyphenatedPrefix(t *testing.T) {
+	s := newTestStore(t)
+	p := seedProject(t, s, "My App", "MY-APP")
+	blocker := seedTicket(t, s, p.ID, "Blocker") // MY-APP-1
+
+	got, err := s.CreateTicket(models.CreateTicketRequest{
+		ProjectID: p.ID, Title: "Dependent", DependsOn: []string{"MY-APP-1"},
+	})
+	if err != nil {
+		t.Fatalf("CreateTicket with a hyphenated prefix key: %v", err)
+	}
+	if len(got.DependsOn) != 1 || got.DependsOn[0].ID != blocker.ID {
+		t.Fatalf("dependsOn = %+v, want the MY-APP-1 blocker", got.DependsOn)
+	}
+}
+
+// GetTicket must surface a failed relation read rather than quietly returning a
+// ticket with no labels or no subtasks.
+func TestGetTicketPropagatesRelationErrors(t *testing.T) {
+	for _, table := range []string{"ticket_labels", "subtasks"} {
+		t.Run(table, func(t *testing.T) {
+			s := newTestStore(t)
+			p := seedProject(t, s, "Billing", "BILL")
+			tk := seedTicket(t, s, p.ID, "Solo")
+
+			if _, err := s.db.Exec("DROP TABLE " + table); err != nil {
+				t.Fatalf("dropping %s: %v", table, err)
+			}
+			if _, err := s.GetTicket(tk.ID); err == nil {
+				t.Fatalf("GetTicket returned no error after %s became unreadable", table)
+			}
+		})
 	}
 }

@@ -351,7 +351,7 @@ func (s *Server) createLabel(w http.ResponseWriter, r *http.Request) {
 	}
 	l, err := s.store.CreateLabel(req)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeStoreError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, l)
@@ -365,9 +365,10 @@ func (s *Server) updateLabel(w http.ResponseWriter, r *http.Request) {
 	}
 	l, err := s.store.UpdateLabel(chi.URLParam(r, "id"), req)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeStoreError(w, err)
 		return
 	}
+	// UpdateLabel returns (nil, nil) for an unknown id.
 	if l == nil {
 		writeError(w, http.StatusNotFound, "label not found")
 		return
