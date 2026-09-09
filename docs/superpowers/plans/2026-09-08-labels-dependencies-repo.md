@@ -2951,7 +2951,21 @@ go build ./...
 go test ./...
 cd web && npx tsc -b && npm run build && cd ..
 make build
-grep -rn -i 'team' internal/ web/src/ README.md
+grep -rn -i 'team' web/src/ README.md
+grep -rn -i 'team' internal/ --include='*.go' | grep -v store_test.go
 ```
 
-The final grep must return nothing. `go test ./...` must pass with no skips.
+`go test ./...` must pass with no skips.
+
+Both greps must return nothing. Note that `internal/` is scoped deliberately. Three
+categories of "team" reference are CORRECT and must survive:
+
+- `internal/db/migrations/001_initial.sql` — applied migrations are immutable history.
+  Editing it would desynchronise every existing database.
+- `internal/db/migrations/003_drop_teams.sql` — a migration that removes teams must name
+  what it removes.
+- `internal/db/store_test.go` — `TestMigrationsDropTeams` and
+  `TestTicketRoundTripAfterTeamsRemoval` exist precisely to assert that teams are gone.
+
+An earlier draft of this plan demanded a bare `grep -rn -i 'team' internal/` return nothing.
+That was wrong: it would have required deleting the evidence that the removal worked.
