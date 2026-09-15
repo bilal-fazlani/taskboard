@@ -19,6 +19,11 @@ export const DEFAULT_STATUS: Status = "todo";
 // comparing against the "done" literal.
 export const DONE_STATUS: Status = "done";
 
+// The status of a ticket an agent is working on. The graph layout (ACP-6)
+// sorts these to the top of the Ready column, so call isInProgress() rather
+// than comparing against the "in_progress" literal.
+export const IN_PROGRESS_STATUS: Status = "in_progress";
+
 export const STATUS_LABELS: Record<Status, string> = {
   todo: "Todo",
   in_progress: "In Progress",
@@ -49,4 +54,9 @@ export function isStatus(status: unknown): status is Status {
 // Whether a status string denotes a finished ticket.
 export function isDone(status: string): boolean {
   return status === DONE_STATUS;
+}
+
+// Whether a status string denotes a ticket being worked on.
+export function isInProgress(status: string): boolean {
+  return status === IN_PROGRESS_STATUS;
 }
