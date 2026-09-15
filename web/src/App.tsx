@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import Layout from "./components/Layout";
 import Board from "./pages/Board";
+import Graph from "./pages/Graph";
 import Projects from "./pages/Projects";
 import Tickets from "./pages/Tickets";
 import Labels from "./pages/Labels";
@@ -11,6 +12,7 @@ export default function App() {
       <Routes>
         <Route element={<Layout />}>
           <Route index element={<Board />} />
+          <Route path="graph" element={<Graph />} />
           <Route path="projects" element={<Projects />} />
           <Route path="tickets" element={<Tickets />} />
           <Route path="labels" element={<Labels />} />
