@@ -2,6 +2,7 @@ import { useState } from "react";
 import { X } from "lucide-react";
 import type { TicketWrite, Project } from "../api/client";
 import LabelPicker from "./LabelPicker";
+import { DEFAULT_STATUS } from "../lib/status";
 
 const PRIORITIES = ["urgent", "high", "medium", "low"];
 
@@ -31,7 +32,7 @@ export default function CreateTicketModal({
       title,
       description,
       priority,
-      status: defaultStatus || "todo",
+      status: defaultStatus || DEFAULT_STATUS,
       dueDate: dueDate || undefined,
       labels,
     });

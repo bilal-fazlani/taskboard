@@ -1,4 +1,5 @@
 import type { TicketRef } from "../api/client";
+import { isDone } from "../lib/status";
 
 const MAX_KEYS = 3;
 
@@ -10,7 +11,7 @@ const MAX_KEYS = 3;
 export default function DependencyBand({ dependsOn }: { dependsOn?: TicketRef[] }) {
   if (!dependsOn || dependsOn.length === 0) return null;
 
-  const outstanding = dependsOn.some((d) => d.status !== "done");
+  const outstanding = dependsOn.some((d) => !isDone(d.status));
   const shown = dependsOn.slice(0, MAX_KEYS);
   const overflow = dependsOn.length - shown.length;
 

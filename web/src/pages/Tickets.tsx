@@ -12,21 +12,9 @@ import {
 import { api, type Ticket, type Project, type TicketWrite, type Label } from "../api/client";
 import TicketPanel from "../components/TicketPanel";
 import CreateTicketModal from "../components/CreateTicketModal";
+import { STATUSES, STATUS_LABELS, STATUS_STYLES, isStatus, isDone } from "../lib/status";
 
-const STATUSES = ["todo", "in_progress", "done"];
 const PRIORITIES = ["urgent", "high", "medium", "low"];
-
-const STATUS_STYLES: Record<string, string> = {
-  todo: "bg-slate-500/20 text-slate-400",
-  in_progress: "bg-blue-500/20 text-blue-400",
-  done: "bg-green-500/20 text-green-400",
-};
-
-const STATUS_LABELS: Record<string, string> = {
-  todo: "Todo",
-  in_progress: "In Progress",
-  done: "Done",
-};
 
 const PRIORITY_CONFIG: Record<string, { style: string; icon: typeof ArrowUp }> = {
   urgent: { style: "bg-red-500/20 text-red-400", icon: AlertTriangle },
@@ -36,13 +24,15 @@ const PRIORITY_CONFIG: Record<string, { style: string; icon: typeof ArrowUp }> =
 };
 
 function StatusBadge({ status }: { status: string }) {
+  const style = isStatus(status) ? STATUS_STYLES[status] : undefined;
+  const label = isStatus(status) ? STATUS_LABELS[status] : status;
   return (
     <span
       className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium capitalize ${
-        STATUS_STYLES[status] || "bg-slate-700 text-slate-300"
+        style || "bg-slate-700 text-slate-300"
       }`}
     >
-      {STATUS_LABELS[status] || status}
+      {label}
     </span>
   );
 }
@@ -230,7 +220,7 @@ export default function Tickets() {
                     {ticket.dependsOn && ticket.dependsOn.length > 0 && (
                       <div
                         className={`text-[10.5px] mt-0.5 ${
-                          ticket.dependsOn.some((d) => d.status !== "done")
+                          ticket.dependsOn.some((d) => !isDone(d.status))
                             ? "text-red-400"
                             : "text-slate-500"
                         }`}

@@ -26,18 +26,7 @@ import { api, type Ticket, type Project, type BoardColumn, type TicketWrite } fr
 import TicketPanel from "../components/TicketPanel";
 import CreateTicketModal from "../components/CreateTicketModal";
 import DependencyBand from "../components/DependencyBand";
-
-const STATUSES = ["todo", "in_progress", "done"];
-const STATUS_LABELS: Record<string, string> = {
-  todo: "Todo",
-  in_progress: "In Progress",
-  done: "Done",
-};
-const STATUS_COLORS: Record<string, string> = {
-  todo: "bg-slate-500",
-  in_progress: "bg-blue-500",
-  done: "bg-green-500",
-};
+import { STATUSES, STATUS_LABELS, STATUS_COLORS, isStatus, type Status } from "../lib/status";
 
 const PRIORITY_CONFIG: Record<string, { color: string; icon: typeof ArrowUp }> = {
   urgent: { color: "text-red-500", icon: AlertTriangle },
@@ -156,7 +145,7 @@ function Column({
   onTicketClick,
   onAddTicket,
 }: {
-  status: string;
+  status: Status;
   tickets: Ticket[];
   onTicketClick: (ticket: Ticket) => void;
   onAddTicket: (status: string) => void;
@@ -263,8 +252,8 @@ export default function Board() {
     if (!over) return;
 
     const activeStatus = findColumnByTicketId(active.id);
-    const overStatus = STATUSES.includes(over.id as string)
-      ? (over.id as string)
+    const overStatus = isStatus(over.id)
+      ? over.id
       : findColumnByTicketId(over.id);
 
     if (!activeStatus || !overStatus || activeStatus === overStatus) return;
@@ -290,8 +279,8 @@ export default function Board() {
 
     if (!over) return;
 
-    const targetStatus = STATUSES.includes(over.id as string)
-      ? (over.id as string)
+    const targetStatus = isStatus(over.id)
+      ? over.id
       : findColumnByTicketId(over.id);
 
     if (!targetStatus) return;

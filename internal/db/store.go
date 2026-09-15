@@ -402,7 +402,7 @@ func (s *Store) CreateTicket(req models.CreateTicketRequest) (*models.Ticket, er
 
 	status := req.Status
 	if status == "" {
-		status = "todo"
+		status = models.StatusTodo
 	}
 	priority := req.Priority
 	if priority == "" {
@@ -611,7 +611,7 @@ func (s *Store) DeleteTicket(id string) error {
 }
 
 func (s *Store) GetBoard(projectID string) (*models.Board, error) {
-	statuses := []string{"todo", "in_progress", "done"}
+	statuses := models.Statuses
 	board := &models.Board{
 		ProjectID: projectID,
 		Columns:   make([]models.Column, len(statuses)),

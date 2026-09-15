@@ -5,15 +5,9 @@ import { api, type Ticket, type Project, type Subtask, type TicketWrite } from "
 import LabelPicker from "./LabelPicker";
 import RepoPicker from "./RepoPicker";
 import DependencyPicker from "./DependencyPicker";
+import { STATUSES, STATUS_LABELS } from "../lib/status";
 
-const STATUSES = ["todo", "in_progress", "done"];
 const PRIORITIES = ["urgent", "high", "medium", "low"];
-
-const STATUS_LABELS: Record<string, string> = {
-  todo: "Todo",
-  in_progress: "In Progress",
-  done: "Done",
-};
 
 export default function TicketPanel({
   ticket,

@@ -63,7 +63,7 @@ func ticketCommands() *cobra.Command {
 		},
 	}
 	listCmd.Flags().StringVar(&projectID, "project", "", "filter by project ID")
-	listCmd.Flags().StringVar(&status, "status", "", "filter by status (todo|in_progress|done)")
+	listCmd.Flags().StringVar(&status, "status", "", fmt.Sprintf("filter by status (%s)", strings.Join(models.Statuses, "|")))
 	listCmd.Flags().StringVar(&priority, "priority", "", "filter by priority (urgent|high|medium|low)")
 	listCmd.Flags().StringVar(&listRepo, "repo", "", "filter by repo")
 	listCmd.Flags().StringVar(&listLabel, "label", "", "filter by label name")
@@ -220,7 +220,7 @@ func ticketCommands() *cobra.Command {
 	}
 	updateCmd.Flags().StringVar(&updTitle, "title", "", "new title")
 	updateCmd.Flags().StringVar(&updDescription, "description", "", "new description")
-	updateCmd.Flags().StringVar(&updStatus, "status", "", "status (todo|in_progress|done)")
+	updateCmd.Flags().StringVar(&updStatus, "status", "", fmt.Sprintf("status (%s)", strings.Join(models.Statuses, "|")))
 	updateCmd.Flags().StringVar(&updPriority, "priority", "", "priority (urgent|high|medium|low)")
 	updateCmd.Flags().StringVar(&updDue, "due", "", "due date (YYYY-MM-DD)")
 	updateCmd.Flags().StringSliceVar(&updRepos, "repo", nil, "replace repos; comma-separated or repeated, empty value clears")

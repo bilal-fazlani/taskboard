@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/tcarac/taskboard/internal/db"
 	"github.com/tcarac/taskboard/internal/models"
@@ -392,7 +393,7 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 				Type: "object",
 				Properties: map[string]schemaProp{
 					"projectId": {Type: "string", Description: "Filter by project ID"},
-					"status":    {Type: "string", Description: "Filter by status", Enum: []string{"todo", "in_progress", "done"}},
+					"status":    {Type: "string", Description: "Filter by status", Enum: models.Statuses},
 					"priority":  {Type: "string", Description: "Filter by priority", Enum: []string{"urgent", "high", "medium", "low"}},
 					"repo":      {Type: "string", Description: "Filter to tickets attached to this repo, matched exactly"},
 					"label":     {Type: "string", Description: "Filter by label name, case-insensitive"},
@@ -420,7 +421,7 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 					"projectId":   {Type: "string", Description: "Project ID"},
 					"title":       {Type: "string", Description: "Ticket title"},
 					"description": {Type: "string", Description: "Rich text description"},
-					"status":      {Type: "string", Description: "Initial status", Enum: []string{"todo", "in_progress", "done"}},
+					"status":      {Type: "string", Description: "Initial status", Enum: models.Statuses},
 					"priority":    {Type: "string", Description: "Priority level", Enum: []string{"urgent", "high", "medium", "low"}},
 					"repos": {
 						Type:        "array",
@@ -451,7 +452,7 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 					"id":          {Type: "string", Description: "Ticket ID"},
 					"title":       {Type: "string", Description: "Ticket title"},
 					"description": {Type: "string", Description: "Description"},
-					"status":      {Type: "string", Description: "Status", Enum: []string{"todo", "in_progress", "done"}},
+					"status":      {Type: "string", Description: "Status", Enum: models.Statuses},
 					"priority":    {Type: "string", Description: "Priority", Enum: []string{"urgent", "high", "medium", "low"}},
 					"repos": {
 						Type:        "array",
@@ -480,7 +481,7 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 				Type: "object",
 				Properties: map[string]schemaProp{
 					"id":     {Type: "string", Description: "Ticket ID"},
-					"status": {Type: "string", Description: "Target status", Enum: []string{"todo", "in_progress", "done"}},
+					"status": {Type: "string", Description: "Target status", Enum: models.Statuses},
 				},
 				Required: []string{"id", "status"},
 			},
@@ -497,7 +498,7 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 		// --- Board ---
 		{
 			Name:        "get_board",
-			Description: "Get full Kanban board grouped by status columns (todo, in_progress, done)",
+			Description: fmt.Sprintf("Get full Kanban board grouped by status columns (%s)", strings.Join(models.Statuses, ", ")),
 			InputSchema: jsonSchema{
 				Type: "object",
 				Properties: map[string]schemaProp{
