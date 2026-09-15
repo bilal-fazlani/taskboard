@@ -40,6 +40,8 @@ make build
 
 Requires Go 1.24+ and Node.js 22+.
 
+`make build`, `go build` and `go install` produce a development build: it never opens the default database, so every command needs `--db`, and `start` defaults to port 3011. The examples below, which rely on the default database and port 3010, assume a release binary or `make install`, which builds the marked binary, installs it to `~/.local/bin` and restarts the server.
+
 ## Usage
 
 ### Web UI
@@ -187,6 +189,8 @@ All data is stored in a SQLite database at:
 
 - **macOS**: `~/Library/Application Support/taskboard/taskboard.db`
 - **Linux**: `~/.config/taskboard/taskboard.db`
+
+Only release binaries and `make install` use this default. A development build (`make build`, `go build`, `go install`) exits with an error unless you pass `--db`.
 
 Migrations run automatically on first start.
 

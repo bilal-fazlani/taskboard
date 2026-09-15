@@ -3,7 +3,7 @@
 # HOME points at a temp dir, so taskboard's default database, pid file and the
 # backup folder all live inside it, and the live board is never touched.
 #
-# Usage: scripts/install_test.sh <built taskboard binary>
+# Usage: scripts/install_test.sh <live taskboard binary, as built by make test-install>
 set -euo pipefail
 
 real_bin=$(cd "$(dirname "${1:?usage: install_test.sh <built taskboard binary>}")" && pwd)/$(basename "$1")
@@ -63,6 +63,25 @@ run_install() {
 holders() { lsof -t -- "$DATA_DIR/taskboard.db" 2>/dev/null | sort -u || true; }
 listening_pid() { lsof -tiTCP:"$1" -sTCP:LISTEN 2>/dev/null | head -1 || true; }
 
+echo "== the binary under test is the live build =="
+# Only a binary marked by `make install` resolves the default database; an
+# unmarked build refuses without --db, and every case below would fail on it.
+new_sandbox
+mkdir -p "$BIN_DIR"; cp "$real_bin" "$BIN_DIR/taskboard"
+if "$BIN_DIR/taskboard" project list >"$S/out" 2>&1; then
+  pass "runs without --db"
+else
+  fail "refuses the default database, so it is not the marked live build: $(head -1 "$S/out")"
+  echo "run this through make test-install, which builds what make install ships" >&2
+  cleanup_sandbox
+  exit 1
+fi
+[ -f "$DATA_DIR/taskboard.db" ] && pass "default database resolves into the config dir" \
+  || fail "no database at $DATA_DIR/taskboard.db"
+case "$("$BIN_DIR/taskboard" start --help)" in *"(default 3010)"*) pass "start defaults to port 3010" ;;
+  *) fail "start does not default to port 3010" ;; esac
+cleanup_sandbox
+
 echo "== upgrade over a running instance =="
 new_sandbox
 mkdir -p "$BIN_DIR"; cp "$real_bin" "$BIN_DIR/taskboard"
@@ -114,6 +133,8 @@ run_install "$real_bin"
 [ "$STATUS" -eq 0 ] && pass "install exited 0" || { fail "install exited $STATUS"; echo "$OUT" >&2; }
 [ -x "$BIN_DIR/taskboard" ] && pass "binary installed" || fail "binary not installed"
 wait_for "fresh server" curl -fsS "http://localhost:$PORT/api/projects" && pass "server running" || fail "server not running"
+[ -f "$DATA_DIR/taskboard.db" ] && [ -f "$DATA_DIR/taskboard.pid" ] \
+  && pass "server uses the default database, pid file beside it" || fail "default database or its pid file missing in $DATA_DIR"
 [ -d "$HOME/taskboard-backups" ] && fail "created a backup with no database to back up" || pass "no backup when there is no database"
 cleanup_sandbox
 

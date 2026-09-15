@@ -59,7 +59,9 @@ jobs:
           CGO_ENABLED: 0
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
-        run: go build -ldflags="-s -w" -o taskboard-${{ matrix.suffix }} ./cmd/taskboard
+        # Marked like the `make install` build, so release binaries use the default
+        # database and port 3010 without --db (internal/livebuild). ci.yml stays unmarked.
+        run: go build -ldflags="-s -w -X github.com/tcarac/taskboard/internal/livebuild.Mark=true" -o taskboard-${{ matrix.suffix }} ./cmd/taskboard
 
       - uses: actions/upload-artifact@v4
         with:

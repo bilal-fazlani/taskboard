@@ -3,10 +3,12 @@ package db
 import (
 	"database/sql"
 	"embed"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 
+	"github.com/tcarac/taskboard/internal/livebuild"
 	_ "modernc.org/sqlite"
 )
 
@@ -64,7 +66,18 @@ func OpenAt(dbPath string) (*sql.DB, error) {
 	return db, nil
 }
 
+// ErrNoDefaultDB is returned when a build other than the live one needs the
+// default database path. Only the binary installed by `make install` may use it.
+var ErrNoDefaultDB = errors.New("no --db given: this development build never opens the default (live) database; " +
+	"pass --db with a throwaway path, e.g. --db ./.tmp/dev.db")
+
+// DefaultDBPath returns the database in the OS config dir. It refuses to
+// resolve it unless this binary is the live build, because that file is the
+// live board.
 func DefaultDBPath() (string, error) {
+	if !livebuild.Enabled() {
+		return "", ErrNoDefaultDB
+	}
 	dataDir, err := os.UserConfigDir()
 	if err != nil {
 		home, err2 := os.UserHomeDir()

@@ -13,6 +13,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/tcarac/taskboard/internal/db"
+	"github.com/tcarac/taskboard/internal/livebuild"
 	"github.com/tcarac/taskboard/internal/mcp"
 	"github.com/tcarac/taskboard/internal/server"
 )
@@ -23,12 +24,25 @@ var (
 	dbPath     string
 )
 
+const (
+	livePort = 3010 // default for the live build installed by `make install`
+	devPort  = 3011 // default for every other build, so it never collides with the live server
+)
+
+// defaultPort keeps development builds off the live server's port.
+func defaultPort() int {
+	if livebuild.Enabled() {
+		return livePort
+	}
+	return devPort
+}
+
 func NewRootCmd(webFS fs.FS) *cobra.Command {
 	root := &cobra.Command{
 		Use:   "taskboard",
 		Short: "Local project management with Kanban UI and MCP server",
 	}
-	root.PersistentFlags().StringVar(&dbPath, "db", "", "path to SQLite database file (default: OS config dir)")
+	root.PersistentFlags().StringVar(&dbPath, "db", "", "path to SQLite database file (default: OS config dir, live build only)")
 
 	startCmd := &cobra.Command{
 		Use:   "start",
@@ -46,7 +60,7 @@ func NewRootCmd(webFS fs.FS) *cobra.Command {
 			return srv.ListenAndServe(port)
 		},
 	}
-	startCmd.Flags().IntVarP(&port, "port", "p", 3010, "port to listen on")
+	startCmd.Flags().IntVarP(&port, "port", "p", defaultPort(), "port to listen on")
 	startCmd.Flags().BoolVar(&foreground, "foreground", false, "run in foreground instead of as a daemon")
 
 	stopCmd := &cobra.Command{
@@ -141,11 +155,21 @@ func Execute(webFS fs.FS) {
 	}
 }
 
-func openDB() (*sql.DB, error) {
+// effectiveDBPath is the database this invocation uses: --db, or else the
+// default path, which only the live build may resolve.
+func effectiveDBPath() (string, error) {
 	if dbPath != "" {
-		return db.OpenAt(dbPath)
+		return dbPath, nil
 	}
-	return db.Open()
+	return db.DefaultDBPath()
+}
+
+func openDB() (*sql.DB, error) {
+	path, err := effectiveDBPath()
+	if err != nil {
+		return nil, err
+	}
+	return db.OpenAt(path)
 }
 
 func openStore() (*db.Store, error) {
@@ -194,16 +218,20 @@ func daemonize(port int) error {
 	return nil
 }
 
+// pidFilePath sits next to the database the server uses, so `stop` only reaches
+// a server started on the same database. An explicit --db gets "<db>.pid",
+// which no other database path can share. The default database keeps
+// taskboard.pid in the OS config dir, where the live server's pid file has
+// always been.
 func pidFilePath() (string, error) {
-	dataDir, err := os.UserConfigDir()
-	if err != nil {
-		home, err2 := os.UserHomeDir()
-		if err2 != nil {
-			return "", fmt.Errorf("finding home directory: %w", err)
-		}
-		dataDir = filepath.Join(home, ".config")
+	if dbPath != "" {
+		return dbPath + ".pid", nil
 	}
-	return filepath.Join(dataDir, "taskboard", "taskboard.pid"), nil
+	path, err := db.DefaultDBPath()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(filepath.Dir(path), "taskboard.pid"), nil
 }
 
 func writePID(path string, pid int) error {

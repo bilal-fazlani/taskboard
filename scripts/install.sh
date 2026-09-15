@@ -23,7 +23,7 @@ db="$data_dir/taskboard.db"
 for tool in lsof curl; do
   command -v "$tool" >/dev/null || { echo "error: $tool is required" >&2; exit 1; }
 done
-[ -f "$src" ] || { echo "error: no binary at $src (run make build)" >&2; exit 1; }
+[ -f "$src" ] || { echo "error: no binary at $src (run make install, which builds the marked binary first)" >&2; exit 1; }
 
 # Processes holding the live database: the web server and every `taskboard mcp`
 # a Claude client started. Instances on their own --db path are not included.

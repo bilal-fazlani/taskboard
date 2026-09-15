@@ -1,4 +1,4 @@
-.PHONY: build dev dev-frontend frontend clean install test test-install
+.PHONY: build dev dev-frontend frontend clean install test test-install test-guard
 
 BUILD_DIR := cmd/taskboard
 BINARY := taskboard
@@ -10,6 +10,20 @@ PORT ?= 3010
 # the installed server on $(PORT).
 DEV_DB ?= ./.tmp/dev.db
 DEV_PORT ?= 3011
+
+# The binary shipped by `make install` and release binaries (see release.yml) are
+# the marked builds: only they may open the default database, and they default
+# to port 3010. Every other build (make build, make dev, go build, go run,
+# go test) needs --db and defaults to 3011. The `make install` binary is built
+# under .tmp/live, not as ./taskboard, and is deleted once used, so no marked
+# build is left lying around to be run by accident.
+LIVE_LDFLAGS := -X github.com/tcarac/taskboard/internal/livebuild.Mark=true
+LIVE_BINARY := .tmp/live/taskboard
+
+define build-live
+	@mkdir -p $(dir $(LIVE_BINARY))
+	go build -ldflags '$(LIVE_LDFLAGS)' -o $(LIVE_BINARY) ./$(BUILD_DIR)
+endef
 
 build: frontend
 	go build -o $(BINARY) ./$(BUILD_DIR)
@@ -32,16 +46,23 @@ clean:
 
 # Stops every process using the live database, backs it up, installs the new
 # binary and starts the server. See scripts/install.sh.
-install: build
-	INSTALL_DIR="$(INSTALL_DIR)" PORT="$(PORT)" ./scripts/install.sh $(BINARY)
+install: frontend
+	$(build-live)
+	INSTALL_DIR="$(INSTALL_DIR)" PORT="$(PORT)" ./scripts/install.sh $(LIVE_BINARY); status=$$?; rm -f $(LIVE_BINARY); exit $$status
 
 # Proxies /api to the `make dev` backend on $(DEV_PORT), not the live server.
 dev-frontend:
 	cd web && TASKBOARD_API_PORT=$(DEV_PORT) npm run dev
 
-test:
+test: test-guard
 	go test ./...
 
-# Runs scripts/install.sh end to end in a sandboxed HOME; never touches the live board.
-test-install: build
-	./scripts/install_test.sh $(BINARY)
+# Runs scripts/install.sh end to end in a sandboxed HOME with the same marked
+# build `make install` ships; never touches the live board.
+test-install: frontend
+	$(build-live)
+	./scripts/install_test.sh $(LIVE_BINARY); status=$$?; rm -f $(LIVE_BINARY); exit $$status
+
+# Feeds sample commands to the Claude Code PreToolUse hook and checks allow/deny.
+test-guard:
+	bash scripts/claude-guard_test.sh
