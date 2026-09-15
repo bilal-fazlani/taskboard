@@ -16,11 +16,19 @@ Thanks for your interest in contributing! Here's how to get started.
    ```
 4. For frontend development:
    ```bash
-   # Terminal 1: backend
-   go run ./cmd/taskboard start
+   # Terminal 1: backend on :3011 with a throwaway database at ./.tmp/dev.db
+   # (override with DEV_PORT=... / DEV_DB=...)
+   make dev
 
-   # Terminal 2: frontend dev server (hot reload, proxies API to :3010)
-   cd web && npm run dev
+   # Terminal 2: frontend dev server (hot reload, proxies API to the make dev backend)
+   make dev-frontend
+   ```
+
+   `make dev` never opens your real board: it always passes `--db` and a port
+   that does not collide with an installed taskboard on :3010. If you run the
+   binary by hand during development, pass `--db` yourself:
+   ```bash
+   go run ./cmd/taskboard --db ./.tmp/dev.db start --foreground --port 3011
    ```
 
 ## Pull Request Process

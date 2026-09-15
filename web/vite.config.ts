@@ -7,7 +7,8 @@ export default defineConfig({
   server: {
     proxy: {
       '/api': {
-        target: 'http://localhost:3010',
+        // Defaults to the `make dev` backend so the dev UI never writes to the live board.
+        target: `http://localhost:${process.env.TASKBOARD_API_PORT ?? '3011'}`,
         ws: true,
       },
     },

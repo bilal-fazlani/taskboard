@@ -231,11 +231,12 @@ taskboard --db /tmp/test.db clear -f
 ## Development
 
 ```bash
-# Run backend (serves API on :3010)
-go run ./cmd/taskboard start
+# Run backend on :3011 against a throwaway database at ./.tmp/dev.db
+# (never the live board on :3010). Override with DEV_PORT=... / DEV_DB=...
+make dev
 
-# Run frontend dev server (proxies API to :3010)
-cd web && npm run dev
+# Run frontend dev server (proxies API to the make dev backend)
+make dev-frontend
 
 # Build everything
 make build
