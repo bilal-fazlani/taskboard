@@ -4,8 +4,14 @@ import { api, type Ticket, type Project, type TicketWrite } from "../api/client"
 import TicketPanel from "../components/TicketPanel";
 import TicketCard from "../components/TicketCard";
 import {
+  chainFinder,
+  chainRole,
   computeGraphTopology,
+  edgeChainRole,
   positionGraph,
+  type ChainRole,
+  type EdgeChainRole,
+  type GraphTopology,
   type PositionedColumn,
   type Size,
 } from "../lib/graphLayout";
@@ -24,6 +30,29 @@ const CARDS_TOP = 52;
 
 const ARROW = "graph-arrow";
 const BACK_ARROW = "graph-arrow-back";
+const UPSTREAM_ARROW = "graph-arrow-upstream";
+const DOWNSTREAM_ARROW = "graph-arrow-downstream";
+
+// Hovering or focusing a card lights its chains and dims everything else:
+// what blocks it in amber, what it blocks in blue, and cards and edges in a
+// cycle with it, which are on both chains, in red, the colour back edges
+// already use for cycles. The card itself gets a bright border of its own.
+// The `*:` classes recolour the TicketCard's own border, and `!` keeps its
+// hover border from winning. Full literal class strings, so Tailwind emits
+// them.
+const CARD_CHAIN_CLASSES: Record<ChainRole, string> = {
+  focus: "*:border-slate-200! ring-2 ring-slate-200/40 shadow-lg shadow-black/40",
+  upstream: "*:border-amber-500! ring-1 ring-amber-500/40 shadow-lg shadow-black/40",
+  downstream: "*:border-blue-400! ring-1 ring-blue-400/35 shadow-lg shadow-black/40",
+  cycle: "*:border-red-500! ring-1 ring-red-500/40 shadow-lg shadow-black/40",
+  none: "opacity-22",
+};
+
+const EDGE_CHAIN_STYLES: Record<Exclude<EdgeChainRole, "none">, { className: string; marker: string }> = {
+  upstream: { className: "stroke-amber-500", marker: UPSTREAM_ARROW },
+  downstream: { className: "stroke-blue-400", marker: DOWNSTREAM_ARROW },
+  cycle: { className: "stroke-red-500", marker: BACK_ARROW },
+};
 
 const NO_SIZES: ReadonlyMap<string, Size> = new Map();
 
@@ -57,6 +86,10 @@ export default function Graph() {
   const [version, setVersion] = useState(0);
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
   const [sizes, setSizes] = useState(NO_SIZES);
+  // The card whose chains are lit, by hover or keyboard focus, with the
+  // topology it was picked from. A refetch builds a new topology, which drops
+  // the pick without an effect, so the graph never comes back dimmed.
+  const [active, setActive] = useState<{ topology: GraphTopology<Ticket>; id: string } | null>(null);
 
   useEffect(() => {
     api.projects.list().then(setProjects).catch(() => setProjects([]));
@@ -105,6 +138,21 @@ export default function Graph() {
     [topology, sizes, gutters],
   );
   const edges = useMemo(() => routeEdges(layout), [layout]);
+  // Adjacency once per topology; the chains once per pick, not per render.
+  const findChains = useMemo(() => chainFinder(topology), [topology]);
+  const chains = useMemo(
+    () => (active && active.topology === topology ? findChains(active.id) : null),
+    [active, topology, findChains],
+  );
+  const highlight = (id: string) =>
+    setActive((prev) => (prev && prev.id === id && prev.topology === topology ? prev : { topology, id }));
+  const clearHighlight = () => setActive(null);
+  // Opening the panel clears the highlight, since the pointer and focus it
+  // came from are about to move.
+  const openTicket = (ticket: Ticket) => {
+    clearHighlight();
+    setSelectedTicket(ticket);
+  };
 
   // One ResizeObserver watches every card wrapper through the stable ref
   // callback below. Observing reports a card's size at the next rendering
@@ -205,6 +253,26 @@ export default function Graph() {
           <div
             className="relative"
             style={{ width: canvasWidth, height: canvasHeight }}
+            // Only leaving the whole graph clears the highlight, so moving
+            // from card to card never flashes back to undimmed. A card
+            // showing a focus ring takes the highlight back, unless the panel
+            // is open over the graph. :focus-visible is what tells that from
+            // a card the pointer merely pressed on, which must not hold the
+            // graph dimmed once the pointer leaves.
+            onPointerLeave={(e) => {
+              const focused = document.activeElement;
+              const focusedId =
+                focused instanceof HTMLElement &&
+                e.currentTarget.contains(focused) &&
+                focused.matches(":focus-visible")
+                  ? focused.dataset.ticketId
+                  : undefined;
+              if (focusedId && !selectedTicket) highlight(focusedId);
+              else clearHighlight();
+            }}
+            onBlur={(e) => {
+              if (!e.currentTarget.contains(e.relatedTarget)) clearHighlight();
+            }}
           >
             {layout.columns.map((column) => (
               <ColumnHeader key={column.index} column={column} />
@@ -234,16 +302,26 @@ export default function Graph() {
               <defs>
                 <Arrowhead id={ARROW} className="fill-slate-600" />
                 <Arrowhead id={BACK_ARROW} className="fill-red-500" />
+                <Arrowhead id={UPSTREAM_ARROW} className="fill-amber-500" />
+                <Arrowhead id={DOWNSTREAM_ARROW} className="fill-blue-400" />
               </defs>
-              {edges.map((edge) => (
-                <path
-                  key={`${edge.from}->${edge.to}`}
-                  d={edge.d}
-                  className={`fill-none ${edge.back ? "stroke-red-500" : "stroke-slate-600"}`}
-                  strokeWidth={1.5}
-                  markerEnd={`url(#${edge.back ? BACK_ARROW : ARROW})`}
-                />
-              ))}
+              {edges.map((edge) => {
+                const role = chains ? edgeChainRole(chains, edge) : "none";
+                const lit = role === "none" ? null : EDGE_CHAIN_STYLES[role];
+                const stroke = lit?.className ?? (edge.back ? "stroke-red-500" : "stroke-slate-600");
+                const marker = lit?.marker ?? (edge.back ? BACK_ARROW : ARROW);
+                return (
+                  <path
+                    key={`${edge.from}->${edge.to}`}
+                    d={edge.d}
+                    className={`fill-none transition-opacity duration-150 ${stroke} ${
+                      chains && !lit ? "opacity-12" : ""
+                    }`}
+                    strokeWidth={lit ? 2 : 1.5}
+                    markerEnd={`url(#${marker})`}
+                  />
+                );
+              })}
             </svg>
 
             {layout.nodes.map((node) => (
@@ -257,15 +335,24 @@ export default function Graph() {
                 onKeyDown={(e) => {
                   if (e.target !== e.currentTarget || (e.key !== "Enter" && e.key !== " ")) return;
                   e.preventDefault();
-                  setSelectedTicket(node.ticket);
+                  openTicket(node.ticket);
                 }}
-                className="absolute w-64 rounded-lg"
+                // Move as well as enter: after a re-render under a still
+                // pointer (the panel closing, a refetch) React sends no enter
+                // for the card already under it, and highlight() bails out
+                // when the pick is unchanged.
+                onPointerEnter={() => highlight(node.id)}
+                onPointerMove={() => highlight(node.id)}
+                onFocus={() => highlight(node.id)}
+                className={`absolute w-64 rounded-lg transition-[opacity,box-shadow] duration-150 ${
+                  chains ? CARD_CHAIN_CLASSES[chainRole(chains, node.id)] : ""
+                }`}
                 style={{ left: node.x, top: node.y }}
               >
                 <TicketCard
                   ticket={node.ticket}
                   graph={node}
-                  onClick={() => setSelectedTicket(node.ticket)}
+                  onClick={() => openTicket(node.ticket)}
                 />
               </div>
             ))}

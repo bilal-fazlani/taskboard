@@ -6,6 +6,9 @@
 //   computeGraphTopology(tickets)       -> columns, row order, edges, counts
 //   positionGraph(topology, options)    -> pixel boxes and edge endpoints
 //
+// chainFinder(topology), from graphChains.ts and re-exported here, answers
+// what is upstream and downstream of a node for hover highlighting.
+//
 // The page measures its rendered cards and feeds their sizes into the second
 // stage, so stacking follows real card heights; layoutGraph() runs both with
 // default sizes for callers that have no measurements yet.
@@ -40,6 +43,10 @@
 
 import type { Ticket, TicketRef } from "../api/client";
 import { isDone, isInProgress } from "./status";
+
+// Upstream and downstream chains through a node, for hover highlighting.
+export { chainFinder, chainRole, edgeChainRole, edgeKey, graphChains } from "./graphChains";
+export type { ChainRole, EdgeChainRole, GraphChains } from "./graphChains";
 
 /** The part of a TicketRef the layout reads. */
 export type GraphTicketRef = Pick<TicketRef, "id" | "status">;
