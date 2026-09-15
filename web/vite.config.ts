@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
@@ -12,5 +13,11 @@ export default defineConfig({
         ws: true,
       },
     },
+  },
+  test: {
+    // Unit tests run in Node without a DOM. `vitest run` starts no dev server, so
+    // the proxy above is never used; tests mock the API rather than reach a server.
+    environment: 'node',
+    include: ['src/**/*.test.{ts,tsx}'],
   },
 })

@@ -27,6 +27,10 @@ jobs:
         working-directory: web
         run: npm ci && npm run build
 
+      - name: Run web tests
+        working-directory: web
+        run: npm test
+
       - name: Embed frontend
         run: |
           mkdir -p cmd/taskboard/web/dist
