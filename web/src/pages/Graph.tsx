@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
+import { Maximize, ZoomIn, ZoomOut } from "lucide-react";
 import { api, type Ticket, type Project, type TicketWrite } from "../api/client";
 import TicketPanel from "../components/TicketPanel";
 import TicketCard from "../components/TicketCard";
@@ -18,6 +19,26 @@ import {
 import { MIN_COLUMN_GAP, laneCount, lanesHeight, planGutters, routeEdges } from "../lib/graphEdges";
 import { mergeSizes } from "../lib/graphSizes";
 import { columnHeading } from "../lib/graphText";
+import {
+  FIT_PADDING,
+  IDENTITY,
+  canZoomIn,
+  canZoomOut,
+  fitTransform,
+  isDrag,
+  panBy,
+  panIntoView,
+  wheelPan,
+  wheelZoomFactor,
+  zoomAround,
+  zoomIn,
+  zoomOut,
+  zoomPercent,
+  type Extent,
+  type Insets,
+  type Point,
+  type Transform,
+} from "../lib/viewport";
 
 // Cards are w-64. Heights are measured; this one is only the placeholder size
 // of the empty Ready column and of a card in the moment before it's measured.
@@ -56,6 +77,30 @@ const EDGE_CHAIN_STYLES: Record<Exclude<EdgeChainRole, "none">, { className: str
 
 const NO_SIZES: ReadonlyMap<string, Size> = new Map();
 
+// Safari reports a trackpad pinch as gesture events, not as ctrl+wheel. The
+// DOM typings don't include them.
+interface GestureLike extends UIEvent {
+  scale: number;
+  clientX: number;
+  clientY: number;
+}
+
+// A pointer that went down on the viewport, until it goes up. It pans only
+// once it has moved DRAG_THRESHOLD pixels from where it went down.
+interface PointerDrag {
+  pointerId: number;
+  start: Point;
+  last: Point;
+  panning: boolean;
+}
+
+// Fit keeps the bottom strip clear of the toolbar: its bottom-4 offset (16px),
+// its height (34px) and 8px of air above it.
+const FIT_INSETS: Insets = { top: FIT_PADDING, right: FIT_PADDING, bottom: 16 + 34 + 8, left: FIT_PADDING };
+
+const TOOL_BUTTON =
+  "flex items-center justify-center w-7 h-7 rounded text-slate-400 transition-colors hover:text-slate-200 hover:bg-slate-800 disabled:text-slate-700 disabled:hover:bg-transparent";
+
 function ColumnHeader({ column }: { column: PositionedColumn }) {
   return (
     <div
@@ -90,6 +135,12 @@ export default function Graph() {
   // topology it was picked from. A refetch builds a new topology, which drops
   // the pick without an effect, so the graph never comes back dimmed.
   const [active, setActive] = useState<{ topology: GraphTopology<Ticket>; id: string } | null>(null);
+  // Pan and zoom: screen = translate + scale * canvas. `fitPending` is true
+  // from first load, and from each project switch, until the fit has run.
+  const [transform, setTransform] = useState<Transform>(IDENTITY);
+  const [fitPending, setFitPending] = useState(true);
+  const [viewportSize, setViewportSize] = useState<Extent | null>(null);
+  const [panning, setPanning] = useState(false);
 
   useEffect(() => {
     api.projects.list().then(setProjects).catch(() => setProjects([]));
@@ -219,13 +270,187 @@ export default function Graph() {
   const canvasWidth = layout.width + gutters.right;
   const canvasHeight = Math.max(layout.height, origin.y + CARD_SIZE.height);
 
+  // The view fits itself only on first load and on a project switch. Tickets
+  // appearing or leaving, the column count changing, cards resizing and the
+  // window resizing never move it; the Fit button does. A pending fit waits
+  // for the selection's tickets to arrive and form a graph, for every card to
+  // be measured, so it fits the real extent, and for the viewport's size. A
+  // selection with no open tickets keeps its fit pending, so the first graph
+  // it shows is fitted. The fit is state adjusted while rendering: React
+  // renders again before committing, so the unfitted graph is never painted,
+  // and the canvas stays invisible while a fit is pending.
+  const measured = useMemo(() => topology.nodes.every((node) => sizes.has(node.id)), [topology, sizes]);
+  const hasGraph = !loading && topology.nodes.length > 0;
+  if (fitPending && hasGraph && measured && viewportSize) {
+    setFitPending(false);
+    setTransform(fitTransform({ width: canvasWidth, height: canvasHeight }, viewportSize, FIT_INSETS));
+  }
+
+  // The viewport's size, for fit and for zooming around its centre. Resizing
+  // the window keeps the transform. Wheel and Safari gesture listeners are
+  // added here rather than as React props, because they have to be
+  // non-passive to stop the browser scrolling or zooming the page.
+  const attachViewport = useCallback((el: HTMLDivElement | null) => {
+    if (!el) return;
+    const sizeObserver = new ResizeObserver(() => {
+      const width = el.clientWidth;
+      const height = el.clientHeight;
+      setViewportSize((prev) => (prev && prev.width === width && prev.height === height ? prev : { width, height }));
+    });
+    sizeObserver.observe(el);
+
+    const showsGraph = () => el.querySelector("[data-graph-canvas]") !== null;
+    // Ctrl or meta+wheel and pinches are always kept from zooming the page,
+    // including while the viewport shows the loading or empty state.
+    const pointIn = (clientX: number, clientY: number): Point => {
+      const rect = el.getBoundingClientRect();
+      return { x: clientX - rect.left, y: clientY - rect.top };
+    };
+    // Plain wheel pans; ctrl or meta zooms around the cursor, which is also
+    // how Chrome and Firefox report a trackpad pinch.
+    const onWheel = (e: WheelEvent) => {
+      const zoom = e.ctrlKey || e.metaKey;
+      if (zoom) e.preventDefault();
+      if (!showsGraph()) return;
+      e.preventDefault();
+      if (zoom) {
+        const at = pointIn(e.clientX, e.clientY);
+        const factor = wheelZoomFactor(e.deltaY, e.deltaMode);
+        setTransform((t) => zoomAround(t, at, factor));
+      } else {
+        const by = wheelPan(e);
+        setTransform((t) => panBy(t, by.x, by.y));
+      }
+    };
+    // Safari's gesture scale is cumulative from gesturestart.
+    let gestureScale = 1;
+    const onGestureStart = (e: Event) => {
+      e.preventDefault();
+      gestureScale = 1;
+    };
+    const onGestureChange = (e: Event) => {
+      e.preventDefault();
+      if (!showsGraph()) return;
+      const gesture = e as GestureLike;
+      if (!(gesture.scale > 0)) return;
+      const factor = gesture.scale / gestureScale;
+      gestureScale = gesture.scale;
+      const at = pointIn(gesture.clientX, gesture.clientY);
+      setTransform((t) => zoomAround(t, at, factor));
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    el.addEventListener("gesturestart", onGestureStart, { passive: false });
+    el.addEventListener("gesturechange", onGestureChange, { passive: false });
+    el.addEventListener("gestureend", onGestureStart, { passive: false });
+    return () => {
+      sizeObserver.disconnect();
+      el.removeEventListener("wheel", onWheel);
+      el.removeEventListener("gesturestart", onGestureStart);
+      el.removeEventListener("gesturechange", onGestureChange);
+      el.removeEventListener("gestureend", onGestureStart);
+    };
+  }, []);
+
+  // Dragging pans, from empty space or from a card. A pointer that moves no
+  // more than DRAG_THRESHOLD before it goes up is a click, and a card opens
+  // its panel; one that moves further pans and swallows the click that
+  // follows. The pointer is only captured once it pans, so hovering cards is
+  // untouched.
+  const dragRef = useRef<PointerDrag | null>(null);
+  const swallowClickRef = useRef(false);
+
+  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    swallowClickRef.current = false;
+    if (!hasGraph || e.button !== 0 || !e.isPrimary) return;
+    if ((e.target as Element).closest("[data-graph-toolbar]")) return;
+    const at = { x: e.clientX, y: e.clientY };
+    dragRef.current = { pointerId: e.pointerId, start: at, last: at, panning: false };
+  };
+
+  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== e.pointerId) return;
+    if (e.pointerType === "mouse" && (e.buttons & 1) === 0) {
+      // The left button went up without a pointerup: outside the window
+      // before the drag started, or while another button is still held.
+      endDrag(e.currentTarget, e.pointerId);
+      return;
+    }
+    const at = { x: e.clientX, y: e.clientY };
+    if (!drag.panning) {
+      if (!isDrag(drag.start, at)) return;
+      drag.panning = true;
+      e.currentTarget.setPointerCapture(e.pointerId);
+      setPanning(true);
+    }
+    const dx = at.x - drag.last.x;
+    const dy = at.y - drag.last.y;
+    drag.last = at;
+    setTransform((t) => panBy(t, dx, dy));
+  };
+
+  // Forgets the drag without swallowing a click, and lets go of the pointer.
+  const endDrag = (el: HTMLDivElement, pointerId: number) => {
+    dragRef.current = null;
+    setPanning(false);
+    if (el.hasPointerCapture(pointerId)) el.releasePointerCapture(pointerId);
+  };
+
+  // Capture can also be lost without a pointerup reaching the viewport.
+  const handleLostPointerCapture = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (dragRef.current?.pointerId !== e.pointerId) return;
+    dragRef.current = null;
+    setPanning(false);
+  };
+
+  // No context menu over a pan in progress, e.g. a right click mid-drag.
+  const handleContextMenu = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (dragRef.current?.panning) e.preventDefault();
+  };
+
+  const handlePointerEnd = (e: React.PointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== e.pointerId) return;
+    dragRef.current = null;
+    if (!drag.panning) return;
+    setPanning(false);
+    if (e.type === "pointerup") swallowClickRef.current = true;
+  };
+
+  const handleClickCapture = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!swallowClickRef.current) return;
+    swallowClickRef.current = false;
+    e.stopPropagation();
+    e.preventDefault();
+  };
+
+  // A card reached with Tab is panned into view. Pointer focus is left alone,
+  // so clicking a card near the edge doesn't move the graph under the pointer.
+  const handleFocus = (e: React.FocusEvent<HTMLDivElement>) => {
+    const target = e.target as HTMLElement;
+    if (!target.dataset.ticketId || !target.matches(":focus-visible")) return;
+    const by = panIntoView(target.getBoundingClientRect(), e.currentTarget.getBoundingClientRect());
+    if (by.x !== 0 || by.y !== 0) setTransform((t) => panBy(t, by.x, by.y));
+  };
+
+  const centre: Point = { x: (viewportSize?.width ?? 0) / 2, y: (viewportSize?.height ?? 0) / 2 };
+  const fit = () => {
+    if (viewportSize) setTransform(fitTransform({ width: canvasWidth, height: canvasHeight }, viewportSize, FIT_INSETS));
+  };
+
   return (
     <div className="h-full flex flex-col">
       <header className="shrink-0 flex items-center justify-between px-6 h-14 border-b border-slate-800">
         <h1 className="text-lg font-semibold text-white">Graph</h1>
         <select
           value={selectedProject}
-          onChange={(e) => setSelectedProject(e.target.value)}
+          onChange={(e) => {
+            setSelectedProject(e.target.value);
+            setFitPending(true);
+            // A card can measure differently under another selection (its
+            // hidden blocker line), so the fit waits for fresh sizes.
+            setSizes(NO_SIZES);
+          }}
           className="bg-slate-800 text-sm text-slate-300 rounded-md border border-slate-700 px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
         >
           <option value="">All Projects</option>
@@ -237,7 +462,20 @@ export default function Graph() {
         </select>
       </header>
 
-      <div className="flex-1 overflow-auto p-6">
+      <div
+        ref={attachViewport}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerEnd}
+        onPointerCancel={handlePointerEnd}
+        onLostPointerCapture={handleLostPointerCapture}
+        onContextMenu={handleContextMenu}
+        onClickCapture={handleClickCapture}
+        onFocus={handleFocus}
+        className={`relative flex-1 min-h-0 overflow-clip ${
+          hasGraph ? `select-none touch-none ${panning ? "cursor-grabbing" : "cursor-grab"}` : ""
+        }`}
+      >
         {loading ? (
           <div className="flex items-center justify-center h-full text-slate-600">
             Loading graph…
@@ -251,8 +489,13 @@ export default function Graph() {
           </div>
         ) : (
           <div
-            className="relative"
-            style={{ width: canvasWidth, height: canvasHeight }}
+            data-graph-canvas
+            className={`relative origin-top-left ${fitPending ? "invisible" : ""}`}
+            style={{
+              width: canvasWidth,
+              height: canvasHeight,
+              transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.k})`,
+            }}
             // Only leaving the whole graph clears the highlight, so moving
             // from card to card never flashes back to undimmed. A card
             // showing a focus ring takes the highlight back, unless the panel
@@ -356,6 +599,41 @@ export default function Graph() {
                 />
               </div>
             ))}
+          </div>
+        )}
+
+        {hasGraph && (
+          <div
+            data-graph-toolbar
+            className="absolute bottom-4 right-4 z-10 flex items-center gap-0.5 rounded-md border border-slate-700 bg-slate-900 p-0.5 shadow-lg shadow-black/40 cursor-default"
+          >
+            <button type="button" onClick={fit} title="Fit to screen" aria-label="Fit to screen" className={TOOL_BUTTON}>
+              <Maximize className="w-4 h-4" />
+            </button>
+            <div className="w-px h-4 mx-0.5 bg-slate-700" />
+            <button
+              type="button"
+              onClick={() => setTransform((t) => zoomOut(t, centre))}
+              disabled={!canZoomOut(transform)}
+              title="Zoom out"
+              aria-label="Zoom out"
+              className={TOOL_BUTTON}
+            >
+              <ZoomOut className="w-4 h-4" />
+            </button>
+            <span className="w-11 text-center text-xs tabular-nums text-slate-400" aria-label="Zoom level">
+              {zoomPercent(transform.k)}
+            </span>
+            <button
+              type="button"
+              onClick={() => setTransform((t) => zoomIn(t, centre))}
+              disabled={!canZoomIn(transform)}
+              title="Zoom in"
+              aria-label="Zoom in"
+              className={TOOL_BUTTON}
+            >
+              <ZoomIn className="w-4 h-4" />
+            </button>
           </div>
         )}
       </div>
