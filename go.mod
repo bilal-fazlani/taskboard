@@ -3,9 +3,7 @@ module github.com/tcarac/taskboard
 go 1.24.0
 
 require (
-	github.com/creack/pty v1.1.24
 	github.com/go-chi/chi/v5 v5.2.5
-	github.com/gorilla/websocket v1.5.3
 	github.com/oklog/ulid/v2 v2.1.1
 	github.com/spf13/cobra v1.10.2
 	modernc.org/sqlite v1.45.0

@@ -4,9 +4,6 @@ import { MemoryRouter } from "react-router-dom";
 import { AppRoutes } from "./App";
 import { VIEWS_GROUP_LABEL, otherItems, viewItems } from "./lib/navigation";
 
-// The terminal needs a DOM, and it stays closed here anyway.
-vi.mock("./components/TerminalPanel", () => ({ default: () => null }));
-
 // Server rendering runs no effects, so the pages never call the API. The mock
 // makes sure of it: any call fails the test.
 vi.mock("./api/client", () => ({
