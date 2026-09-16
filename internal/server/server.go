@@ -1,14 +1,17 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"sync"
+	"time"
 
 	"github.com/creack/pty"
 	"github.com/go-chi/chi/v5"
@@ -19,13 +22,42 @@ import (
 	"github.com/tcarac/taskboard/internal/models"
 )
 
+// Server is the HTTP API and web UI. It can be used as an http.Handler directly;
+// Serve and ListenAndServe also watch the database and can be called at most
+// once per Server (see Serve).
 type Server struct {
-	store  *db.Store
-	router chi.Router
+	store         *db.Store
+	router        chi.Router
+	events        *broadcaster
+	keepAlive     time.Duration
+	watchInterval time.Duration
 }
 
-func New(store *db.Store, webFS fs.FS) *Server {
-	s := &Server{store: store}
+// Option configures a Server.
+type Option func(*Server)
+
+// WithKeepAlive sets how long an events stream may stay idle before it gets a
+// keep-alive comment. The default is DefaultKeepAlive.
+func WithKeepAlive(d time.Duration) Option {
+	return func(s *Server) { s.keepAlive = d }
+}
+
+// WithWatchInterval sets how often Serve polls the database for changes. The
+// default is db.DefaultWatchInterval.
+func WithWatchInterval(d time.Duration) Option {
+	return func(s *Server) { s.watchInterval = d }
+}
+
+func New(store *db.Store, webFS fs.FS, opts ...Option) *Server {
+	s := &Server{
+		store:         store,
+		events:        newBroadcaster(),
+		keepAlive:     DefaultKeepAlive,
+		watchInterval: db.DefaultWatchInterval,
+	}
+	for _, opt := range opts {
+		opt(s)
+	}
 	s.setupRoutes(webFS)
 	return s
 }
@@ -34,10 +66,93 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.router.ServeHTTP(w, r)
 }
 
-func (s *Server) ListenAndServe(port int) error {
-	addr := fmt.Sprintf(":%d", port)
-	fmt.Printf("Taskboard running at http://localhost:%d\n", port)
-	return http.ListenAndServe(addr, s.router)
+// shutdownTimeout bounds how long Serve waits for in-flight requests.
+const shutdownTimeout = 5 * time.Second
+
+// openWatcher opens the database watcher Serve runs. Tests replace it to
+// observe the watcher.
+var openWatcher = db.OpenWatcher
+
+// ListenAndServe serves on port until ctx is done. dbPath is the database the
+// store uses; it is watched for changes from any process (see Serve).
+func (s *Server) ListenAndServe(ctx context.Context, port int, dbPath string) error {
+	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
+	if err != nil {
+		return err
+	}
+	return s.serve(ctx, ln, dbPath, func() {
+		fmt.Printf("Taskboard running at http://localhost:%d\n", port)
+	})
+}
+
+// Serve serves HTTP on ln until ctx is done, then shuts down cleanly.
+//
+// While it runs, a watcher polls the database at dbPath and every commit, from
+// this server, the CLI or the MCP server, becomes a "changed" event on
+// /api/events. On shutdown the watcher stops, open event streams end and
+// in-flight requests get shutdownTimeout to finish. If serving fails instead,
+// Serve closes every connection and returns the error. Either way it returns
+// only after the watcher has stopped and its connection is closed.
+//
+// A Server can be served once: when Serve returns, its event streams stay
+// closed, so serving it again would accept event clients and end them at once.
+func (s *Server) Serve(ctx context.Context, ln net.Listener, dbPath string) error {
+	return s.serve(ctx, ln, dbPath, nil)
+}
+
+// serve is Serve with a callback that runs once the watcher is open, just
+// before requests are accepted.
+func (s *Server) serve(ctx context.Context, ln net.Listener, dbPath string, ready func()) error {
+	watcher, err := openWatcher(dbPath, s.watchInterval)
+	if err != nil {
+		ln.Close()
+		return err
+	}
+
+	// Event streams never finish on their own; closing the broadcaster makes
+	// them return so Shutdown does not wait for them.
+	defer s.events.close()
+
+	watchCtx, stopWatch := context.WithCancel(ctx)
+	watchDone := make(chan struct{})
+	go func() {
+		defer close(watchDone)
+		watcher.Run(watchCtx, s.events.publish)
+	}()
+	// One deferred step, so the watcher is always told to stop before Serve
+	// waits for it, whichever way Serve returns.
+	defer func() {
+		stopWatch()
+		<-watchDone
+		watcher.Close()
+	}()
+
+	srv := &http.Server{Handler: s.router}
+	srv.RegisterOnShutdown(s.events.close)
+
+	if ready != nil {
+		ready()
+	}
+	serveErr := make(chan error, 1)
+	go func() { serveErr <- srv.Serve(ln) }()
+
+	select {
+	case err := <-serveErr:
+		s.events.close()
+		srv.Close()
+		return err
+	case <-ctx.Done():
+	}
+	stopWatch()
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer cancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		return fmt.Errorf("shutting down: %w", err)
+	}
+	if err := <-serveErr; !errors.Is(err, http.ErrServerClosed) {
+		return err
+	}
+	return nil
 }
 
 func (s *Server) setupRoutes(webFS fs.FS) {
@@ -83,6 +198,7 @@ func (s *Server) setupRoutes(webFS fs.FS) {
 		})
 
 		r.Get("/board", s.getBoard)
+		r.Get("/events", s.handleEvents)
 		r.Get("/terminal/ws", s.handleTerminalWS)
 	})
 

@@ -31,24 +31,7 @@ func OpenAt(dbPath string) (*sql.DB, error) {
 		return nil, fmt.Errorf("creating db directory: %w", err)
 	}
 
-	// SQLite allows one writer at a time, and ticket create/update hold a
-	// transaction across label and dependency resolution. Two settings are
-	// needed for a second writer — typically an agent using the MCP server
-	// while someone uses the web UI — to wait its turn instead of failing:
-	//
-	//   busy_timeout   installs a busy handler; without it the driver has none
-	//                  and a contended write returns SQLITE_BUSY immediately.
-	//   _txlock        makes db.Begin() issue BEGIN IMMEDIATE, taking the write
-	//                  lock up front. This one is not optional: a deferred
-	//                  transaction that reads first and writes later cannot use
-	//                  the busy handler when it upgrades to a writer, because
-	//                  waiting there could deadlock, so SQLite fails it at once.
-	//                  Our write transactions all read before they write.
-	db, err := sql.Open("sqlite", dbPath+
-		"?_pragma=journal_mode(WAL)"+
-		"&_pragma=foreign_keys(1)"+
-		"&_pragma=busy_timeout(5000)"+
-		"&_txlock=immediate")
+	db, err := sql.Open("sqlite", dsn(dbPath))
 	if err != nil {
 		return nil, fmt.Errorf("opening database: %w", err)
 	}
@@ -64,6 +47,31 @@ func OpenAt(dbPath string) (*sql.DB, error) {
 	}
 
 	return db, nil
+}
+
+// dsn is the driver connection string for dbPath. Every connection to the
+// file uses it, including the change watcher's, so they all share the same
+// journal mode, busy timeout and locking behaviour.
+//
+// SQLite allows one writer at a time, and ticket create/update hold a
+// transaction across label and dependency resolution. Two settings are
+// needed for a second writer — typically an agent using the MCP server
+// while someone uses the web UI — to wait its turn instead of failing:
+//
+//	busy_timeout   installs a busy handler; without it the driver has none
+//	               and a contended write returns SQLITE_BUSY immediately.
+//	_txlock        makes db.Begin() issue BEGIN IMMEDIATE, taking the write
+//	               lock up front. This one is not optional: a deferred
+//	               transaction that reads first and writes later cannot use
+//	               the busy handler when it upgrades to a writer, because
+//	               waiting there could deadlock, so SQLite fails it at once.
+//	               Our write transactions all read before they write.
+func dsn(dbPath string) string {
+	return dbPath +
+		"?_pragma=journal_mode(WAL)" +
+		"&_pragma=foreign_keys(1)" +
+		"&_pragma=busy_timeout(5000)" +
+		"&_txlock=immediate"
 }
 
 // ErrNoDefaultDB is returned when a build other than the live one needs the

@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -51,13 +52,19 @@ func NewRootCmd(webFS fs.FS) *cobra.Command {
 			if !foreground {
 				return daemonize(port)
 			}
-			database, err := openDB()
+			path, err := effectiveDBPath()
 			if err != nil {
 				return fmt.Errorf("opening database: %w", err)
 			}
-			store := db.NewStore(database)
-			srv := server.New(store, webFS)
-			return srv.ListenAndServe(port)
+			database, err := db.OpenAt(path)
+			if err != nil {
+				return fmt.Errorf("opening database: %w", err)
+			}
+			defer database.Close()
+			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+			defer stop()
+			srv := server.New(db.NewStore(database), webFS)
+			return srv.ListenAndServe(ctx, port, path)
 		},
 	}
 	startCmd.Flags().IntVarP(&port, "port", "p", defaultPort(), "port to listen on")
