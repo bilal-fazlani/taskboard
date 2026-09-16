@@ -441,7 +441,7 @@ export default function Graph() {
   return (
     <div className="h-full flex flex-col">
       <header className="shrink-0 flex items-center justify-between px-6 h-14 border-b border-slate-800">
-        <h1 className="text-lg font-semibold text-white">Graph</h1>
+        <h1 className="text-lg font-semibold text-white">Dependencies</h1>
         <select
           value={selectedProject}
           onChange={(e) => {

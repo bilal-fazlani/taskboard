@@ -1,23 +1,27 @@
 import { useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
-import {
-  Workflow,
-  LayoutDashboard,
-  FolderKanban,
-  Ticket,
-  Tag,
-  Zap,
-  TerminalSquare,
-} from "lucide-react";
+import { Zap, TerminalSquare } from "lucide-react";
 import TerminalPanel from "./TerminalPanel";
+import { VIEWS_GROUP_LABEL, otherItems, viewItems, type NavItem } from "../lib/navigation";
 
-const navItems = [
-  { to: "/", icon: Workflow, label: "Home" },
-  { to: "/board", icon: LayoutDashboard, label: "Board" },
-  { to: "/projects", icon: FolderKanban, label: "Projects" },
-  { to: "/tickets", icon: Ticket, label: "Tickets" },
-  { to: "/labels", icon: Tag, label: "Labels" },
-];
+function NavEntry({ item }: { item: NavItem }) {
+  return (
+    <NavLink
+      to={item.to}
+      end={item.to === "/"}
+      className={({ isActive }) =>
+        `flex items-center gap-2.5 px-2.5 py-2 rounded-md text-sm transition-colors ${
+          isActive
+            ? "bg-blue-500/15 text-blue-400"
+            : "text-slate-400 hover:text-slate-200 hover:bg-slate-800"
+        }`
+      }
+    >
+      <item.icon className="w-4 h-4" />
+      {item.label}
+    </NavLink>
+  );
+}
 
 export default function Layout() {
   const [terminalOpen, setTerminalOpen] = useState(false);
@@ -32,24 +36,25 @@ export default function Layout() {
           </span>
         </div>
 
-        <nav className="flex-1 py-3 px-2.5 space-y-0.5">
-          {navItems.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              end={item.to === "/"}
-              className={({ isActive }) =>
-                `flex items-center gap-2.5 px-2.5 py-2 rounded-md text-sm transition-colors ${
-                  isActive
-                    ? "bg-blue-500/15 text-blue-400"
-                    : "text-slate-400 hover:text-slate-200 hover:bg-slate-800"
-                }`
-              }
+        <nav className="flex-1 py-3 px-2.5 space-y-4">
+          <div role="group" aria-labelledby="nav-views">
+            <p
+              id="nav-views"
+              className="px-2.5 pb-1.5 text-[10px] font-medium text-slate-500 tracking-wider uppercase"
             >
-              <item.icon className="w-4 h-4" />
-              {item.label}
-            </NavLink>
-          ))}
+              {VIEWS_GROUP_LABEL}
+            </p>
+            <div className="space-y-0.5">
+              {viewItems.map((item) => (
+                <NavEntry key={item.to} item={item} />
+              ))}
+            </div>
+          </div>
+          <div className="space-y-0.5">
+            {otherItems.map((item) => (
+              <NavEntry key={item.to} item={item} />
+            ))}
+          </div>
         </nav>
 
         <div className="px-2.5 pb-2">
