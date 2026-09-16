@@ -31,6 +31,63 @@ body {
   background: #475569;
 }
 
+/* Dependencies-view attention animation (see src/lib/attention.ts).
+   An in-progress card breathes a ring in the in-progress blue (#3b82f6,
+   blue-500, the status dot's own colour) on a ~2s cycle so it can be picked
+   out across a full-screen graph, and its status dot pulses on the same cycle.
+   Both rules share the timing and start from the same mount, so the ring and
+   the dot stay in step. */
+@keyframes graph-attention-ring {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 1px rgb(59 130 246 / 0.5),
+      0 0 12px 1px rgb(59 130 246 / 0.25);
+  }
+  50% {
+    box-shadow:
+      0 0 0 3px rgb(59 130 246 / 0.95),
+      0 0 28px 7px rgb(59 130 246 / 0.55);
+  }
+}
+
+@keyframes graph-attention-dot {
+  0%,
+  100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgb(59 130 246 / 0);
+  }
+  50% {
+    transform: scale(1.45);
+    box-shadow: 0 0 9px 3px rgb(59 130 246 / 0.7);
+  }
+}
+
+.graph-attention {
+  animation: graph-attention-ring 2s ease-in-out infinite;
+}
+
+.graph-attention-dot {
+  animation: graph-attention-dot 2s ease-in-out infinite;
+}
+
+/* Without motion the state still has to be visible, so the ring stays on at
+   its bright end and only the breathing stops. */
+@media (prefers-reduced-motion: reduce) {
+  .graph-attention {
+    animation: none;
+    box-shadow:
+      0 0 0 2px rgb(59 130 246 / 0.9),
+      0 0 20px 4px rgb(59 130 246 / 0.4);
+  }
+
+  .graph-attention-dot {
+    animation: none;
+    transform: scale(1.35);
+    box-shadow: 0 0 8px 2px rgb(59 130 246 / 0.55);
+  }
+}
+
 .prose-card {
   font-size: 0.875rem;
   line-height: 1.625;

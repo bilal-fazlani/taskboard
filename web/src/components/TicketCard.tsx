@@ -1,5 +1,6 @@
 import { Calendar, Check, CheckCircle2, EyeOff } from "lucide-react";
 import type { Ticket } from "../api/client";
+import { attentionClasses } from "../lib/attention";
 import type { GraphNode } from "../lib/graphLayout";
 import { hiddenBlockersText, satisfiedDependenciesText } from "../lib/graphText";
 import { STATUS_COLORS, STATUS_LABELS, isStatus } from "../lib/status";
@@ -29,12 +30,12 @@ function SubtaskProgress({ subtasks }: { subtasks: Ticket["subtasks"] }) {
   );
 }
 
-function StatusDot({ status }: { status: string }) {
+function StatusDot({ status, attention }: { status: string; attention: string }) {
   const known = isStatus(status);
   return (
     <span
       title={known ? STATUS_LABELS[status] : status}
-      className={`w-2 h-2 shrink-0 rounded-full ${known ? STATUS_COLORS[status] : "bg-slate-500"}`}
+      className={`w-2 h-2 shrink-0 rounded-full ${known ? STATUS_COLORS[status] : "bg-slate-500"} ${attention}`}
     />
   );
 }
@@ -85,17 +86,19 @@ export default function TicketCard({
   onClick?: () => void;
   graph?: GraphCardInfo;
 }) {
+  // Empty strings everywhere but an in-progress card on the graph.
+  const attention = attentionClasses(ticket.status, graph !== undefined);
   return (
     <div
       onClick={onClick}
       className={`rounded-lg border border-slate-700/50 bg-slate-900 p-3 space-y-2 transition-colors hover:border-slate-600 cursor-pointer ${
         isDragging ? "opacity-90 shadow-xl shadow-blue-500/10 rotate-2" : ""
-      }`}
+      } ${attention.card}`}
     >
       <div className="flex items-start justify-between gap-2">
         {graph ? (
           <span className="inline-flex items-center gap-1.5 text-[11px] font-mono text-slate-500">
-            <StatusDot status={ticket.status} />
+            <StatusDot status={ticket.status} attention={attention.dot} />
             {ticket.projectPrefix}-{ticket.number}
           </span>
         ) : (
