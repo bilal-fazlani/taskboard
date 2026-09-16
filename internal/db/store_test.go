@@ -851,6 +851,268 @@ func TestDependencyDuplicatesCollapse(t *testing.T) {
 	}
 }
 
+func TestResolveTicketIDByULID(t *testing.T) {
+	s := newTestStore(t)
+	p := seedProject(t, s, "Billing", "BILL")
+	tk := seedTicket(t, s, p.ID, "Invoice") // BILL-1
+
+	id, err := s.ResolveTicketID(tk.ID)
+	if err != nil {
+		t.Fatalf("ResolveTicketID(ulid): %v", err)
+	}
+	if id != tk.ID {
+		t.Fatalf("resolved id = %q, want %q", id, tk.ID)
+	}
+}
+
+func TestResolveTicketIDByDisplayKeyIsCaseInsensitive(t *testing.T) {
+	s := newTestStore(t)
+	p := seedProject(t, s, "Billing", "BILL")
+	tk := seedTicket(t, s, p.ID, "Invoice") // BILL-1
+
+	for _, ref := range []string{"BILL-1", "bill-1", "Bill-1"} {
+		id, err := s.ResolveTicketID(ref)
+		if err != nil {
+			t.Fatalf("ResolveTicketID(%q): %v", ref, err)
+		}
+		if id != tk.ID {
+			t.Fatalf("ResolveTicketID(%q) = %q, want %q", ref, id, tk.ID)
+		}
+	}
+}
+
+func TestResolveTicketIDUnresolvableIsAnError(t *testing.T) {
+	s := newTestStore(t)
+
+	if _, err := s.ResolveTicketID("NOPE-42"); err == nil {
+		t.Fatal("expected an error for an unresolvable display key")
+	}
+	// A 26-character, Crockford-shaped string is treated as a ULID and looked
+	// up as a literal id, not split as a display key.
+	if _, err := s.ResolveTicketID("01ARZ3NDEKTSV4RRFFQ69G5FAV"); err == nil {
+		t.Fatal("expected an error for a well-formed but unknown ULID")
+	}
+	if _, err := s.ResolveTicketID(""); err == nil {
+		t.Fatal("expected an error for an empty ref")
+	}
+}
+
+// The number half of a display key must be its canonical decimal form: a
+// signed or zero-padded number must not resolve, even though strconv.Atoi
+// would happily parse either.
+func TestResolveTicketIDRejectsNonCanonicalNumber(t *testing.T) {
+	s := newTestStore(t)
+	p := seedProject(t, s, "Glow", "GLOW")
+	seedTicket(t, s, p.ID, "First") // GLOW-1
+
+	for _, ref := range []string{"GLOW-+1", "GLOW-001", "GLOW-1.0", "GLOW-"} {
+		if _, err := s.ResolveTicketID(ref); err == nil {
+			t.Fatalf("ResolveTicketID(%q) resolved, want an error", ref)
+		}
+	}
+}
+
+func TestResolveProjectRefByIDOrPrefix(t *testing.T) {
+	s := newTestStore(t)
+	p := seedProject(t, s, "Billing", "BILL")
+
+	id, err := s.ResolveProjectRef(p.ID)
+	if err != nil {
+		t.Fatalf("ResolveProjectRef(id): %v", err)
+	}
+	if id != p.ID {
+		t.Fatalf("resolved id = %q, want %q", id, p.ID)
+	}
+
+	for _, ref := range []string{"BILL", "bill", "Bill"} {
+		id, err := s.ResolveProjectRef(ref)
+		if err != nil {
+			t.Fatalf("ResolveProjectRef(%q): %v", ref, err)
+		}
+		if id != p.ID {
+			t.Fatalf("ResolveProjectRef(%q) = %q, want %q", ref, id, p.ID)
+		}
+	}
+}
+
+func TestResolveProjectRefUnknownIsAnError(t *testing.T) {
+	s := newTestStore(t)
+
+	_, err := s.ResolveProjectRef("NOPE")
+	if err == nil {
+		t.Fatal("expected an error for an unknown project prefix")
+	}
+	if !strings.Contains(err.Error(), "project not found") {
+		t.Fatalf("error %q should say project not found", err)
+	}
+}
+
+// projects.prefix is UNIQUE only under SQLite's default binary collation, so
+// "GLOW" and "glow" can coexist as two different projects. Matching
+// case-insensitively must prefer an exact case match when there is exactly
+// one, and refuse to guess when there isn't — never silently resolve to
+// whichever row the database happens to return first.
+func TestResolveProjectRefPrefixCaseAmbiguity(t *testing.T) {
+	s := newTestStore(t)
+	upper := seedProject(t, s, "Glow Upper", "GLOW")
+	lower := seedProject(t, s, "Glow Lower", "glow")
+
+	if id, err := s.ResolveProjectRef("glow"); err != nil {
+		t.Fatalf("ResolveProjectRef(glow): %v", err)
+	} else if id != lower.ID {
+		t.Fatalf("ResolveProjectRef(glow) = %q, want the exact-case match %q", id, lower.ID)
+	}
+
+	if id, err := s.ResolveProjectRef("GLOW"); err != nil {
+		t.Fatalf("ResolveProjectRef(GLOW): %v", err)
+	} else if id != upper.ID {
+		t.Fatalf("ResolveProjectRef(GLOW) = %q, want the exact-case match %q", id, upper.ID)
+	}
+
+	_, err := s.ResolveProjectRef("Glow")
+	if err == nil {
+		t.Fatal("expected an error for a prefix matching two projects with no exact case match")
+	}
+	if !strings.Contains(err.Error(), "more than one project prefix") {
+		t.Fatalf("error %q should explain the ambiguity", err)
+	}
+}
+
+// The same ambiguity guard must apply to lookupTicketRef's prefix join, the
+// pre-existing code resolveProjectRef was built on.
+func TestResolveTicketIDPrefixCaseAmbiguity(t *testing.T) {
+	s := newTestStore(t)
+	upper := seedProject(t, s, "Glow Upper", "GLOW")
+	lower := seedProject(t, s, "Glow Lower", "glow")
+	upperTicket := seedTicket(t, s, upper.ID, "Upper first") // GLOW-1
+	lowerTicket := seedTicket(t, s, lower.ID, "Lower first") // glow-1
+
+	if id, err := s.ResolveTicketID("glow-1"); err != nil {
+		t.Fatalf("ResolveTicketID(glow-1): %v", err)
+	} else if id != lowerTicket.ID {
+		t.Fatalf("ResolveTicketID(glow-1) = %q, want the exact-case match %q", id, lowerTicket.ID)
+	}
+
+	if id, err := s.ResolveTicketID("GLOW-1"); err != nil {
+		t.Fatalf("ResolveTicketID(GLOW-1): %v", err)
+	} else if id != upperTicket.ID {
+		t.Fatalf("ResolveTicketID(GLOW-1) = %q, want the exact-case match %q", id, upperTicket.ID)
+	}
+
+	_, err := s.ResolveTicketID("Glow-1")
+	if err == nil {
+		t.Fatal("expected an error for a prefix matching two projects with no exact case match")
+	}
+	if !strings.Contains(err.Error(), "more than one project prefix") {
+		t.Fatalf("error %q should explain the ambiguity", err)
+	}
+}
+
+func TestCreateTicketAcceptsProjectPrefix(t *testing.T) {
+	s := newTestStore(t)
+	seedProject(t, s, "Billing", "BILL")
+
+	tk, err := s.CreateTicket(models.CreateTicketRequest{ProjectID: "bill", Title: "Invoice"})
+	if err != nil {
+		t.Fatalf("CreateTicket with project prefix: %v", err)
+	}
+	if tk.DisplayKey() != "BILL-1" {
+		t.Fatalf("display key = %q, want BILL-1", tk.DisplayKey())
+	}
+}
+
+func TestCreateTicketWithUnknownProjectIsAClearError(t *testing.T) {
+	s := newTestStore(t)
+
+	_, err := s.CreateTicket(models.CreateTicketRequest{ProjectID: "NOPE", Title: "Invoice"})
+	if err == nil {
+		t.Fatal("expected an error for an unknown project")
+	}
+	if strings.Contains(err.Error(), "FOREIGN KEY") {
+		t.Fatalf("error %q leaked a raw constraint failure instead of a clear message", err)
+	}
+	if !strings.Contains(err.Error(), "project not found") {
+		t.Fatalf("error %q should say project not found", err)
+	}
+}
+
+func TestListTicketsFilterByProjectPrefix(t *testing.T) {
+	s := newTestStore(t)
+	billing := seedProject(t, s, "Billing", "BILL")
+	auth := seedProject(t, s, "Auth", "AUTH")
+	seedTicket(t, s, billing.ID, "Invoice")
+	seedTicket(t, s, auth.ID, "Login")
+
+	tickets, err := s.ListTickets(models.TicketFilter{ProjectID: "bill"})
+	if err != nil {
+		t.Fatalf("ListTickets: %v", err)
+	}
+	if len(tickets) != 1 || tickets[0].Title != "Invoice" {
+		t.Fatalf("tickets = %+v, want just Invoice", tickets)
+	}
+}
+
+func TestListTicketsFilterByUnknownProjectIsEmptyNotError(t *testing.T) {
+	s := newTestStore(t)
+	p := seedProject(t, s, "Billing", "BILL")
+	seedTicket(t, s, p.ID, "Invoice")
+
+	tickets, err := s.ListTickets(models.TicketFilter{ProjectID: "NOPE"})
+	if err != nil {
+		t.Fatalf("ListTickets with unknown project filter: %v", err)
+	}
+	if len(tickets) != 0 {
+		t.Fatalf("tickets = %+v, want none for an unknown project filter", tickets)
+	}
+}
+
+func TestGetBoardFilterByProjectPrefixEchoesResolvedID(t *testing.T) {
+	s := newTestStore(t)
+	billing := seedProject(t, s, "Billing", "BILL")
+	auth := seedProject(t, s, "Auth", "AUTH")
+	seedTicket(t, s, billing.ID, "Invoice")
+	seedTicket(t, s, auth.ID, "Login")
+
+	board, err := s.GetBoard("bill")
+	if err != nil {
+		t.Fatalf("GetBoard: %v", err)
+	}
+	if board.ProjectID != billing.ID {
+		t.Fatalf("board.ProjectID = %q, want the resolved id %q, not the raw prefix", board.ProjectID, billing.ID)
+	}
+	var total int
+	for _, col := range board.Columns {
+		total += len(col.Tickets)
+		for _, tk := range col.Tickets {
+			if tk.ProjectID != billing.ID {
+				t.Fatalf("board included a ticket from another project: %+v", tk)
+			}
+		}
+	}
+	if total != 1 {
+		t.Fatalf("board carried %d tickets, want 1 scoped to BILL", total)
+	}
+}
+
+func TestGetBoardFilterByUnknownProjectIsEmptyNotError(t *testing.T) {
+	s := newTestStore(t)
+	p := seedProject(t, s, "Billing", "BILL")
+	seedTicket(t, s, p.ID, "Invoice")
+
+	board, err := s.GetBoard("NOPE")
+	if err != nil {
+		t.Fatalf("GetBoard with unknown project: %v", err)
+	}
+	if board.ProjectID != "" {
+		t.Fatalf("board.ProjectID = %q, want empty for an unresolvable project", board.ProjectID)
+	}
+	for _, col := range board.Columns {
+		if len(col.Tickets) != 0 {
+			t.Fatalf("column %+v carried tickets for an unknown project", col)
+		}
+	}
+}
+
 func TestListTicketsCarriesLabelsAndDependenciesButNotBlocks(t *testing.T) {
 	s := newTestStore(t)
 	p := seedProject(t, s, "Billing", "BILL")

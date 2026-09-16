@@ -3,6 +3,7 @@ package db
 import (
 	"crypto/rand"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -171,8 +172,18 @@ func (s *Store) ListTickets(filter models.TicketFilter) ([]models.Ticket, error)
 	args := []any{}
 
 	if filter.ProjectID != "" {
+		// Accepts a project id or prefix, same as ResolveProjectRef. An
+		// unresolvable value matches no tickets, the same convention the
+		// label filter below uses for an unresolvable label name.
+		projectID, ok, err := resolveProjectFilterID(s.db, filter.ProjectID)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			return nil, nil
+		}
 		query += " AND t.project_id = ?"
-		args = append(args, filter.ProjectID)
+		args = append(args, projectID)
 	}
 	if filter.Status != "" {
 		query += " AND t.status = ?"
@@ -395,7 +406,15 @@ func (s *Store) CreateTicket(req models.CreateTicketRequest) (*models.Ticket, er
 	}
 	defer tx.Rollback()
 
-	num, err := nextTicketNumber(tx, req.ProjectID)
+	// Resolved before the insert so an unknown project (id or prefix) fails
+	// with a clear error instead of the FOREIGN KEY constraint failure the
+	// insert below would otherwise surface verbatim.
+	projectID, err := resolveProjectRef(tx, req.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+
+	num, err := nextTicketNumber(tx, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("getting next ticket number: %w", err)
 	}
@@ -411,7 +430,7 @@ func (s *Store) CreateTicket(req models.CreateTicketRequest) (*models.Ticket, er
 
 	t := models.Ticket{
 		ID:          newID(),
-		ProjectID:   req.ProjectID,
+		ProjectID:   projectID,
 		Number:      num,
 		Title:       req.Title,
 		Description: req.Description,
@@ -611,13 +630,34 @@ func (s *Store) DeleteTicket(id string) error {
 func (s *Store) GetBoard(projectID string) (*models.Board, error) {
 	statuses := models.Statuses
 	board := &models.Board{
-		ProjectID: projectID,
-		Columns:   make([]models.Column, len(statuses)),
+		Columns: make([]models.Column, len(statuses)),
+	}
+
+	// Resolved once here, up front, rather than once per status column: a
+	// prefix like "BILL" is matched against the projects table a single
+	// time, and every column below filters on the same literal id. An
+	// unresolvable project matches no tickets, the same as an unresolvable
+	// project filter on ListTickets, without a per-column round trip to
+	// discover that.
+	hasProjectFilter := projectID != ""
+	if hasProjectFilter {
+		resolved, ok, err := resolveProjectFilterID(s.db, projectID)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			for i, status := range statuses {
+				board.Columns[i] = models.Column{Status: status, Tickets: []models.Ticket{}}
+			}
+			return board, nil
+		}
+		projectID = resolved
+		board.ProjectID = resolved
 	}
 
 	for i, status := range statuses {
 		filter := models.TicketFilter{Status: status}
-		if projectID != "" {
+		if hasProjectFilter {
 			filter.ProjectID = projectID
 		}
 		tickets, err := s.ListTickets(filter)
@@ -795,16 +835,63 @@ func resolveTicketRefs(q dbtx, selfID string, refs []string) ([]string, error) {
 	return ids, nil
 }
 
-// lookupTicketRef resolves a single reference, trying a raw ID first and then a
-// PREFIX-NUMBER display key.
-func lookupTicketRef(q dbtx, ref string) (string, error) {
-	var id string
-	err := q.QueryRow("SELECT id FROM tickets WHERE id = ?", ref).Scan(&id)
-	if err == nil {
-		return id, nil
+// crockfordAlphabet is the Base32 alphabet ULIDs are encoded with (no I, L, O
+// or U, to avoid confusion with 1 and 0).
+const crockfordAlphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+
+// isULID reports whether ref has the shape of a ULID: exactly 26 characters,
+// each a Crockford Base32 digit. It is a format check only, so it does not
+// guarantee a matching row exists, just that ref should be looked up as a
+// literal ID rather than parsed as a PREFIX-NUMBER display key.
+func isULID(ref string) bool {
+	if len(ref) != 26 {
+		return false
 	}
-	if err != sql.ErrNoRows {
-		return "", fmt.Errorf("looking up ticket %q: %w", ref, err)
+	for _, r := range ref {
+		if r >= 'a' && r <= 'z' {
+			r -= 'a' - 'A'
+		}
+		if !strings.ContainsRune(crockfordAlphabet, r) {
+			return false
+		}
+	}
+	return true
+}
+
+// isCanonicalNumber reports whether s is the canonical decimal form of a
+// ticket number: digits only, no leading '+' or '-' sign, and no leading
+// zero (other than "0" itself). This is what keeps "GLOW-+1" and "GLOW-001"
+// from resolving as GLOW-1, even though strconv.Atoi would happily parse
+// both.
+func isCanonicalNumber(s string) bool {
+	if s == "" {
+		return false
+	}
+	if len(s) > 1 && s[0] == '0' {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// lookupTicketRef resolves a single reference: a ULID (26 Crockford Base32
+// characters) is looked up as a literal ticket ID, and anything else is
+// parsed as a case-insensitive PREFIX-NUMBER display key such as "BILL-2".
+func lookupTicketRef(q dbtx, ref string) (string, error) {
+	if isULID(ref) {
+		var id string
+		err := q.QueryRow("SELECT id FROM tickets WHERE id = ?", ref).Scan(&id)
+		if err == sql.ErrNoRows {
+			return "", invalidInput("no ticket matches %q", ref)
+		}
+		if err != nil {
+			return "", fmt.Errorf("looking up ticket %q: %w", ref, err)
+		}
+		return id, nil
 	}
 
 	// Split at the LAST hyphen: a project prefix may itself contain one, so
@@ -814,16 +901,29 @@ func lookupTicketRef(q dbtx, ref string) (string, error) {
 		return "", invalidInput("no ticket matches %q", ref)
 	}
 	prefix, numStr := ref[:cut], ref[cut+1:]
+	if !isCanonicalNumber(numStr) {
+		return "", invalidInput("no ticket matches %q", ref)
+	}
 	number, convErr := strconv.Atoi(numStr)
 	if convErr != nil {
 		return "", invalidInput("no ticket matches %q", ref)
 	}
 
+	projectID, found, err := resolveProjectByPrefix(q, prefix)
+	if err != nil {
+		// An ambiguous prefix (e.g. both GLOW and glow exist) is a clearer
+		// error than "no ticket matches", so it is returned as-is rather
+		// than folded into the generic not-found message below.
+		return "", err
+	}
+	if !found {
+		return "", invalidInput("no ticket matches %q", ref)
+	}
+
+	var id string
 	err = q.QueryRow(
-		`SELECT t.id FROM tickets t
-		JOIN projects p ON t.project_id = p.id
-		WHERE LOWER(p.prefix) = LOWER(?) AND t.number = ?`,
-		prefix, number,
+		"SELECT id FROM tickets WHERE project_id = ? AND number = ?",
+		projectID, number,
 	).Scan(&id)
 	if err == sql.ErrNoRows {
 		return "", invalidInput("no ticket matches %q", ref)
@@ -832,6 +932,133 @@ func lookupTicketRef(q dbtx, ref string) (string, error) {
 		return "", fmt.Errorf("looking up ticket %q: %w", ref, err)
 	}
 	return id, nil
+}
+
+// ResolveTicketID resolves a caller-supplied ticket argument the same way a
+// dependsOn entry does: a ULID is a literal ticket ID, anything else is a
+// case-insensitive PREFIX-NUMBER display key. This is the single resolver
+// every CLI command and MCP tool that takes a ticket id calls before passing
+// it to an ID-based store method such as GetTicket or UpdateTicket. Reused
+// by resolveTicketRefs above, so dependsOn, and every other ticket-id entry
+// point, resolve references identically.
+func (s *Store) ResolveTicketID(ref string) (string, error) {
+	trimmed := strings.TrimSpace(ref)
+	if trimmed == "" {
+		return "", invalidInput("ticket id is required")
+	}
+	return lookupTicketRef(s.db, trimmed)
+}
+
+// resolveProjectByPrefix resolves a project prefix case-insensitively.
+// projects.prefix is UNIQUE under SQLite's default binary collation, so
+// "GLOW" and "glow" can both exist as separate projects; matching
+// case-insensitively can then find more than one row, and picking one
+// arbitrarily has previously deleted the wrong project (and its tickets).
+// An exact, case-sensitive match on prefix breaks the tie when there is
+// exactly one; anything left ambiguous is reported by name rather than
+// resolved by picking whichever row SQLite returns first. found is false,
+// with a nil error, only when nothing matches at all.
+func resolveProjectByPrefix(q dbtx, prefix string) (id string, found bool, err error) {
+	rows, err := q.Query("SELECT id, prefix FROM projects WHERE LOWER(prefix) = LOWER(?)", prefix)
+	if err != nil {
+		return "", false, fmt.Errorf("looking up project prefix %q: %w", prefix, err)
+	}
+	defer rows.Close()
+
+	type match struct{ id, prefix string }
+	var matches []match
+	for rows.Next() {
+		var m match
+		if err := rows.Scan(&m.id, &m.prefix); err != nil {
+			return "", false, fmt.Errorf("scanning project prefix %q: %w", prefix, err)
+		}
+		matches = append(matches, m)
+	}
+	if err := rows.Err(); err != nil {
+		return "", false, fmt.Errorf("looking up project prefix %q: %w", prefix, err)
+	}
+
+	switch len(matches) {
+	case 0:
+		return "", false, nil
+	case 1:
+		return matches[0].id, true, nil
+	}
+
+	var exact []match
+	for _, m := range matches {
+		if m.prefix == prefix {
+			exact = append(exact, m)
+		}
+	}
+	if len(exact) == 1 {
+		return exact[0].id, true, nil
+	}
+
+	names := make([]string, len(matches))
+	for i, m := range matches {
+		names[i] = m.prefix
+	}
+	return "", false, invalidInput("%q matches more than one project prefix (%s)", prefix, strings.Join(names, ", "))
+}
+
+// resolveProjectRef maps a project reference to its id: a ULID is looked up
+// as a literal project id, anything else is matched case-insensitively
+// against the project's prefix via resolveProjectByPrefix. It takes a dbtx
+// so it can run inside CreateTicket's transaction, resolving the project
+// before the ticket insert so an unknown project fails with a clear error
+// instead of the FOREIGN KEY constraint failure that insert would otherwise
+// surface verbatim.
+func resolveProjectRef(q dbtx, ref string) (string, error) {
+	trimmed := strings.TrimSpace(ref)
+	if trimmed == "" {
+		return "", invalidInput("project not found: %q", ref)
+	}
+
+	if isULID(trimmed) {
+		var id string
+		err := q.QueryRow("SELECT id FROM projects WHERE id = ?", trimmed).Scan(&id)
+		if err == sql.ErrNoRows {
+			return "", invalidInput("project not found: %q", trimmed)
+		}
+		if err != nil {
+			return "", fmt.Errorf("looking up project %q: %w", trimmed, err)
+		}
+		return id, nil
+	}
+
+	id, found, err := resolveProjectByPrefix(q, trimmed)
+	if err != nil {
+		return "", err
+	}
+	if !found {
+		return "", invalidInput("project not found: %q", trimmed)
+	}
+	return id, nil
+}
+
+// ResolveProjectRef resolves a project id or prefix (case-insensitive) to its
+// id. It is what CLI and MCP entry points call to accept a project prefix
+// wherever they take a project reference, such as creating a ticket or
+// filtering a list.
+func (s *Store) ResolveProjectRef(ref string) (string, error) {
+	return resolveProjectRef(s.db, ref)
+}
+
+// resolveProjectFilterID resolves a project id-or-prefix used to filter a
+// list. An unresolvable value reports ok=false rather than an error, the same
+// convention findLabelIDByName uses for an unresolvable label filter: a bad
+// filter value matches nothing instead of failing the whole list.
+func resolveProjectFilterID(q dbtx, ref string) (id string, ok bool, err error) {
+	id, err = resolveProjectRef(q, ref)
+	if err != nil {
+		var invalid *ErrInvalidInput
+		if errors.As(err, &invalid) {
+			return "", false, nil
+		}
+		return "", false, err
+	}
+	return id, true, nil
 }
 
 func (s *Store) ListLabels() ([]models.Label, error) {
