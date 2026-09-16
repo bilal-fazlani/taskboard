@@ -14,6 +14,7 @@ import TicketEditor from "../components/TicketEditor";
 import CreateTicketModal from "../components/CreateTicketModal";
 import FilterPanel from "../components/FilterPanel";
 import { useFilters } from "../hooks/useFilters";
+import { useLiveRefresh } from "../hooks/useLiveRefresh";
 import { matchesFilters, repoOptions } from "../lib/filters";
 import { STATUS_LABELS, STATUS_STYLES, isStatus, isDone } from "../lib/status";
 
@@ -77,6 +78,12 @@ export default function Tickets() {
   useEffect(() => {
     load();
   }, [load]);
+
+  // A live update only replaces the rows. `load` never sets `loading` back to
+  // true, so the table isn't torn down and its scroll position stays; the
+  // filters live in the URL and the open editor in its own state, so neither
+  // notices.
+  useLiveRefresh(load);
 
   // Filters apply client-side, so changing one never refetches.
   const filtered = useMemo(() => tickets.filter((t) => matchesFilters(t, filters)), [tickets, filters]);

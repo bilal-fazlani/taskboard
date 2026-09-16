@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Plus, Trash2, X, FolderKanban, ChevronDown, ChevronUp } from "lucide-react";
 import Markdown from "react-markdown";
 import { api, type Project } from "../api/client";
+import { useLiveRefresh } from "../hooks/useLiveRefresh";
 
 const DEFAULT_COLORS = [
   "#3b82f6",
@@ -183,7 +184,7 @@ export default function Projects() {
     });
   };
 
-  const load = async () => {
+  const load = useCallback(async () => {
     try {
       const data = await api.projects.list();
       setProjects(data || []);
@@ -191,11 +192,15 @@ export default function Projects() {
       setProjects([]);
     }
     setLoading(false);
-  };
+  }, []);
 
   useEffect(() => {
     load();
-  }, []);
+  }, [load]);
+
+  // The expanded descriptions and an open modal are state of their own, so a
+  // live update just replaces the list.
+  useLiveRefresh(load);
 
   const handleCreate = async (data: Partial<Project>) => {
     await api.projects.create(data);

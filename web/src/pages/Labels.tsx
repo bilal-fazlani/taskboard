@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Pencil, Trash2 } from "lucide-react";
 import { api, type Label } from "../api/client";
+import { useLiveRefresh } from "../hooks/useLiveRefresh";
 
 export default function Labels() {
   const [labels, setLabels] = useState<Label[]>([]);
@@ -15,10 +16,14 @@ export default function Labels() {
   // id is in flight, a re-entrant call for that same id is a no-op.
   const savingLabelId = useRef<string | null>(null);
 
-  const load = () => api.labels.list().then(setLabels).catch(() => setLabels([]));
+  const load = useCallback(() => api.labels.list().then(setLabels).catch(() => setLabels([])), []);
   useEffect(() => {
     load();
-  }, []);
+  }, [load]);
+
+  // Ticket counts move whenever a ticket's labels change, so this page follows
+  // the stream too. A rename in progress is separate state and survives.
+  useLiveRefresh(load);
 
   const create = async (e: React.FormEvent) => {
     e.preventDefault();

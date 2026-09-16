@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   NO_HIGHLIGHT,
+  forgetCard,
   highlightedCard,
   nextHighlight,
   type HighlightEvent,
@@ -113,5 +114,41 @@ describe("the ticket editor", () => {
 
   it("changes nothing when nothing was lit", () => {
     expect(nextHighlight(NO_HIGHLIGHT, { type: "editorOpened" })).toBe(NO_HIGHLIGHT);
+  });
+});
+
+// A live refetch can take the lit card off the graph while the pointer sits
+// still somewhere else. The page spots that through the chain finder and
+// forgets the card, so it doesn't light itself again if a later refetch brings
+// it back.
+describe("a card that has left the graph", () => {
+  it("stops being lit by the pointer", () => {
+    const state = replay([over("A")]);
+    expect(highlightedCard(forgetCard(state, "A"))).toBeNull();
+  });
+
+  it("stops being lit by a focus ring", () => {
+    const state = replay([tabbedTo("A")]);
+    expect(highlightedCard(forgetCard(state, "A"))).toBeNull();
+  });
+
+  it("is forgotten wherever it was held, so it cannot come back lit", () => {
+    // Tabbed to and hovered at once: forgetting it must clear both, otherwise
+    // the pointer's pick would fall back to the focus ring on the same card.
+    const state = replay([tabbedTo("A"), over("A")]);
+    const after = forgetCard(state, "A");
+    expect(after.pointer).toBeNull();
+    expect(after.focus).toBeNull();
+  });
+
+  it("hands the highlight to the focused card when only the hovered one went", () => {
+    const state = replay([tabbedTo("A"), over("B")]);
+    expect(highlightedCard(forgetCard(state, "B"))).toBe("A");
+  });
+
+  it("leaves the state alone, by identity, when it held no such card", () => {
+    const state = replay([tabbedTo("A"), over("B")]);
+    expect(forgetCard(state, "C")).toBe(state);
+    expect(forgetCard(NO_HIGHLIGHT, "A")).toBe(NO_HIGHLIGHT);
   });
 });

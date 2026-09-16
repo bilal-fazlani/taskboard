@@ -79,6 +79,18 @@ export function nextHighlight(state: HighlightState, event: HighlightEvent): Hig
   }
 }
 
+/**
+ * The state with `id` forgotten, wherever it was held. The page calls this for
+ * a card that is no longer on the graph — a live refetch can take the lit card
+ * away while the pointer sits still somewhere else — so that the card doesn't
+ * light its chains again the moment it comes back.
+ */
+export function forgetCard(state: HighlightState, id: string): HighlightState {
+  const pointer = state.pointer === id ? null : state.pointer;
+  const focus = state.focus === id ? null : state.focus;
+  return pointer === state.pointer && focus === state.focus ? state : { pointer, focus };
+}
+
 function withPointer(state: HighlightState, pointer: string | null): HighlightState {
   return state.pointer === pointer ? state : { pointer, focus: state.focus };
 }

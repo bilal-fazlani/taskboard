@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   DndContext,
   DragOverlay,
@@ -20,6 +20,7 @@ import CreateTicketModal from "../components/CreateTicketModal";
 import TicketCard from "../components/TicketCard";
 import FilterPanel from "../components/FilterPanel";
 import { useFilters } from "../hooks/useFilters";
+import { useLiveRefresh } from "../hooks/useLiveRefresh";
 import { matchesFilters, repoOptions } from "../lib/filters";
 import { STATUSES, STATUS_LABELS, STATUS_COLORS, isStatus, type Status } from "../lib/status";
 
@@ -112,12 +113,21 @@ export default function Board() {
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
   );
 
+  // Live updates and the user's own edits both refetch, so two GETs can be in
+  // flight at once and finish out of order. Only the newest one is allowed to
+  // set the columns; an older response is dropped rather than putting stale
+  // cards back on the board.
+  const loadSeqRef = useRef(0);
+
   const loadBoard = useCallback(async () => {
+    const seq = ++loadSeqRef.current;
     try {
       // Every project's tickets: the project is a filter, applied below.
       const board = await api.board.get();
+      if (seq !== loadSeqRef.current) return;
       setColumns(board.columns || []);
     } catch {
+      if (seq !== loadSeqRef.current) return;
       setColumns(
         STATUSES.map((status) => ({ status, tickets: [] }))
       );
@@ -131,6 +141,29 @@ export default function Board() {
 
   useEffect(() => {
     setLoading(true);
+    loadBoard();
+  }, [loadBoard]);
+
+  // A live update replaces the columns without touching the scroll position or
+  // the open editor, which keep their own state. A drag is the exception: it
+  // moves cards between columns optimistically, so swapping the columns under
+  // it would yank the card away. The refetch waits for the drag to end.
+  const draggingRef = useRef(false);
+  const missedRefreshRef = useRef(false);
+  const liveRefresh = useCallback(() => {
+    if (draggingRef.current) {
+      missedRefreshRef.current = true;
+      return;
+    }
+    loadBoard();
+  }, [loadBoard]);
+  useLiveRefresh(liveRefresh);
+
+  // Called when a drag ends, however it ended.
+  const endDrag = useCallback(() => {
+    draggingRef.current = false;
+    if (!missedRefreshRef.current) return;
+    missedRefreshRef.current = false;
     loadBoard();
   }, [loadBoard]);
 
@@ -161,6 +194,7 @@ export default function Board() {
 
   const handleDragStart = (event: DragStartEvent) => {
     const ticket = findTicketById(event.active.id);
+    draggingRef.current = true;
     setActiveTicket(ticket ?? null);
   };
 
@@ -194,19 +228,27 @@ export default function Board() {
     const { active, over } = event;
     setActiveTicket(null);
 
-    if (!over) return;
+    const targetStatus = over
+      ? isStatus(over.id)
+        ? over.id
+        : findColumnByTicketId(over.id)
+      : undefined;
 
-    const targetStatus = isStatus(over.id)
-      ? over.id
-      : findColumnByTicketId(over.id);
+    if (!targetStatus) {
+      endDrag();
+      return;
+    }
 
-    if (!targetStatus) return;
-
+    // The drag stays "in progress" until the move has been sent. Letting a
+    // deferred refetch go first would read the board from before the move and
+    // snap the card back to where it was dropped from.
     try {
       await api.tickets.move(active.id as string, targetStatus);
     } catch {
-      loadBoard();
+      // The optimistic columns are wrong now, so take the server's word.
+      missedRefreshRef.current = true;
     }
+    endDrag();
   };
 
   const handleTicketClick = (ticket: Ticket) => {
@@ -254,6 +296,10 @@ export default function Board() {
             onDragStart={handleDragStart}
             onDragOver={handleDragOver}
             onDragEnd={handleDragEnd}
+            onDragCancel={() => {
+              setActiveTicket(null);
+              endDrag();
+            }}
           >
             <div className="flex gap-6 h-full">
               {STATUSES.map((status) => (

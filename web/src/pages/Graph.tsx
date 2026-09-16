@@ -6,6 +6,7 @@ import TicketEditor from "../components/TicketEditor";
 import TicketCard from "../components/TicketCard";
 import FilterPanel from "../components/FilterPanel";
 import { useFilters } from "../hooks/useFilters";
+import { useLiveRefresh } from "../hooks/useLiveRefresh";
 import { matchesFilters, repoOptions } from "../lib/filters";
 import {
   chainFinder,
@@ -15,12 +16,12 @@ import {
   positionGraph,
   type ChainRole,
   type EdgeChainRole,
-  type GraphTopology,
   type PositionedColumn,
   type Size,
 } from "../lib/graphLayout";
 import {
   NO_HIGHLIGHT,
+  forgetCard,
   highlightedCard,
   nextHighlight,
   type HighlightEvent,
@@ -147,13 +148,11 @@ export default function Graph() {
   const [version, setVersion] = useState(0);
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
   const [sizes, setSizes] = useState(NO_SIZES);
-  // What the cards' pointer and focus events have lit, with the topology they
-  // were seen on. A refetch builds a new topology, which drops the highlight
-  // without an effect, so the graph never comes back dimmed.
-  const [picked, setPicked] = useState<{ topology: GraphTopology<Ticket> | null; state: HighlightState }>({
-    topology: null,
-    state: NO_HIGHLIGHT,
-  });
+  // What the cards' pointer and focus events have lit. It is not tied to the
+  // topology it was picked on: a refetch leaves the cards where they are, so a
+  // live update under a still pointer must not unlight the graph. Only a lit
+  // card that has left the graph is dropped, below.
+  const [picked, setPicked] = useState<HighlightState>(NO_HIGHLIGHT);
   // Pan and zoom: screen = translate + scale * canvas. `fitPending` is true
   // from first load until the fit has run.
   const [transform, setTransform] = useState<Transform>(IDENTITY);
@@ -181,8 +180,12 @@ export default function Graph() {
     };
   }, [version]);
 
-  const refresh = () => setVersion((v) => v + 1);
+  const refresh = useCallback(() => setVersion((v) => v + 1), []);
   const loading = fetched === null;
+
+  // Pan, zoom, the lit chain and an open editor all live outside `fetched`, so
+  // refetching leaves them as they are.
+  useLiveRefresh(refresh);
 
   // Once per fetched ticket set; measuring only repositions.
   const topology = useMemo(() => computeGraphTopology(fetched ?? []), [fetched]);
@@ -229,17 +232,18 @@ export default function Graph() {
   const repos = useMemo(() => repoOptions(fetched ?? [], filters.repo), [fetched, filters.repo]);
   // Adjacency once per topology; the chains once per pick, not per render.
   const findChains = useMemo(() => chainFinder(topology), [topology]);
-  const lit = picked.topology === topology ? highlightedCard(picked.state) : null;
+  const lit = highlightedCard(picked);
   const chains = useMemo(() => (lit === null ? null : findChains(lit)), [lit, findChains]);
+  // chainFinder answers null for an id that is not a node, which is how a
+  // refetch that removed the lit card shows up here. Forgetting it is state
+  // adjusted while rendering: React renders again before committing, so the
+  // graph is never painted with a pick it no longer holds, and the card can't
+  // light up again on its own if a later refetch brings it back.
+  if (lit !== null && chains === null) setPicked((prev) => forgetCard(prev, lit));
   // graphHighlight.ts holds the rule; the cards below only report what they
-  // see. A state it leaves unchanged leaves this state object alone, so
-  // pointermoves over the card already lit re-render nothing.
-  const onHighlight = (event: HighlightEvent) =>
-    setPicked((prev) => {
-      const from = prev.topology === topology ? prev.state : NO_HIGHLIGHT;
-      const state = nextHighlight(from, event);
-      return state === prev.state && prev.topology === topology ? prev : { topology, state };
-    });
+  // see. A state it leaves unchanged is returned by identity, so pointermoves
+  // over the card already lit re-render nothing.
+  const onHighlight = (event: HighlightEvent) => setPicked((prev) => nextHighlight(prev, event));
   // Opening the panel clears the highlight, since the pointer and focus it
   // came from are about to move.
   const openTicket = (ticket: Ticket) => {
