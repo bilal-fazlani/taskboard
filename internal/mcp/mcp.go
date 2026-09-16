@@ -569,7 +569,7 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 						Description: "Free-form repository identifiers, for example acme/billing-api. Matched exactly, so case matters.",
 						Items:       &jsonSchema{Type: "string"},
 					},
-					"dueDate": {Type: "string", Description: "Due date (YYYY-MM-DD)"},
+					"dueDate": {Type: "string", Description: "Due date (YYYY-MM-DD). Omit the field or pass null to leave the current due date unchanged; pass an empty string to clear it."},
 					"labels": {
 						Type:        "array",
 						Description: "Label names. Matched case-insensitively; unknown names are created automatically.",

@@ -424,9 +424,8 @@ func (s *Store) CreateTicket(req models.CreateTicketRequest) (*models.Ticket, er
 	}
 
 	if req.DueDate != nil {
-		parsed, err := time.Parse("2006-01-02", *req.DueDate)
-		if err == nil {
-			t.DueDate = &parsed
+		if t.DueDate, err = parseDueDate(*req.DueDate); err != nil {
+			return nil, err
 		}
 	}
 
@@ -525,9 +524,8 @@ func (s *Store) UpdateTicket(id string, req models.UpdateTicketRequest) (*models
 		t.Position = *req.Position
 	}
 	if req.DueDate != nil {
-		parsed, err := time.Parse("2006-01-02", *req.DueDate)
-		if err == nil {
-			t.DueDate = &parsed
+		if t.DueDate, err = parseDueDate(*req.DueDate); err != nil {
+			return nil, err
 		}
 	}
 	t.UpdatedAt = time.Now()
@@ -748,6 +746,23 @@ func (e *ErrInvalidInput) Error() string { return e.Msg }
 
 func invalidInput(format string, a ...any) error {
 	return &ErrInvalidInput{Msg: fmt.Sprintf(format, a...)}
+}
+
+// parseDueDate resolves a caller-supplied due date string, called only once
+// the caller's pointer is known to be non-nil (nil itself means "omitted",
+// handled by CreateTicket and UpdateTicket before this is reached). An empty
+// string is an explicit clear and parses to a nil *time.Time with no error;
+// anything else must match YYYY-MM-DD or the value is rejected with an
+// ErrInvalidInput (mapped to HTTP 400) rather than being silently dropped.
+func parseDueDate(raw string) (*time.Time, error) {
+	if raw == "" {
+		return nil, nil
+	}
+	parsed, err := time.Parse("2006-01-02", raw)
+	if err != nil {
+		return nil, invalidInput("due date %q is invalid: must be YYYY-MM-DD", raw)
+	}
+	return &parsed, nil
 }
 
 // resolveTicketRefs maps ticket IDs or display keys like "BILL-2" to ticket IDs.

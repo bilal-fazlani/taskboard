@@ -17,6 +17,18 @@ const SELECT =
 const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
+// The API returns dueDate as an RFC 3339 timestamp at midnight UTC (e.g.
+// "2026-10-01T00:00:00Z"), which an <input type="date"> rejects outright — it
+// wants a bare "yyyy-MM-dd". Slicing off everything from "T" onward reads the
+// calendar date exactly as the server stored it, with no Date object and so
+// no local-timezone conversion: parsing that timestamp with `new Date(...)`
+// and formatting it back would shift the displayed day for anyone west of
+// UTC. A plain "YYYY-MM-DD" (as CreateTicketModal sends and the API echoes
+// back) passes through unchanged since it has no "T" to slice at.
+function toDateInputValue(dueDate?: string): string {
+  return dueDate ? dueDate.slice(0, 10) : "";
+}
+
 // The ticket editor: a modal that fills the viewport minus a margin, so the
 // scrim stays visible around it. It closes from the header's close button,
 // from Escape, and from a click on the scrim; with unsaved edits each of those
@@ -43,9 +55,7 @@ export default function TicketEditor({
   const [description, setDescription] = useState(ticket.description);
   const [status, setStatus] = useState(ticket.status);
   const [priority, setPriority] = useState(ticket.priority);
-  // Known issue: an RFC 3339 dueDate does not fit a date input, so the input
-  // shows empty for it. Carried over unchanged from the old side panel.
-  const [dueDate, setDueDate] = useState(ticket.dueDate || "");
+  const [dueDate, setDueDate] = useState(toDateInputValue(ticket.dueDate));
   const [repos, setRepos] = useState<string[]>(ticket.repos || []);
   const [labels, setLabels] = useState<string[]>((ticket.labels || []).map((l) => l.name));
   const [dependsOn, setDependsOn] = useState(ticket.dependsOn || []);
@@ -192,7 +202,10 @@ export default function TicketEditor({
       description,
       status,
       priority,
-      dueDate: dueDate || undefined,
+      // Always sent, never omitted: an empty string is the API's explicit
+      // "clear the due date" (an omitted field means "leave it unchanged",
+      // which this save intentionally does not rely on for dueDate).
+      dueDate,
       repos,
       labels,
       dependsOn: dependsOn.map((d) => d.id),

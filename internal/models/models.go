@@ -123,9 +123,12 @@ type CreateTicketRequest struct {
 	Status      string   `json:"status,omitempty"`
 	Priority    string   `json:"priority,omitempty"`
 	Repos       []string `json:"repos,omitempty"`
-	DueDate     *string  `json:"dueDate,omitempty"`
-	Labels      []string `json:"labels,omitempty"`
-	DependsOn   []string `json:"dependsOn,omitempty"`
+	// DueDate follows the same "omitted vs explicit" contract as
+	// UpdateTicketRequest.DueDate below, though on create there is nothing to
+	// clear: a nil pointer and a pointer to "" both just mean no due date.
+	DueDate   *string  `json:"dueDate,omitempty"`
+	Labels    []string `json:"labels,omitempty"`
+	DependsOn []string `json:"dependsOn,omitempty"`
 }
 
 type UpdateTicketRequest struct {
@@ -134,10 +137,19 @@ type UpdateTicketRequest struct {
 	Status      *string  `json:"status,omitempty"`
 	Priority    *string  `json:"priority,omitempty"`
 	Repos       []string `json:"repos,omitempty"`
-	DueDate     *string  `json:"dueDate,omitempty"`
-	Position    *float64 `json:"position,omitempty"`
-	Labels      []string `json:"labels,omitempty"`
-	DependsOn   []string `json:"dependsOn,omitempty"`
+	// DueDate is nil when the caller omitted the field (or sent JSON null),
+	// meaning "leave the due date unchanged" — this is what makes it safe for
+	// a caller to send only the fields it actually edited, rather than the
+	// whole ticket, without ever touching a due date it didn't mean to touch.
+	// A non-nil pointer to "" is an explicit clear. A non-nil pointer to
+	// anything else must parse as YYYY-MM-DD or the store rejects the whole
+	// request with an ErrInvalidInput (HTTP 400) instead of silently dropping
+	// it. This applies identically whether the request came from the HTTP
+	// API, an MCP tool call, or the CLI.
+	DueDate   *string  `json:"dueDate,omitempty"`
+	Position  *float64 `json:"position,omitempty"`
+	Labels    []string `json:"labels,omitempty"`
+	DependsOn []string `json:"dependsOn,omitempty"`
 }
 
 type MoveTicketRequest struct {

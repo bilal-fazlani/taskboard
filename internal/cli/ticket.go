@@ -160,7 +160,8 @@ func ticketCommands() *cobra.Command {
 			"Omitting a flag leaves that field untouched. Passing --repo, --labels " +
 			"or --depends-on replaces the existing set, so passing one with an empty " +
 			"value clears it. --label is accepted as an alias for --labels, matching " +
-			"the spelling used by 'ticket create' and 'ticket list'.",
+			"the spelling used by 'ticket create' and 'ticket list'. --due follows the " +
+			"same rule: omit it to leave the due date alone, or pass --due=\"\" to clear it.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			store, err := openStore()
@@ -222,7 +223,7 @@ func ticketCommands() *cobra.Command {
 	updateCmd.Flags().StringVar(&updDescription, "description", "", "new description")
 	updateCmd.Flags().StringVar(&updStatus, "status", "", fmt.Sprintf("status (%s)", strings.Join(models.Statuses, "|")))
 	updateCmd.Flags().StringVar(&updPriority, "priority", "", "priority (urgent|high|medium|low)")
-	updateCmd.Flags().StringVar(&updDue, "due", "", "due date (YYYY-MM-DD)")
+	updateCmd.Flags().StringVar(&updDue, "due", "", "due date (YYYY-MM-DD); empty value clears it")
 	updateCmd.Flags().StringSliceVar(&updRepos, "repo", nil, "replace repos; comma-separated or repeated, empty value clears")
 	updateCmd.Flags().StringSliceVar(&updLabels, "labels", nil, "replace labels; comma-separated or repeated, empty value clears")
 	updateCmd.Flags().StringSliceVar(&updLabelAlias, "label", nil, "alias for --labels")

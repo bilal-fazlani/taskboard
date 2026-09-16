@@ -137,6 +137,37 @@ describe("TicketEditor as a modal", () => {
   });
 });
 
+describe("the due date input", () => {
+  it("shows an existing RFC 3339 due date with no day shift", () => {
+    // The API stores and returns due dates as midnight UTC. Formatting this
+    // through a Date object in a negative-offset timezone (anything west of
+    // UTC) would land on September 30th; slicing the string must not. This is
+    // the value an <input type="date"> itself validates against, so a wrong
+    // value here is the real guard against the RFC 3339 string reappearing
+    // unparsed.
+    renderEditor(makeTicket({ dueDate: "2026-10-01T00:00:00Z" }));
+    expect((screen.getByLabelText("Due Date") as HTMLInputElement).value).toBe("2026-10-01");
+  });
+
+  it("shows a plain YYYY-MM-DD due date unchanged, matching what CreateTicketModal sends", () => {
+    renderEditor(makeTicket({ dueDate: "2026-10-01" }));
+    expect((screen.getByLabelText("Due Date") as HTMLInputElement).value).toBe("2026-10-01");
+  });
+
+  it("shows an empty due date input when the ticket has none", () => {
+    renderEditor(makeTicket({ dueDate: undefined }));
+    expect((screen.getByLabelText("Due Date") as HTMLInputElement).value).toBe("");
+  });
+
+  it("re-sends an RFC 3339 due date as a plain date after an unrelated edit, matching the API's real shape", () => {
+    const { onUpdate } = renderEditor(makeTicket({ dueDate: "2026-10-01T00:00:00Z" }));
+    expect((screen.getByLabelText("Due Date") as HTMLInputElement).value).toBe("2026-10-01");
+    editTitle();
+    fireEvent.click(saveButton()!);
+    expect(onUpdate.mock.calls[0][1].dueDate).toBe("2026-10-01");
+  });
+});
+
 describe("closing", () => {
   it("closes from the close button", () => {
     const { onClose } = renderEditor();
@@ -385,11 +416,14 @@ describe("the dirty flag and saving", () => {
     expect(saveButton()).toBeNull();
   });
 
-  it("sends no due date once it is cleared", () => {
+  it("sends an explicit clear once the due date is cleared", () => {
     const { onUpdate } = renderEditor();
     fireEvent.change(screen.getByLabelText("Due Date"), { target: { value: "" } });
     fireEvent.click(saveButton()!);
-    expect(onUpdate.mock.calls[0][1].dueDate).toBeUndefined();
+    // "" is the API's explicit "clear the due date", distinct from omitting
+    // the field entirely (which the API reads as "leave it unchanged").
+    expect(onUpdate.mock.calls[0][1].dueDate).toBe("");
+    expect("dueDate" in onUpdate.mock.calls[0][1]).toBe(true);
   });
 
   const edits: [string, () => void, Record<string, unknown>][] = [

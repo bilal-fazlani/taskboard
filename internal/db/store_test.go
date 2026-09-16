@@ -340,6 +340,150 @@ func TestUpdateTicketWithEmptyReposClearsThem(t *testing.T) {
 	assertRepos(t, "after clearing", cleared.Repos, nil)
 }
 
+func TestCreateTicketParsesDueDate(t *testing.T) {
+	s := newTestStore(t)
+	p := seedProject(t, s, "Billing", "BILL")
+
+	due := "2026-10-01"
+	tk, err := s.CreateTicket(models.CreateTicketRequest{
+		ProjectID: p.ID, Title: "Invoice export", DueDate: &due,
+	})
+	if err != nil {
+		t.Fatalf("CreateTicket: %v", err)
+	}
+	if tk.DueDate == nil {
+		t.Fatal("DueDate = nil, want 2026-10-01")
+	}
+	if got := tk.DueDate.Format("2006-01-02"); got != due {
+		t.Fatalf("DueDate = %q, want %q", got, due)
+	}
+}
+
+// A malformed due date must reject the whole create rather than silently
+// storing the ticket without one.
+func TestCreateTicketRejectsMalformedDueDate(t *testing.T) {
+	s := newTestStore(t)
+	p := seedProject(t, s, "Billing", "BILL")
+
+	bad := "not-a-date"
+	_, err := s.CreateTicket(models.CreateTicketRequest{
+		ProjectID: p.ID, Title: "Invoice export", DueDate: &bad,
+	})
+	if err == nil {
+		t.Fatal("expected an error for a malformed due date")
+	}
+	if !errors.As(err, new(*ErrInvalidInput)) {
+		t.Fatalf("error %v should be an ErrInvalidInput so the HTTP layer returns 400", err)
+	}
+
+	tickets, err := s.ListTickets(models.TicketFilter{})
+	if err != nil {
+		t.Fatalf("ListTickets: %v", err)
+	}
+	if len(tickets) != 0 {
+		t.Fatalf("tickets = %d, want 0; a rejected create must leave nothing behind", len(tickets))
+	}
+}
+
+func TestUpdateTicketSetsDueDate(t *testing.T) {
+	s := newTestStore(t)
+	p := seedProject(t, s, "Billing", "BILL")
+	tk := seedTicket(t, s, p.ID, "Invoice export")
+
+	due := "2026-12-24"
+	updated, err := s.UpdateTicket(tk.ID, models.UpdateTicketRequest{DueDate: &due})
+	if err != nil {
+		t.Fatalf("UpdateTicket: %v", err)
+	}
+	if updated.DueDate == nil {
+		t.Fatal("DueDate = nil, want 2026-12-24")
+	}
+	if got := updated.DueDate.Format("2006-01-02"); got != due {
+		t.Fatalf("DueDate = %q, want %q", got, due)
+	}
+}
+
+// Omitting the field (a nil pointer) must leave an existing due date alone —
+// this is the "omitted field = unchanged" contract that lets a caller send
+// only the fields it actually edited, rather than the whole ticket.
+func TestUpdateTicketWithNilDueDateLeavesItAlone(t *testing.T) {
+	s := newTestStore(t)
+	p := seedProject(t, s, "Billing", "BILL")
+
+	due := "2026-10-01"
+	tk, err := s.CreateTicket(models.CreateTicketRequest{
+		ProjectID: p.ID, Title: "Invoice export", DueDate: &due,
+	})
+	if err != nil {
+		t.Fatalf("CreateTicket: %v", err)
+	}
+
+	title := "Renamed"
+	untouched, err := s.UpdateTicket(tk.ID, models.UpdateTicketRequest{Title: &title})
+	if err != nil {
+		t.Fatalf("UpdateTicket (title only): %v", err)
+	}
+	if untouched.DueDate == nil || untouched.DueDate.Format("2006-01-02") != due {
+		t.Fatalf("DueDate = %v, want unchanged at %q", untouched.DueDate, due)
+	}
+}
+
+// A pointer to an explicit empty string clears an existing due date, the
+// only way the editor (or any other caller) can remove one.
+func TestUpdateTicketWithEmptyDueDateClearsIt(t *testing.T) {
+	s := newTestStore(t)
+	p := seedProject(t, s, "Billing", "BILL")
+
+	due := "2026-10-01"
+	tk, err := s.CreateTicket(models.CreateTicketRequest{
+		ProjectID: p.ID, Title: "Invoice export", DueDate: &due,
+	})
+	if err != nil {
+		t.Fatalf("CreateTicket: %v", err)
+	}
+
+	empty := ""
+	cleared, err := s.UpdateTicket(tk.ID, models.UpdateTicketRequest{DueDate: &empty})
+	if err != nil {
+		t.Fatalf("UpdateTicket: %v", err)
+	}
+	if cleared.DueDate != nil {
+		t.Fatalf("DueDate = %v, want nil after clearing", cleared.DueDate)
+	}
+}
+
+// A malformed due date must reject the whole update rather than silently
+// leaving the previous value (or clearing it) in place.
+func TestUpdateTicketRejectsMalformedDueDate(t *testing.T) {
+	s := newTestStore(t)
+	p := seedProject(t, s, "Billing", "BILL")
+
+	due := "2026-10-01"
+	tk, err := s.CreateTicket(models.CreateTicketRequest{
+		ProjectID: p.ID, Title: "Invoice export", DueDate: &due,
+	})
+	if err != nil {
+		t.Fatalf("CreateTicket: %v", err)
+	}
+
+	bad := "10/01/2026"
+	_, err = s.UpdateTicket(tk.ID, models.UpdateTicketRequest{DueDate: &bad})
+	if err == nil {
+		t.Fatal("expected an error for a malformed due date")
+	}
+	if !errors.As(err, new(*ErrInvalidInput)) {
+		t.Fatalf("error %v should be an ErrInvalidInput so the HTTP layer returns 400", err)
+	}
+
+	got, err := s.GetTicket(tk.ID)
+	if err != nil {
+		t.Fatalf("GetTicket: %v", err)
+	}
+	if got.DueDate == nil || got.DueDate.Format("2006-01-02") != due {
+		t.Fatalf("DueDate = %v, want unchanged at %q after a rejected update", got.DueDate, due)
+	}
+}
+
 func TestListTicketsFilterByRepoMatchesOneOfSeveral(t *testing.T) {
 	s := newTestStore(t)
 	p := seedProject(t, s, "Billing", "BILL")
