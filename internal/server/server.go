@@ -16,7 +16,6 @@ import (
 	"github.com/creack/pty"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
-	"github.com/go-chi/cors"
 	"github.com/gorilla/websocket"
 	"github.com/tcarac/taskboard/internal/db"
 	"github.com/tcarac/taskboard/internal/models"
@@ -158,13 +157,33 @@ func (s *Server) serve(ctx context.Context, ln net.Listener, dbPath string, read
 func (s *Server) setupRoutes(webFS fs.FS) {
 	r := chi.NewRouter()
 	r.Use(middleware.Recoverer)
-	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   []string{"*"},
-		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		AllowedHeaders:   []string{"Accept", "Content-Type"},
-		AllowCredentials: false,
-		MaxAge:           300,
-	}))
+	// The API is meant to be reached only from the embedded web UI (same
+	// origin) or the Vite dev proxy (which forwards requests server-side, so
+	// the browser never sees the backend's origin directly). Two separate
+	// defenses replace the previous `Access-Control-Allow-Origin: *`, which
+	// let any site open in the same browser read and write the whole board:
+	//
+	//  1. No CORS middleware at all, so no Access-Control-Allow-Origin
+	//     header ever goes out. For a cross-origin GET (a "read", including
+	//     the /api/events stream) the request still runs, but the browser
+	//     refuses to let the requesting page's JavaScript read the
+	//     response.
+	//  2. rejectCrossOriginWrites, below, actively refuses a cross-origin
+	//     POST/PUT/PATCH/DELETE (a "write") with 403 before it reaches a
+	//     handler. This is load-bearing on its own: a browser only sends a
+	//     CORS preflight for a "non-simple" request, and a POST with
+	//     Content-Type text/plain, application/x-www-form-urlencoded or
+	//     multipart/form-data counts as simple, so it reaches the server
+	//     with no preflight and no CORS check at all — omitting CORS
+	//     headers alone does not stop it, since the handlers (see
+	//     decodeJSON) parse the body as JSON regardless of the Content-Type
+	//     header the browser actually sent.
+	//
+	// The CLI and MCP server talk to the store directly rather than over
+	// HTTP, and non-browser HTTP clients (curl, scripts) never send an
+	// Origin header and are unaffected by either defense, since CORS and
+	// Fetch Metadata are both enforced by the browser, not the server.
+	r.Use(rejectCrossOriginWrites)
 
 	r.Route("/api", func(r chi.Router) {
 		r.Route("/projects", func(r chi.Router) {
@@ -213,6 +232,58 @@ func (s *Server) setupRoutes(webFS fs.FS) {
 	}
 
 	s.router = r
+}
+
+// rejectCrossOriginWrites refuses a state-changing request (POST, PUT,
+// PATCH, DELETE) whose Origin header names an origin other than this
+// server's own, with 403. It exists because a browser only preflights a
+// "non-simple" cross-origin request; a POST with Content-Type text/plain,
+// application/x-www-form-urlencoded or multipart/form-data is simple, so it
+// is sent (and, without this check, executed) with no preflight and no
+// Access-Control-* headers involved at all.
+//
+// A request with no Origin header is treated as same-origin: only a browser
+// adds Origin to a request a page's script made, so its absence means
+// either a non-browser client (curl, a script) or a request this check does
+// not need to cover. The origin comparison is against this request's own
+// Host, in both the http and https forms, rather than a fixed origin, so it
+// keeps working across ports and across the embedded UI vs. the Vite dev
+// proxy without configuration.
+//
+// Sec-Fetch-Site is checked too, belt and braces: a browser that sends Fetch
+// Metadata headers reports "cross-site" or "same-site" (a different
+// subdomain of the same registrable domain — not "same-origin") on a
+// request the Origin check above would already refuse, so both values are
+// refused outright even if Origin were absent or, hypothetically, wrong.
+//
+// Known limitations: this check is self-referential — it compares Origin
+// against the request's own Host rather than against a fixed allowlist — so
+// DNS rebinding to 127.0.0.1 (a public DNS name that resolves to the
+// loopback address) still passes it, since both Origin and Host would name
+// that same rebound host. A fixed Host allowlist would close that gap but
+// would also break reaching the board through a tunnel or reverse proxy,
+// where the Host the server sees is neither localhost nor known in advance.
+// Both the http and https forms of Host are accepted on purpose for the
+// same reason: TLS may terminate upstream (a tunnel, a reverse proxy) so the
+// browser's Origin can be https even though this server only ever speaks
+// plain http.
+func rejectCrossOriginWrites(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
+			switch r.Header.Get("Sec-Fetch-Site") {
+			case "cross-site", "same-site":
+				writeError(w, http.StatusForbidden, "cross-origin request refused")
+				return
+			}
+			if origin := r.Header.Get("Origin"); origin != "" &&
+				origin != "http://"+r.Host && origin != "https://"+r.Host {
+				writeError(w, http.StatusForbidden, "cross-origin request refused")
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
