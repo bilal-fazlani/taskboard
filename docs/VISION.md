@@ -72,10 +72,16 @@ The status set grows from `todo`, `in_progress`, `done` to:
 | Status | Meaning | Who sets it | Where it shows |
 |---|---|---|---|
 | `todo` | Not started | anyone | graph |
-| `in_progress` | An agent is working | agent, when it claims | graph, animated |
+| `in_progress` | An agent is working | agent, when it claims | graph, blue, animated |
+| `agent_review` | Written, waiting on the review agent | the review agent, when it takes the ticket | graph, violet, animated |
 | `needs_input` | Agent asked a question | agent, via a request | graph, red, attention animation |
-| `needs_review` | Agent wants approval to proceed | agent, via a request | graph, yellow |
+| `needs_approval` | Agent wants approval to proceed | agent, via a request | graph, yellow |
 | `done` | Finished | agent, or the person | table below the graph |
+
+Blue and violet mean an agent holds the ticket; red and yellow mean it is
+waiting on a person. A ticket bouncing between an implementer agent and a
+review agent alternates between the first two, and the graph treats them as
+one group so the card does not move as it flips.
 
 The graph is status-agnostic by construction: `done` goes to the table,
 everything else is a card. Adding a status later must be a data change, not a
@@ -109,7 +115,7 @@ answer.
 - answer, answered at.
 - created at.
 
-Opening a request moves the ticket to `needs_input` or `needs_review`.
+Opening a request moves the ticket to `needs_input` or `needs_approval`.
 Answering it moves the ticket back to `in_progress` and stores the answer.
 The agent collects the answer and acts. The request stays on the ticket as
 history: every question the fleet asked and every answer the person gave is
@@ -142,7 +148,9 @@ Card states:
 
 - `in_progress`: a quiet, continuous animation (a pulse on the status dot or a
   slow gradient along the card edge) that says "someone is on this".
-- `needs_review`: yellow.
+- `agent_review`: the same animation in violet, so a ticket in review still
+  reads as an agent's, and which agent holds it reads at a glance.
+- `needs_approval`: yellow.
 - `needs_input`: red, with an attention animation that stops once the card is
   opened.
 - stale agent: the in-progress animation turns amber; the last-seen time is
@@ -252,7 +260,7 @@ the new product.
 
 ## Open questions
 
-- Should `needs_review` be a status, or should a review simply be an open
+- Should `needs_approval` be a status, or should a review simply be an open
   `approval` request on an `in_progress` ticket? The table above says status;
   the alternative keeps the status set smaller. Decide in the step 3 design.
 - Lease and staleness durations: fixed defaults, per-project, or per-agent?
