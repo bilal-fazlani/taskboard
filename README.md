@@ -21,7 +21,6 @@ Single binary. SQLite-backed. No Docker, no external database, no runtime depend
   - A filter bar shared by all three views narrows them by project, status, priority, label, repo and a text search over key, title and description. Filters live in the URL (for example `/kanban?project=ACP&status=todo&label=web`), so a filtered view can be bookmarked and switching views keeps them. Dependencies dims the tickets that don't match, keeping every arrow; Kanban and Table leave them out
 - **Projects** — organize work with customizable projects (icons, colors, prefixes)
 - **Tickets** — priority levels, due dates, labels, subtasks, dependencies, and one or more repos
-- **Embedded Terminal** — run AI coding agents (opencode, Claude Code) directly from the web UI
 - **CLI** — manage everything from the terminal
 - **MCP Server** — 20 tools for AI-native project management via Model Context Protocol
 - **Self-Hosted** — your data stays on your machine in a SQLite database
@@ -255,12 +254,6 @@ Here's what that looks like — a project and tickets created entirely by an AI 
 
 ![Table view](screenshots/tickets.png)
 
-### Embedded Terminal
-
-The web UI includes a built-in terminal. Click **Terminal** in the sidebar to open a full PTY shell with color support and a resizable panel. Run `opencode`, `claude`, or any command directly from the browser.
-
-![Embedded Terminal](screenshots/terminal.png)
-
 The agent shares the same SQLite database via MCP, so tickets it creates show up on your board immediately.
 
 ## Data Storage
@@ -308,7 +301,6 @@ taskboard --db /tmp/test.db clear -f
 | CLI          | cobra                                               |
 | HTTP         | chi                                                 |
 | Frontend     | React, TypeScript, Tailwind CSS v4, dnd-kit         |
-| Terminal     | xterm.js, gorilla/websocket, creack/pty             |
 | MCP          | JSON-RPC over stdio                                 |
 | Distribution | Single binary with embedded frontend via `embed.FS` |
 
