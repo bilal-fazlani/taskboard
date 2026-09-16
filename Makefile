@@ -43,6 +43,7 @@ clean:
 	rm -f $(BINARY)
 	rm -rf $(BUILD_DIR)/web
 	rm -rf web/dist web/node_modules
+	rm -rf $(dir $(LIVE_BINARY))
 
 # Stops every process using the live database, backs it up, installs the new
 # binary and starts the server. See scripts/install.sh.
