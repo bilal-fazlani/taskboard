@@ -11,6 +11,11 @@ export default defineConfig({
         // Defaults to the `make dev` backend so the dev UI never writes to the live board.
         target: `http://localhost:${process.env.TASKBOARD_API_PORT ?? '3011'}`,
         ws: true,
+        // Verified empirically: Vite's proxy (node-http-proxy) pipes the
+        // /api/events SSE response through as it arrives, with no extra
+        // buffering or compression here in dev mode, so `changed` events
+        // reach the browser on the backend's own watch interval (~250ms).
+        // No configure() hook is needed to disable buffering.
       },
     },
   },
