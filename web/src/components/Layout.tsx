@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
 import {
+  Workflow,
   LayoutDashboard,
   FolderKanban,
   Ticket,
@@ -11,7 +12,8 @@ import {
 import TerminalPanel from "./TerminalPanel";
 
 const navItems = [
-  { to: "/", icon: LayoutDashboard, label: "Board" },
+  { to: "/", icon: Workflow, label: "Home" },
+  { to: "/board", icon: LayoutDashboard, label: "Board" },
   { to: "/projects", icon: FolderKanban, label: "Projects" },
   { to: "/tickets", icon: Ticket, label: "Tickets" },
   { to: "/labels", icon: Tag, label: "Labels" },
@@ -66,7 +68,7 @@ export default function Layout() {
 
         <div className="px-5 py-3 border-t border-slate-800">
           <p className="text-[10px] text-slate-600 tracking-wider uppercase">
-            v0.6.0
+            v0.7.0
           </p>
         </div>
       </aside>

@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import Layout from "./components/Layout";
 import Board from "./pages/Board";
 import Graph from "./pages/Graph";
@@ -11,8 +11,10 @@ export default function App() {
     <BrowserRouter>
       <Routes>
         <Route element={<Layout />}>
-          <Route index element={<Board />} />
-          <Route path="graph" element={<Graph />} />
+          <Route index element={<Graph />} />
+          <Route path="board" element={<Board />} />
+          {/* The graph lived here before it became the home page. */}
+          <Route path="graph" element={<Navigate to="/" replace />} />
           <Route path="projects" element={<Projects />} />
           <Route path="tickets" element={<Tickets />} />
           <Route path="labels" element={<Labels />} />

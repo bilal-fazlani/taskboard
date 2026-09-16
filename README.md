@@ -1,10 +1,12 @@
 # Taskboard
 
-A local, self-hosted project management tool with a Kanban UI, full CLI, and a built-in [MCP](https://modelcontextprotocol.io/) server that lets AI assistants manage your projects, tickets, and labels directly.
+A local, self-hosted project management tool with a dependency graph for a home page, a Kanban board, a full CLI, and a built-in [MCP](https://modelcontextprotocol.io/) server that lets AI assistants manage your projects, tickets, and labels directly.
 
 Single binary. SQLite-backed. No Docker, no external database, no runtime dependencies.
 
 ## Screenshots
+
+![Dependency Graph](screenshots/graph.png)
 
 ![Kanban Board](screenshots/board.png)
 
@@ -12,7 +14,8 @@ Single binary. SQLite-backed. No Docker, no external database, no runtime depend
 
 ## Features
 
-- **Kanban Board** — drag-and-drop ticket management across Todo, In Progress, and Done columns
+- **Dependency Graph** — the home page puts open tickets in columns by how many steps of unfinished work block them, with arrows from each blocker and cycles drawn in red. Hover a card to trace what blocks it and what it blocks; pan, zoom or fit the graph to the screen
+- **Kanban Board** — drag-and-drop ticket management across Todo, In Progress, and Done columns, at `/board`
 - **Projects** — organize work with customizable projects (icons, colors, prefixes)
 - **Tickets** — priority levels, due dates, labels, subtasks, dependencies, and one or more repos
 - **Embedded Terminal** — run AI coding agents (opencode, Claude Code) directly from the web UI
