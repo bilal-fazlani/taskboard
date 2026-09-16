@@ -18,10 +18,11 @@ DEV_PORT ?= 3011
 # under .tmp/live, not as ./taskboard, and is deleted once used, so no marked
 # build is left lying around to be run by accident.
 LIVE_LDFLAGS := -X github.com/tcarac/taskboard/internal/livebuild.Mark=true
-LIVE_BINARY := .tmp/live/taskboard
+LIVE_DIR := .tmp/live
+LIVE_BINARY := $(LIVE_DIR)/taskboard
 
 define build-live
-	@mkdir -p $(dir $(LIVE_BINARY))
+	@mkdir -p $(LIVE_DIR)
 	go build -ldflags '$(LIVE_LDFLAGS)' -o $(LIVE_BINARY) ./$(BUILD_DIR)
 endef
 
@@ -36,6 +37,7 @@ dev:
 
 frontend:
 	cd web && npm install && npm run build
+	rm -rf $(BUILD_DIR)/web/dist
 	mkdir -p $(BUILD_DIR)/web/dist
 	cp -r web/dist/* $(BUILD_DIR)/web/dist/
 
@@ -43,7 +45,7 @@ clean:
 	rm -f $(BINARY)
 	rm -rf $(BUILD_DIR)/web
 	rm -rf web/dist web/node_modules
-	rm -rf $(dir $(LIVE_BINARY))
+	rm -rf $(LIVE_DIR)
 
 # Stops every process using the live database, backs it up, installs the new
 # binary and starts the server. See scripts/install.sh.
