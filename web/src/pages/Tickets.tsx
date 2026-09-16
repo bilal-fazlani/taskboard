@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Plus,
   ChevronRight,
@@ -9,12 +9,13 @@ import {
   Calendar,
   Ticket as TicketIcon,
 } from "lucide-react";
-import { api, type Ticket, type Project, type TicketWrite, type Label } from "../api/client";
+import { api, type Ticket, type Project, type TicketWrite } from "../api/client";
 import TicketEditor from "../components/TicketEditor";
 import CreateTicketModal from "../components/CreateTicketModal";
-import { STATUSES, STATUS_LABELS, STATUS_STYLES, isStatus, isDone } from "../lib/status";
-
-const PRIORITIES = ["urgent", "high", "medium", "low"];
+import FilterPanel from "../components/FilterPanel";
+import { useFilters } from "../hooks/useFilters";
+import { matchesFilters, repoOptions } from "../lib/filters";
+import { STATUS_LABELS, STATUS_STYLES, isStatus, isDone } from "../lib/status";
 
 const PRIORITY_CONFIG: Record<string, { style: string; icon: typeof ArrowUp }> = {
   urgent: { style: "bg-red-500/20 text-red-400", icon: AlertTriangle },
@@ -58,18 +59,12 @@ export default function Tickets() {
   const [showCreate, setShowCreate] = useState(false);
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
 
-  const [filterProject, setFilterProject] = useState("");
-  const [filterStatus, setFilterStatus] = useState("");
-  const [filterPriority, setFilterPriority] = useState("");
-  const [labelFilter, setLabelFilter] = useState("");
-  const [allLabels, setAllLabels] = useState<Label[]>([]);
+  const filterState = useFilters();
+  const { filters } = filterState;
 
   const load = useCallback(async () => {
     try {
-      const [t, p] = await Promise.all([
-        api.tickets.list({ label: labelFilter || undefined }),
-        api.projects.list(),
-      ]);
+      const [t, p] = await Promise.all([api.tickets.list(), api.projects.list()]);
       setTickets(t || []);
       setProjects(p || []);
     } catch {
@@ -77,22 +72,15 @@ export default function Tickets() {
       setProjects([]);
     }
     setLoading(false);
-  }, [labelFilter]);
+  }, []);
 
   useEffect(() => {
     load();
   }, [load]);
 
-  useEffect(() => {
-    api.labels.list().then(setAllLabels).catch(() => setAllLabels([]));
-  }, []);
-
-  const filtered = tickets.filter((t) => {
-    if (filterProject && t.projectId !== filterProject) return false;
-    if (filterStatus && t.status !== filterStatus) return false;
-    if (filterPriority && t.priority !== filterPriority) return false;
-    return true;
-  });
+  // Filters apply client-side, so changing one never refetches.
+  const filtered = useMemo(() => tickets.filter((t) => matchesFilters(t, filters)), [tickets, filters]);
+  const repos = useMemo(() => repoOptions(tickets, filters.repo), [tickets, filters.repo]);
 
   const handleCreate = async (data: TicketWrite) => {
     await api.tickets.create(data);
@@ -123,59 +111,12 @@ export default function Tickets() {
         </button>
       </header>
 
-      <div className="shrink-0 flex items-center gap-3 px-6 py-3 border-b border-slate-800/50">
-        <select
-          value={filterProject}
-          onChange={(e) => setFilterProject(e.target.value)}
-          className="bg-slate-800 text-xs text-slate-300 rounded-md border border-slate-700 px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
-        >
-          <option value="">All Projects</option>
-          {projects.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.icon} {p.name}
-            </option>
-          ))}
-        </select>
-        <select
-          value={filterStatus}
-          onChange={(e) => setFilterStatus(e.target.value)}
-          className="bg-slate-800 text-xs text-slate-300 rounded-md border border-slate-700 px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
-        >
-          <option value="">All Statuses</option>
-          {STATUSES.map((s) => (
-            <option key={s} value={s}>
-              {STATUS_LABELS[s]}
-            </option>
-          ))}
-        </select>
-        <select
-          value={filterPriority}
-          onChange={(e) => setFilterPriority(e.target.value)}
-          className="bg-slate-800 text-xs text-slate-300 rounded-md border border-slate-700 px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 capitalize"
-        >
-          <option value="">All Priorities</option>
-          {PRIORITIES.map((p) => (
-            <option key={p} value={p} className="capitalize">
-              {p}
-            </option>
-          ))}
-        </select>
-        <select
-          value={labelFilter}
-          onChange={(e) => setLabelFilter(e.target.value)}
-          className="bg-slate-800 border border-slate-700 rounded-md px-3 py-1.5 text-sm text-slate-300"
-        >
-          <option value="">All labels</option>
-          {allLabels.map((l) => (
-            <option key={l.id} value={l.name}>
-              {l.name}
-            </option>
-          ))}
-        </select>
-        <span className="text-xs text-slate-600 ml-auto">
-          {filtered.length} ticket{filtered.length !== 1 ? "s" : ""}
-        </span>
-      </div>
+      <FilterPanel
+        state={filterState}
+        projects={projects}
+        repos={repos}
+        count={loading ? undefined : { shown: filtered.length, total: tickets.length }}
+      />
 
       <div className="flex-1 overflow-auto">
         {loading ? (
@@ -185,7 +126,9 @@ export default function Tickets() {
         ) : filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-64 text-slate-600 space-y-3">
             <TicketIcon className="w-10 h-10 text-slate-700" />
-            <p className="text-sm">No tickets found</p>
+            <p className="text-sm">
+              {filterState.active && tickets.length > 0 ? "No tickets match the filters" : "No tickets found"}
+            </p>
           </div>
         ) : (
           <table className="w-full">

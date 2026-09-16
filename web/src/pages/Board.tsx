@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   DndContext,
   DragOverlay,
@@ -18,6 +18,9 @@ import { api, type Ticket, type Project, type BoardColumn, type TicketWrite } fr
 import TicketEditor from "../components/TicketEditor";
 import CreateTicketModal from "../components/CreateTicketModal";
 import TicketCard from "../components/TicketCard";
+import FilterPanel from "../components/FilterPanel";
+import { useFilters } from "../hooks/useFilters";
+import { matchesFilters, repoOptions } from "../lib/filters";
 import { STATUSES, STATUS_LABELS, STATUS_COLORS, isStatus, type Status } from "../lib/status";
 
 function DraggableTicket({
@@ -97,12 +100,13 @@ function Column({
 
 export default function Board() {
   const [projects, setProjects] = useState<Project[]>([]);
-  const [selectedProject, setSelectedProject] = useState<string>("");
   const [columns, setColumns] = useState<BoardColumn[]>([]);
   const [activeTicket, setActiveTicket] = useState<Ticket | null>(null);
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
   const [createForStatus, setCreateForStatus] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const filterState = useFilters();
+  const { filters } = filterState;
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
@@ -110,7 +114,8 @@ export default function Board() {
 
   const loadBoard = useCallback(async () => {
     try {
-      const board = await api.board.get(selectedProject || undefined);
+      // Every project's tickets: the project is a filter, applied below.
+      const board = await api.board.get();
       setColumns(board.columns || []);
     } catch {
       setColumns(
@@ -118,7 +123,7 @@ export default function Board() {
       );
     }
     setLoading(false);
-  }, [selectedProject]);
+  }, []);
 
   useEffect(() => {
     api.projects.list().then(setProjects).catch(() => setProjects([]));
@@ -129,8 +134,15 @@ export default function Board() {
     loadBoard();
   }, [loadBoard]);
 
+  // Non-matching tickets are left out. The ticket being dragged always stays,
+  // so moving it into a column its status filter excludes doesn't unmount it
+  // mid-drag.
+  const allTickets = useMemo(() => columns.flatMap((c) => c.tickets), [columns]);
+  const isShown = (ticket: Ticket) => ticket.id === activeTicket?.id || matchesFilters(ticket, filters);
   const getColumnTickets = (status: string) =>
-    columns.find((c) => c.status === status)?.tickets || [];
+    (columns.find((c) => c.status === status)?.tickets || []).filter(isShown);
+  const shownCount = allTickets.filter((t) => matchesFilters(t, filters)).length;
+  const repos = useMemo(() => repoOptions(allTickets, filters.repo), [allTickets, filters.repo]);
 
   const findTicketById = (id: UniqueIdentifier): Ticket | undefined => {
     for (const col of columns) {
@@ -221,19 +233,14 @@ export default function Board() {
     <div className="h-full flex flex-col">
       <header className="shrink-0 flex items-center justify-between px-6 h-14 border-b border-slate-800">
         <h1 className="text-lg font-semibold text-white">Kanban</h1>
-        <select
-          value={selectedProject}
-          onChange={(e) => setSelectedProject(e.target.value)}
-          className="bg-slate-800 text-sm text-slate-300 rounded-md border border-slate-700 px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
-        >
-          <option value="">All Projects</option>
-          {projects.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.icon} {p.name}
-            </option>
-          ))}
-        </select>
       </header>
+
+      <FilterPanel
+        state={filterState}
+        projects={projects}
+        repos={repos}
+        count={loading ? undefined : { shown: shownCount, total: allTickets.length }}
+      />
 
       <div className="flex-1 overflow-x-auto p-6">
         {loading ? (

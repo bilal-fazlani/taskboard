@@ -4,6 +4,9 @@ import { Maximize, ZoomIn, ZoomOut } from "lucide-react";
 import { api, type Ticket, type Project, type TicketWrite } from "../api/client";
 import TicketEditor from "../components/TicketEditor";
 import TicketCard from "../components/TicketCard";
+import FilterPanel from "../components/FilterPanel";
+import { useFilters } from "../hooks/useFilters";
+import { matchesFilters, repoOptions } from "../lib/filters";
 import {
   chainFinder,
   chainRole,
@@ -69,6 +72,10 @@ const CARD_CHAIN_CLASSES: Record<ChainRole, string> = {
   none: "opacity-22",
 };
 
+// A card or edge the filters don't match dims rather than leaving the graph,
+// so the arrows stay whole. A lit chain overrides this while it's shown.
+const FILTERED_OUT = "opacity-20";
+
 const EDGE_CHAIN_STYLES: Record<Exclude<EdgeChainRole, "none">, { className: string; marker: string }> = {
   upstream: { className: "stroke-amber-500", marker: UPSTREAM_ARROW },
   downstream: { className: "stroke-blue-400", marker: DOWNSTREAM_ARROW },
@@ -101,14 +108,17 @@ const FIT_INSETS: Insets = { top: FIT_PADDING, right: FIT_PADDING, bottom: 16 + 
 const TOOL_BUTTON =
   "flex items-center justify-center w-7 h-7 rounded text-slate-400 transition-colors hover:text-slate-200 hover:bg-slate-800 disabled:text-slate-700 disabled:hover:bg-transparent";
 
-function ColumnHeader({ column }: { column: PositionedColumn }) {
+// With filters set, a column's count is its matching cards out of all of them.
+function ColumnHeader({ column, matching }: { column: PositionedColumn; matching?: number }) {
   return (
     <div
       className="absolute top-0 flex items-baseline gap-2"
       style={{ left: column.x, width: column.width }}
     >
       <h3 className="text-xs font-medium text-slate-400">{columnHeading(column.index)}</h3>
-      <span className="text-[11px] text-slate-600">{column.count}</span>
+      <span className="text-[11px] text-slate-600">
+        {matching === undefined ? column.count : `${matching} of ${column.count}`}
+      </span>
     </div>
   );
 }
@@ -123,11 +133,10 @@ function Arrowhead({ id, className }: { id: string; className: string }) {
 
 export default function Graph() {
   const [projects, setProjects] = useState<Project[]>([]);
-  const [selectedProject, setSelectedProject] = useState<string>("");
-  // The tickets and the project selection they were fetched for. The page is
-  // loading while they belong to a different project than the selected one.
-  const [fetched, setFetched] = useState<{ projectId: string; tickets: Ticket[] } | null>(null);
-  // Bumped after an edit to refetch the same project selection.
+  // Every project's tickets, null until the first fetch. Filters, the
+  // project among them, only dim cards, so they never refetch.
+  const [fetched, setFetched] = useState<Ticket[] | null>(null);
+  // Bumped after an edit to refetch.
   const [version, setVersion] = useState(0);
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
   const [sizes, setSizes] = useState(NO_SIZES);
@@ -136,11 +145,13 @@ export default function Graph() {
   // the pick without an effect, so the graph never comes back dimmed.
   const [active, setActive] = useState<{ topology: GraphTopology<Ticket>; id: string } | null>(null);
   // Pan and zoom: screen = translate + scale * canvas. `fitPending` is true
-  // from first load, and from each project switch, until the fit has run.
+  // from first load until the fit has run.
   const [transform, setTransform] = useState<Transform>(IDENTITY);
   const [fitPending, setFitPending] = useState(true);
   const [viewportSize, setViewportSize] = useState<Extent | null>(null);
   const [panning, setPanning] = useState(false);
+  const filterState = useFilters();
+  const { filters } = filterState;
 
   useEffect(() => {
     api.projects.list().then(setProjects).catch(() => setProjects([]));
@@ -149,22 +160,22 @@ export default function Graph() {
   useEffect(() => {
     let cancelled = false;
     api.tickets
-      .list({ projectId: selectedProject || undefined })
+      .list()
       .then((tickets) => tickets || [])
       .catch((): Ticket[] => [])
       .then((tickets) => {
-        if (!cancelled) setFetched({ projectId: selectedProject, tickets });
+        if (!cancelled) setFetched(tickets);
       });
     return () => {
       cancelled = true;
     };
-  }, [selectedProject, version]);
+  }, [version]);
 
   const refresh = () => setVersion((v) => v + 1);
-  const loading = fetched === null || fetched.projectId !== selectedProject;
+  const loading = fetched === null;
 
   // Once per fetched ticket set; measuring only repositions.
-  const topology = useMemo(() => computeGraphTopology(fetched?.tickets ?? []), [fetched]);
+  const topology = useMemo(() => computeGraphTopology(fetched ?? []), [fetched]);
   // Back edges' vertical runs need room in the gaps and beside the outer
   // columns, which depends only on the topology. positionGraph takes one gap
   // for every column, so every gap gets the widest one any gap needs.
@@ -189,6 +200,23 @@ export default function Graph() {
     [topology, sizes, gutters],
   );
   const edges = useMemo(() => routeEdges(layout), [layout]);
+  // The ids of the cards the filters match, or null when no filter is set.
+  const matching = useMemo(
+    () =>
+      filterState.active
+        ? new Set(topology.nodes.filter((node) => matchesFilters(node.ticket, filters)).map((node) => node.id))
+        : null,
+    [filterState.active, topology, filters],
+  );
+  const dimmed = (id: string) => matching !== null && !matching.has(id);
+  // Matching cards per column, for the column headers.
+  const matchingPerColumn = useMemo(() => {
+    if (!matching) return null;
+    const counts = topology.columnCounts.map(() => 0);
+    for (const node of topology.nodes) if (matching.has(node.id)) counts[node.column]++;
+    return counts;
+  }, [matching, topology]);
+  const repos = useMemo(() => repoOptions(fetched ?? [], filters.repo), [fetched, filters.repo]);
   // Adjacency once per topology; the chains once per pick, not per render.
   const findChains = useMemo(() => chainFinder(topology), [topology]);
   const chains = useMemo(
@@ -270,15 +298,15 @@ export default function Graph() {
   const canvasWidth = layout.width + gutters.right;
   const canvasHeight = Math.max(layout.height, origin.y + CARD_SIZE.height);
 
-  // The view fits itself only on first load and on a project switch. Tickets
-  // appearing or leaving, the column count changing, cards resizing and the
-  // window resizing never move it; the Fit button does. A pending fit waits
-  // for the selection's tickets to arrive and form a graph, for every card to
-  // be measured, so it fits the real extent, and for the viewport's size. A
-  // selection with no open tickets keeps its fit pending, so the first graph
-  // it shows is fitted. The fit is state adjusted while rendering: React
-  // renders again before committing, so the unfitted graph is never painted,
-  // and the canvas stays invisible while a fit is pending.
+  // The view fits itself only on first load. Filters, tickets appearing or
+  // leaving, the column count changing, cards resizing and the window
+  // resizing never move it; the Fit button does. A pending fit waits for the
+  // tickets to arrive and form a graph, for every card to be measured, so it
+  // fits the real extent, and for the viewport's size. With no open tickets
+  // the fit stays pending, so the first graph shown is fitted. The fit is
+  // state adjusted while rendering: React renders again before committing, so
+  // the unfitted graph is never painted, and the canvas stays invisible while
+  // a fit is pending.
   const measured = useMemo(() => topology.nodes.every((node) => sizes.has(node.id)), [topology, sizes]);
   const hasGraph = !loading && topology.nodes.length > 0;
   if (fitPending && hasGraph && measured && viewportSize) {
@@ -442,25 +470,14 @@ export default function Graph() {
     <div className="h-full flex flex-col">
       <header className="shrink-0 flex items-center justify-between px-6 h-14 border-b border-slate-800">
         <h1 className="text-lg font-semibold text-white">Dependencies</h1>
-        <select
-          value={selectedProject}
-          onChange={(e) => {
-            setSelectedProject(e.target.value);
-            setFitPending(true);
-            // A card can measure differently under another selection (its
-            // hidden blocker line), so the fit waits for fresh sizes.
-            setSizes(NO_SIZES);
-          }}
-          className="bg-slate-800 text-sm text-slate-300 rounded-md border border-slate-700 px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
-        >
-          <option value="">All Projects</option>
-          {projects.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.icon} {p.name}
-            </option>
-          ))}
-        </select>
       </header>
+
+      <FilterPanel
+        state={filterState}
+        projects={projects}
+        repos={repos}
+        count={loading ? undefined : { shown: matching?.size ?? topology.nodes.length, total: topology.nodes.length }}
+      />
 
       <div
         ref={attachViewport}
@@ -518,7 +535,11 @@ export default function Graph() {
             }}
           >
             {layout.columns.map((column) => (
-              <ColumnHeader key={column.index} column={column} />
+              <ColumnHeader
+                key={column.index}
+                column={column}
+                matching={matchingPerColumn?.[column.index]}
+              />
             ))}
             {layout.columns.slice(1).map((column) => (
               <div
@@ -553,12 +574,13 @@ export default function Graph() {
                 const lit = role === "none" ? null : EDGE_CHAIN_STYLES[role];
                 const stroke = lit?.className ?? (edge.back ? "stroke-red-500" : "stroke-slate-600");
                 const marker = lit?.marker ?? (edge.back ? BACK_ARROW : ARROW);
+                const faded = chains ? !lit : dimmed(edge.from) || dimmed(edge.to);
                 return (
                   <path
                     key={`${edge.from}->${edge.to}`}
                     d={edge.d}
                     className={`fill-none transition-opacity duration-150 ${stroke} ${
-                      chains && !lit ? "opacity-12" : ""
+                      faded ? (chains ? "opacity-12" : FILTERED_OUT) : ""
                     }`}
                     strokeWidth={lit ? 2 : 1.5}
                     markerEnd={`url(#${marker})`}
@@ -588,7 +610,7 @@ export default function Graph() {
                 onPointerMove={() => highlight(node.id)}
                 onFocus={() => highlight(node.id)}
                 className={`absolute w-64 rounded-lg transition-[opacity,box-shadow] duration-150 ${
-                  chains ? CARD_CHAIN_CLASSES[chainRole(chains, node.id)] : ""
+                  chains ? CARD_CHAIN_CLASSES[chainRole(chains, node.id)] : dimmed(node.id) ? FILTERED_OUT : ""
                 }`}
                 style={{ left: node.x, top: node.y }}
               >

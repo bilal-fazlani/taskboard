@@ -1,13 +1,15 @@
 import { useState } from "react";
-import { NavLink, Outlet } from "react-router-dom";
+import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { Zap, TerminalSquare } from "lucide-react";
 import TerminalPanel from "./TerminalPanel";
 import { VIEWS_GROUP_LABEL, otherItems, viewItems, type NavItem } from "../lib/navigation";
+import { filterSearch } from "../lib/filters";
 
-function NavEntry({ item }: { item: NavItem }) {
+// `search` is the query string the link carries; the views pass on the filters.
+function NavEntry({ item, search = "" }: { item: NavItem; search?: string }) {
   return (
     <NavLink
-      to={item.to}
+      to={{ pathname: item.to, search }}
       end={item.to === "/"}
       className={({ isActive }) =>
         `flex items-center gap-2.5 px-2.5 py-2 rounded-md text-sm transition-colors ${
@@ -25,6 +27,7 @@ function NavEntry({ item }: { item: NavItem }) {
 
 export default function Layout() {
   const [terminalOpen, setTerminalOpen] = useState(false);
+  const viewSearch = filterSearch(useLocation().search);
 
   return (
     <div className="flex h-screen overflow-hidden">
@@ -46,7 +49,7 @@ export default function Layout() {
             </p>
             <div className="space-y-0.5">
               {viewItems.map((item) => (
-                <NavEntry key={item.to} item={item} />
+                <NavEntry key={item.to} item={item} search={viewSearch} />
               ))}
             </div>
           </div>

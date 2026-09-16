@@ -18,6 +18,7 @@ Single binary. SQLite-backed. No Docker, no external database, no runtime depend
   - **Dependencies**, the home page at `/`, puts open tickets in columns by how many steps of unfinished work block them, with arrows from each blocker and cycles drawn in red. Hover a card to trace what blocks it and what it blocks; pan, zoom or fit the graph to the screen
   - **Kanban**, at `/kanban`, is drag-and-drop ticket management across Todo, In Progress, and Done columns
   - **Table**, at `/table`, lists tickets with their labels, repos, status, priority and due date
+  - A filter bar shared by all three views narrows them by project, status, priority, label, repo and a text search over key, title and description. Filters live in the URL (for example `/kanban?project=ACP&status=todo&label=web`), so a filtered view can be bookmarked and switching views keeps them. Dependencies dims the tickets that don't match, keeping every arrow; Kanban and Table leave them out
 - **Projects** — organize work with customizable projects (icons, colors, prefixes)
 - **Tickets** — priority levels, due dates, labels, subtasks, dependencies, and one or more repos
 - **Embedded Terminal** — run AI coding agents (opencode, Claude Code) directly from the web UI

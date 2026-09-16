@@ -91,3 +91,51 @@ describe("views navigation", () => {
     }
   });
 });
+
+// The select with the given accessible name, and the value it shows selected.
+function selectedOption(html: string, name: string): string | undefined {
+  const select = new RegExp(`<select aria-label="${name}"[^>]*>(.*?)</select>`).exec(html);
+  if (!select) return undefined;
+  return /<option value="([^"]*)" selected="">/.exec(select[1])?.[1];
+}
+
+describe("filter panel", () => {
+  const views = viewItems.map((i) => [i.label, i.to]);
+
+  it.each(views)("renders on %s with every filter and no other project selector", (_name, path) => {
+    const html = render(path);
+    expect(html).toContain('role="search"');
+    for (const name of ["Project", "Status", "Priority", "Label", "Repo"]) {
+      expect(selectedOption(html, name), name).toBe("");
+    }
+    expect(html).toContain('<input type="search" aria-label="Search"');
+    expect(html.match(/<select/g)).toHaveLength(5);
+    expect(html).not.toContain("All Projects");
+    // Nothing to clear.
+    expect(html).not.toContain("Clear filters");
+  });
+
+  it.each(views)("reads its state from the URL on %s", (_name, path) => {
+    const html = render(`${path}?project=ACP&status=in_progress&priority=high&label=web&repo=a%2Fb&q=live+%26+hook&ticket=ACP-7`);
+    expect(selectedOption(html, "Project")).toBe("ACP");
+    expect(selectedOption(html, "Status")).toBe("in_progress");
+    expect(selectedOption(html, "Priority")).toBe("high");
+    expect(selectedOption(html, "Label")).toBe("web");
+    expect(selectedOption(html, "Repo")).toBe("a/b");
+    expect(html).toMatch(/aria-label="Search"[^>]*value="live &amp; hook"/);
+    expect(html).toContain("Clear filters");
+  });
+
+  it("carries the filters, and only the filters, to the other views", () => {
+    const html = render("/kanban?ticket=ACP-7&label=web&project=ACP");
+    expect(viewsGroupLinks(html)).toEqual([
+      "Dependencies /?project=ACP&amp;label=web",
+      "Kanban /kanban?project=ACP&amp;label=web",
+      "Table /table?project=ACP&amp;label=web",
+    ]);
+    expect(activeLink(html)).toBe("Kanban");
+    // Projects and Labels have no filters to carry.
+    expect(html).toMatch(/href="\/projects"/);
+    expect(html).toMatch(/href="\/labels"/);
+  });
+});
