@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { latestSearchParams } from "../lib/latestSearch";
 import {
@@ -40,6 +40,12 @@ export interface TicketParamState<T> {
  * parameter is left alone — so the editor appears by itself once a load
  * finishes.
  *
+ * A ticket that opened and then left a later load is a different matter: it
+ * was deleted, so the parameter is dropped rather than left naming nothing,
+ * and the editor closes with it (asking first, if it holds unsaved edits).
+ * Only a reference that resolved here is dropped, so neither a first load nor
+ * a refetch that failed and kept the previous list can take a parameter away.
+ *
  * History: opening pushes an entry, so the browser's Back button closes the
  * editor, and closing from inside the editor pops that entry rather than
  * replacing it, so opening and closing leaves the history as it was and Back
@@ -74,6 +80,9 @@ export function useTicketParam<T extends TicketIdentity>(
   // so it can ask about unsaved edits first. Derived during render rather than
   // in an effect, so a close with nothing to lose unmounts the editor in the
   // same commit and never paints a frame of an editor on its way out.
+  // It is let go only once the editor reports nothing unsaved, which is the
+  // whole point: a save that failed leaves the edits unsaved and the editor
+  // dirty, so the ticket is still held and nothing unmounts underneath it.
   const [held, setHeld] = useState<T | null>(null);
   if (fromUrl) {
     if (held?.id !== fromUrl.id) setHeld(fromUrl);
@@ -81,12 +90,37 @@ export function useTicketParam<T extends TicketIdentity>(
     setHeld(null);
   }
 
+  // A held ticket the user chose to keep editing although it is gone: there
+  // is no parameter worth putting back for it, so the request to close is
+  // answered here instead.
+  const [keptGone, setKeptGone] = useState<string | null>(null);
+
   const selected = fromUrl ?? held;
-  const closeRequested = fromUrl === null && held !== null;
+  const closeRequested = fromUrl === null && held !== null && keptGone !== held.id;
+
+  // The reference the editor last opened on. A reference that resolved here
+  // and then stopped naming a loaded ticket names a deleted one, which is
+  // what tells this apart from a key that never named anything: that one is
+  // left in the URL, this one goes.
+  const [resolvedRef, setResolvedRef] = useState("");
+  if (fromUrl && resolvedRef !== ref) setResolvedRef(ref);
+  const vanished = ref !== "" && fromUrl === null && resolvedRef === ref;
+
+  useEffect(() => {
+    // Replaces rather than pops: the ticket went without the user asking, so
+    // the view they are on stays where it is.
+    if (vanished) setParams(withoutTicket(latestSearchParams(params)), { replace: true });
+  }, [vanished, params, setParams]);
+
+  // Whether the ticket the editor holds has left the loaded tickets, which is
+  // how a deletion elsewhere reaches this hook. A list that has not loaded
+  // says nothing about it.
+  const gone = held !== null && tickets != null && !tickets.some((t) => t.id === held.id);
 
   const open = useCallback(
     (ticket: TicketIdentity) => {
       setDirty(false);
+      setKeptGone(null);
       pushedRef.current = true;
       setParams(withTicket(latestSearchParams(params), ticket));
     },
@@ -95,6 +129,7 @@ export function useTicketParam<T extends TicketIdentity>(
 
   const close = useCallback(() => {
     setDirty(false);
+    setKeptGone(null);
     setHeld(null);
     // A close the URL asked for has already dropped the parameter, and the
     // entry opening pushed went with it.
@@ -111,15 +146,23 @@ export function useTicketParam<T extends TicketIdentity>(
   }, [params, setParams, navigate]);
 
   const cancelClose = useCallback(() => {
+    if (!held) return;
+    // Nothing to put back when the ticket itself was deleted: a parameter
+    // naming it would only be dropped again, and the question would come
+    // straight back. The editor stays open on the edits instead, until the
+    // user saves them elsewhere or lets them go.
+    if (gone) {
+      setKeptGone(held.id);
+      return;
+    }
     // Back popped the entry opening pushed, so push it again rather than
     // replacing what Back landed on: a second Back then drops the parameter
     // and asks again, instead of leaving the app with the edits unsaved and
     // nothing asked. Closing later pops this entry as usual, so the history
     // does not grow.
-    if (!held) return;
     pushedRef.current = true;
     setParams(withTicket(latestSearchParams(params), held));
-  }, [held, params, setParams]);
+  }, [held, gone, params, setParams]);
 
   const url = useMemo(
     () =>
