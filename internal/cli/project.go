@@ -69,15 +69,19 @@ func projectCommands() *cobra.Command {
 	createCmd.Flags().StringVar(&color, "color", "#3B82F6", "hex color")
 
 	deleteCmd := &cobra.Command{
-		Use:   "delete [id]",
-		Short: "Delete a project",
+		Use:   "delete [id-or-prefix]",
+		Short: "Delete a project, by id or prefix (case-insensitive)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			store, err := openStore()
 			if err != nil {
 				return err
 			}
-			if err := store.DeleteProject(args[0]); err != nil {
+			projectID, err := store.ResolveProjectRef(args[0])
+			if err != nil {
+				return err
+			}
+			if err := store.DeleteProject(projectID); err != nil {
 				return err
 			}
 			fmt.Println("Project deleted.")

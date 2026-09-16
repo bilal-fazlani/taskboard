@@ -64,7 +64,7 @@ func ticketCommands() *cobra.Command {
 			return nil
 		},
 	}
-	listCmd.Flags().StringVar(&projectID, "project", "", "filter by project ID")
+	listCmd.Flags().StringVar(&projectID, "project", "", "filter by project ID or prefix (case-insensitive); an unknown one returns no tickets rather than an error")
 	listCmd.Flags().StringVar(&status, "status", "", fmt.Sprintf("filter by status (%s)", strings.Join(models.Statuses, "|")))
 	listCmd.Flags().StringVar(&priority, "priority", "", "filter by priority (urgent|high|medium|low)")
 	listCmd.Flags().StringVar(&listRepo, "repo", "", "filter by repo")
@@ -100,7 +100,7 @@ func ticketCommands() *cobra.Command {
 			return nil
 		},
 	}
-	createCmd.Flags().StringVar(&createProject, "project", "", "project ID (required)")
+	createCmd.Flags().StringVar(&createProject, "project", "", "project ID or prefix (case-insensitive, required)")
 	createCmd.MarkFlagRequired("project")
 	createCmd.Flags().String("title", "", "ticket title (required)")
 	createCmd.MarkFlagRequired("title")
@@ -112,15 +112,19 @@ func ticketCommands() *cobra.Command {
 
 	var moveStatus string
 	moveCmd := &cobra.Command{
-		Use:   "move [id]",
-		Short: "Move ticket to different status",
+		Use:   "move [id-or-key]",
+		Short: "Move ticket to different status, by id or display key (e.g. BILL-2)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			store, err := openStore()
 			if err != nil {
 				return err
 			}
-			t, err := store.MoveTicket(args[0], models.MoveTicketRequest{Status: moveStatus})
+			ticketID, err := store.ResolveTicketID(args[0])
+			if err != nil {
+				return err
+			}
+			t, err := store.MoveTicket(ticketID, models.MoveTicketRequest{Status: moveStatus})
 			if err != nil {
 				return err
 			}
@@ -135,15 +139,19 @@ func ticketCommands() *cobra.Command {
 	moveCmd.MarkFlagRequired("status")
 
 	deleteCmd := &cobra.Command{
-		Use:   "delete [id]",
-		Short: "Delete a ticket",
+		Use:   "delete [id-or-key]",
+		Short: "Delete a ticket, by id or display key (e.g. BILL-2)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			store, err := openStore()
 			if err != nil {
 				return err
 			}
-			if err := store.DeleteTicket(args[0]); err != nil {
+			ticketID, err := store.ResolveTicketID(args[0])
+			if err != nil {
+				return err
+			}
+			if err := store.DeleteTicket(ticketID); err != nil {
 				return err
 			}
 			fmt.Println("Ticket deleted.")
@@ -156,9 +164,9 @@ func ticketCommands() *cobra.Command {
 		updRepos, updLabels, updLabelAlias, updDependsOn         []string
 	)
 	updateCmd := &cobra.Command{
-		Use:   "update [id]",
-		Short: "Update ticket fields",
-		Long: "Update ticket fields.\n\n" +
+		Use:   "update [id-or-key]",
+		Short: "Update ticket fields, by id or display key (e.g. BILL-2)",
+		Long: "Update ticket fields, identified by id or display key (e.g. BILL-2, case-insensitive).\n\n" +
 			"Omitting a flag leaves that field untouched. Passing --repo, --labels " +
 			"or --depends-on replaces the existing set, so passing one with an empty " +
 			"value clears it. --label is accepted as an alias for --labels, matching " +
@@ -167,6 +175,10 @@ func ticketCommands() *cobra.Command {
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			store, err := openStore()
+			if err != nil {
+				return err
+			}
+			ticketID, err := store.ResolveTicketID(args[0])
 			if err != nil {
 				return err
 			}
@@ -210,7 +222,7 @@ func ticketCommands() *cobra.Command {
 				}
 			}
 
-			t, err := store.UpdateTicket(args[0], req)
+			t, err := store.UpdateTicket(ticketID, req)
 			if err != nil {
 				return err
 			}
