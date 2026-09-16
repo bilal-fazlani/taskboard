@@ -127,6 +127,17 @@ describe("TicketEditor as a modal", () => {
     await waitFor(() => expect(mockApi.tickets.get).toHaveBeenCalledWith("t1"));
   });
 
+  it("offers every status in its dropdown and badges agent_review in violet", async () => {
+    renderEditor(makeTicket({ status: "agent_review" }));
+    const status = screen.getByLabelText("Status") as HTMLSelectElement;
+    expect([...status.options].map((o) => o.value)).toEqual(["todo", "in_progress", "agent_review", "done"]);
+    expect(status.value).toBe("agent_review");
+    const badge = screen.getByTestId("ticket-editor-status");
+    expect(badge.textContent).toBe("Agent Review");
+    expect(badge.className).toMatch(/\bbg-violet-500\/20\b/);
+    await waitFor(() => expect(mockApi.tickets.get).toHaveBeenCalledWith("t1"));
+  });
+
   it("puts content in the first column and fields in the second", () => {
     renderEditor();
     const body = screen.getByTestId("ticket-editor-body");

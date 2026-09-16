@@ -204,4 +204,17 @@ describe("filter panel dropdowns", () => {
     expect(select("Label").value).toBe("gone");
     expect(select("Repo").value).toBe("a/b");
   });
+
+  it("offers every status, agent_review included, in board column order", async () => {
+    await mount("/?status=agent_review", true);
+    expect([...select("Status").options].map((o) => o.value)).toEqual([
+      "",
+      "todo",
+      "in_progress",
+      "agent_review",
+      "done",
+    ]);
+    expect([...select("Status").options].map((o) => o.textContent)).toContain("Agent Review");
+    expect(select("Status").value).toBe("agent_review");
+  });
 });
