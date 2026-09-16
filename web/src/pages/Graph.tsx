@@ -5,9 +5,11 @@ import { api, type Ticket, type Project, type TicketWrite } from "../api/client"
 import TicketEditor from "../components/TicketEditor";
 import TicketCard from "../components/TicketCard";
 import FilterPanel from "../components/FilterPanel";
+import { useChangeGlow } from "../hooks/useChangeGlow";
 import { useFilters } from "../hooks/useFilters";
 import { useLiveRefresh } from "../hooks/useLiveRefresh";
 import { useTicketParam } from "../hooks/useTicketParam";
+import { CHANGE_GLOW_CLASS } from "../lib/changeGlow";
 import { matchesFilters, repoOptions } from "../lib/filters";
 import {
   chainFinder,
@@ -227,6 +229,11 @@ export default function Graph() {
     [topology, sizes, gutters],
   );
   const edges = useMemo(() => routeEdges(layout), [layout]);
+  // Cards a live refresh just changed or brought in glow for two seconds.
+  // Only the cards on the graph are watched, so a ticket that left for done
+  // is simply gone from the next fetch and never flashes on its way out.
+  const onGraph = useMemo(() => topology.nodes.map((node) => node.ticket), [topology]);
+  const glowing = useChangeGlow(loading ? null : onGraph);
   // The ids of the cards the filters match, or null when no filter is set.
   const matching = useMemo(
     () =>
@@ -642,7 +649,7 @@ export default function Graph() {
                 onBlur={() => onHighlight({ type: "cardBlurred", id: node.id })}
                 className={`absolute w-64 rounded-lg transition-[opacity,box-shadow] duration-150 ${
                   chains ? CARD_CHAIN_CLASSES[chainRole(chains, node.id)] : dimmed(node.id) ? FILTERED_OUT : ""
-                }`}
+                } ${glowing.has(node.id) ? CHANGE_GLOW_CLASS : ""}`}
                 style={{ left: node.x, top: node.y }}
               >
                 <TicketCard
