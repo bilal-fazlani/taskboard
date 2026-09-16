@@ -20,7 +20,7 @@ Single binary. SQLite-backed. No Docker, no external database, no runtime depend
 - **Tickets** — priority levels, due dates, labels, subtasks, dependencies, and one or more repos
 - **Embedded Terminal** — run AI coding agents (opencode, Claude Code) directly from the web UI
 - **CLI** — manage everything from the terminal
-- **MCP Server** — 17 tools for AI-native project management via Model Context Protocol
+- **MCP Server** — 20 tools for AI-native project management via Model Context Protocol
 - **Self-Hosted** — your data stays on your machine in a SQLite database
 - **Single Binary** — one `brew install` and you're running
 
@@ -141,7 +141,7 @@ ticket whose dependencies are unfinished can still be moved to any status.
 The reverse direction is derived, not stored. When `BILL-5` depends on `BILL-2`,
 `BILL-2` lists `BILL-5` under *blocks* automatically, and that list is read-only.
 
-#### Available MCP Tools (17)
+#### Available MCP Tools (20)
 
 | Tool                    | Description                                      |
 | ----------------------- | ------------------------------------------------ |
@@ -153,6 +153,9 @@ The reverse direction is derived, not stored. When `BILL-5` depends on `BILL-2`,
 | `delete_project`        | Delete a project and all its tickets             |
 | **Labels**              |                                                  |
 | `list_labels`           | List all labels with ticket counts               |
+| `create_label`          | Create a label with a name and color             |
+| `update_label`          | Rename or recolor a label, by id or exact name   |
+| `delete_label`          | Delete a label and report tickets detached       |
 | **Tickets**             |                                                  |
 | `list_tickets`          | List tickets with filters                        |
 | `get_ticket`            | Get ticket details with subtasks and labels      |

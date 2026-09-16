@@ -638,7 +638,10 @@ func (s *Store) GetBoard(projectID string) (*models.Board, error) {
 	return board, nil
 }
 
-const defaultLabelColor = "#6B7280"
+// DefaultLabelColor is used when a label is created without an explicit
+// color, both by resolveLabelNames' implicit creation and by callers (such
+// as the MCP create_label tool) that want the same fallback.
+const DefaultLabelColor = "#6B7280"
 
 type labelRef struct {
 	id   string
@@ -719,7 +722,7 @@ func resolveLabelNames(q dbtx, names []string) ([]string, error) {
 			id = newID()
 			if _, err := q.Exec(
 				"INSERT INTO labels (id, name, color) VALUES (?, ?, ?)",
-				id, trimmed, defaultLabelColor,
+				id, trimmed, DefaultLabelColor,
 			); err != nil {
 				return nil, fmt.Errorf("creating label %q: %w", trimmed, err)
 			}
@@ -858,22 +861,34 @@ func nameTakenBy(q dbtx, name, exceptID string) (bool, error) {
 	return false, nil
 }
 
+// CreateLabel stores the name trimmed, so a caller-supplied "  pad  " neither
+// splits from an existing "pad" label (nameTakenBy folds on the trimmed form)
+// nor becomes unresolvable by its own trimmed name afterward. A name that is
+// blank after trimming is rejected, matching UpdateLabel.
 func (s *Store) CreateLabel(req models.CreateLabelRequest) (*models.Label, error) {
-	taken, err := nameTakenBy(s.db, req.Name, "")
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		return nil, invalidInput("name cannot be blank")
+	}
+	taken, err := nameTakenBy(s.db, name, "")
 	if err != nil {
 		return nil, err
 	}
 	if taken {
-		return nil, invalidInput("a label named %q already exists", strings.TrimSpace(req.Name))
+		return nil, invalidInput("a label named %q already exists", name)
 	}
 
-	l := models.Label{ID: newID(), Name: req.Name, Color: req.Color}
+	l := models.Label{ID: newID(), Name: name, Color: req.Color}
 	_, err = s.db.Exec("INSERT INTO labels (id, name, color) VALUES (?, ?, ?)", l.ID, l.Name, l.Color)
 	return &l, err
 }
 
 // UpdateLabel returns (nil, nil) for an unknown id, matching UpdateTicket and
 // UpdateProject, so the HTTP layer can turn it into a 404 rather than a 500.
+// A name that is blank after trimming is rejected, since a label must keep a
+// readable name; the stored name is the trimmed form, for the same reason
+// CreateLabel trims. A color that is blank (or all whitespace) is treated as
+// not given and leaves the existing color untouched, rather than blanking it.
 func (s *Store) UpdateLabel(id string, req models.UpdateLabelRequest) (*models.Label, error) {
 	var l models.Label
 	err := s.db.QueryRow("SELECT id, name, color FROM labels WHERE id = ?", id).Scan(&l.ID, &l.Name, &l.Color)
@@ -884,25 +899,75 @@ func (s *Store) UpdateLabel(id string, req models.UpdateLabelRequest) (*models.L
 		return nil, err
 	}
 	if req.Name != nil {
-		taken, err := nameTakenBy(s.db, *req.Name, l.ID)
+		trimmedName := strings.TrimSpace(*req.Name)
+		if trimmedName == "" {
+			return nil, invalidInput("name cannot be blank")
+		}
+		taken, err := nameTakenBy(s.db, trimmedName, l.ID)
 		if err != nil {
 			return nil, err
 		}
 		if taken {
-			return nil, invalidInput("a label named %q already exists", strings.TrimSpace(*req.Name))
+			return nil, invalidInput("a label named %q already exists", trimmedName)
 		}
-		l.Name = *req.Name
+		l.Name = trimmedName
 	}
 	if req.Color != nil {
-		l.Color = *req.Color
+		if trimmedColor := strings.TrimSpace(*req.Color); trimmedColor != "" {
+			l.Color = trimmedColor
+		}
 	}
 	_, err = s.db.Exec("UPDATE labels SET name=?, color=? WHERE id=?", l.Name, l.Color, l.ID)
 	return &l, err
 }
 
-func (s *Store) DeleteLabel(id string) error {
-	_, err := s.db.Exec("DELETE FROM labels WHERE id = ?", id)
-	return err
+// ResolveLabelRef resolves a caller-supplied label reference that may be
+// either a label id or its exact name, matching case-insensitively (Unicode-
+// aware, via strings.EqualFold) the same way resolveLabelNames and
+// findLabelIDByName already do for ticket label lists. It returns "" when
+// nothing matches, and never creates a label.
+func (s *Store) ResolveLabelRef(ref string) (string, error) {
+	trimmed := strings.TrimSpace(ref)
+	if trimmed == "" {
+		return "", nil
+	}
+
+	var id string
+	err := s.db.QueryRow("SELECT id FROM labels WHERE id = ?", trimmed).Scan(&id)
+	if err == nil {
+		return id, nil
+	}
+	if err != sql.ErrNoRows {
+		return "", fmt.Errorf("looking up label %q: %w", trimmed, err)
+	}
+
+	return findLabelIDByName(s.db, trimmed)
+}
+
+// DeleteLabel removes a label and detaches it from every ticket that carried
+// it (the ticket_labels rows cascade on delete), reporting how many tickets
+// it was detached from. The count is read in the same transaction as the
+// delete, so it always reflects exactly what was removed.
+func (s *Store) DeleteLabel(id string) (int, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, fmt.Errorf("beginning transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	var count int
+	if err := tx.QueryRow("SELECT COUNT(*) FROM ticket_labels WHERE label_id = ?", id).Scan(&count); err != nil {
+		return 0, fmt.Errorf("counting tickets for label: %w", err)
+	}
+
+	if _, err := tx.Exec("DELETE FROM labels WHERE id = ?", id); err != nil {
+		return 0, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("committing label deletion: %w", err)
+	}
+	return count, nil
 }
 
 func (s *Store) AddSubtask(ticketID string, req models.CreateSubtaskRequest) (*models.Subtask, error) {

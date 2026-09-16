@@ -828,7 +828,7 @@ func TestDeletingLabelDetachesItFromTickets(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListLabels: %v", err)
 	}
-	if err := s.DeleteLabel(labels[0].ID); err != nil {
+	if _, err := s.DeleteLabel(labels[0].ID); err != nil {
 		t.Fatalf("DeleteLabel: %v", err)
 	}
 
@@ -937,6 +937,54 @@ func TestCreateLabelRejectsCaseInsensitiveDuplicate(t *testing.T) {
 	}
 }
 
+func TestCreateLabelTrimsName(t *testing.T) {
+	s := newTestStore(t)
+
+	l, err := s.CreateLabel(models.CreateLabelRequest{Name: "  pad  ", Color: "#FF0000"})
+	if err != nil {
+		t.Fatalf("CreateLabel: %v", err)
+	}
+	if l.Name != "pad" {
+		t.Fatalf("name = %q, want %q; the padding must be trimmed before storing", l.Name, "pad")
+	}
+
+	// The trimmed name is what a later exact-name lookup and duplicate check see.
+	id, err := s.ResolveLabelRef("pad")
+	if err != nil {
+		t.Fatalf("ResolveLabelRef: %v", err)
+	}
+	if id != l.ID {
+		t.Fatalf("ResolveLabelRef(pad) = %q, want %q", id, l.ID)
+	}
+
+	if _, err := s.CreateLabel(models.CreateLabelRequest{Name: "Pad", Color: "#00FF00"}); err == nil {
+		t.Fatal("expected an error creating Pad while the trimmed pad label exists")
+	} else if !errors.As(err, new(*ErrInvalidInput)) {
+		t.Fatalf("error %v should be an ErrInvalidInput", err)
+	}
+}
+
+// A name that is blank after trimming must be rejected, matching UpdateLabel;
+// otherwise HTTP POST and CLI `label create "   "` would silently store a
+// label named "".
+func TestCreateLabelRejectsBlankName(t *testing.T) {
+	s := newTestStore(t)
+
+	if _, err := s.CreateLabel(models.CreateLabelRequest{Name: "   ", Color: "#FF0000"}); err == nil {
+		t.Fatal("expected an error for a blank name")
+	} else if !errors.As(err, new(*ErrInvalidInput)) {
+		t.Fatalf("error %v should be an ErrInvalidInput", err)
+	}
+
+	labels, err := s.ListLabels()
+	if err != nil {
+		t.Fatalf("ListLabels: %v", err)
+	}
+	if len(labels) != 0 {
+		t.Fatalf("labels = %d, want 0; a rejected create must leave nothing behind", len(labels))
+	}
+}
+
 func TestUpdateLabelRejectsRenameOntoAnotherName(t *testing.T) {
 	s := newTestStore(t)
 
@@ -964,6 +1012,169 @@ func TestUpdateLabelRejectsRenameOntoAnotherName(t *testing.T) {
 	}
 	if updated == nil || updated.Name != "Bug" {
 		t.Fatalf("updated label = %+v, want name Bug", updated)
+	}
+}
+
+// A blank (or all-whitespace) name must not be saved: a label needs a
+// readable name. This guards both UpdateLabel directly and the MCP/CLI
+// callers that pass whatever the caller typed straight through.
+func TestUpdateLabelRejectsBlankName(t *testing.T) {
+	s := newTestStore(t)
+	bug, err := s.CreateLabel(models.CreateLabelRequest{Name: "bug", Color: "#FF0000"})
+	if err != nil {
+		t.Fatalf("CreateLabel: %v", err)
+	}
+
+	blank := "   "
+	if _, err := s.UpdateLabel(bug.ID, models.UpdateLabelRequest{Name: &blank}); err == nil {
+		t.Fatal("expected an error for a blank name")
+	} else if !errors.As(err, new(*ErrInvalidInput)) {
+		t.Fatalf("error %v should be an ErrInvalidInput", err)
+	}
+
+	// The label is untouched by the rejected update.
+	got, err := s.ListLabels()
+	if err != nil {
+		t.Fatalf("ListLabels: %v", err)
+	}
+	if len(got) != 1 || got[0].Name != "bug" {
+		t.Fatalf("labels = %+v, want unchanged [bug]", got)
+	}
+
+	// A name with surrounding whitespace is still accepted, and stored trimmed.
+	padded := "  defect  "
+	updated, err := s.UpdateLabel(bug.ID, models.UpdateLabelRequest{Name: &padded})
+	if err != nil {
+		t.Fatalf("UpdateLabel with padded name: %v", err)
+	}
+	if updated.Name != "defect" {
+		t.Fatalf("name = %q, want trimmed %q", updated.Name, "defect")
+	}
+}
+
+// A blank color means "not given", leaving the existing color untouched,
+// rather than blanking it — distinct from a blank name, which is rejected.
+func TestUpdateLabelBlankColorLeavesExistingColorUnchanged(t *testing.T) {
+	s := newTestStore(t)
+	bug, err := s.CreateLabel(models.CreateLabelRequest{Name: "bug", Color: "#FF0000"})
+	if err != nil {
+		t.Fatalf("CreateLabel: %v", err)
+	}
+
+	blank := "   "
+	updated, err := s.UpdateLabel(bug.ID, models.UpdateLabelRequest{Color: &blank})
+	if err != nil {
+		t.Fatalf("UpdateLabel with blank color: %v", err)
+	}
+	if updated.Color != "#FF0000" {
+		t.Fatalf("color = %q, want unchanged %q", updated.Color, "#FF0000")
+	}
+}
+
+func TestDeleteLabelReportsDetachedTicketCount(t *testing.T) {
+	s := newTestStore(t)
+	p := seedProject(t, s, "Billing", "BILL")
+	if _, err := s.CreateTicket(models.CreateTicketRequest{
+		ProjectID: p.ID, Title: "One", Labels: []string{"bug"},
+	}); err != nil {
+		t.Fatalf("CreateTicket: %v", err)
+	}
+	if _, err := s.CreateTicket(models.CreateTicketRequest{
+		ProjectID: p.ID, Title: "Two", Labels: []string{"bug"},
+	}); err != nil {
+		t.Fatalf("CreateTicket: %v", err)
+	}
+	if _, err := s.CreateTicket(models.CreateTicketRequest{
+		ProjectID: p.ID, Title: "Three", Labels: []string{"chore"},
+	}); err != nil {
+		t.Fatalf("CreateTicket: %v", err)
+	}
+
+	labels, err := s.ListLabels()
+	if err != nil {
+		t.Fatalf("ListLabels: %v", err)
+	}
+	var bugID string
+	for _, l := range labels {
+		if l.Name == "bug" {
+			bugID = l.ID
+		}
+	}
+	if bugID == "" {
+		t.Fatal("bug label not found")
+	}
+
+	count, err := s.DeleteLabel(bugID)
+	if err != nil {
+		t.Fatalf("DeleteLabel: %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("detached count = %d, want 2", count)
+	}
+
+	// chore still carries its one ticket.
+	choreID, err := s.ResolveLabelRef("chore")
+	if err != nil {
+		t.Fatalf("ResolveLabelRef(chore): %v", err)
+	}
+	count, err = s.DeleteLabel(choreID)
+	if err != nil {
+		t.Fatalf("DeleteLabel(chore): %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("detached count = %d, want 1", count)
+	}
+
+	// A label with no tickets at all (and an unknown id) reports zero, not an error.
+	count, err = s.DeleteLabel("MISSING")
+	if err != nil {
+		t.Fatalf("DeleteLabel(missing id): %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("detached count = %d, want 0 for an unknown label id", count)
+	}
+}
+
+func TestResolveLabelRefByIDOrExactName(t *testing.T) {
+	s := newTestStore(t)
+	bug, err := s.CreateLabel(models.CreateLabelRequest{Name: "bug", Color: "#FF0000"})
+	if err != nil {
+		t.Fatalf("CreateLabel: %v", err)
+	}
+
+	// By id.
+	id, err := s.ResolveLabelRef(bug.ID)
+	if err != nil {
+		t.Fatalf("ResolveLabelRef(id): %v", err)
+	}
+	if id != bug.ID {
+		t.Fatalf("resolved id = %q, want %q", id, bug.ID)
+	}
+
+	// By exact name, case-insensitive, matching findLabelIDByName's behavior.
+	id, err = s.ResolveLabelRef("BUG")
+	if err != nil {
+		t.Fatalf("ResolveLabelRef(name): %v", err)
+	}
+	if id != bug.ID {
+		t.Fatalf("resolved id by name = %q, want %q", id, bug.ID)
+	}
+
+	// A substring or unrelated string matches nothing.
+	id, err = s.ResolveLabelRef("bu")
+	if err != nil {
+		t.Fatalf("ResolveLabelRef(partial): %v", err)
+	}
+	if id != "" {
+		t.Fatalf("resolved id for partial match = %q, want empty", id)
+	}
+
+	id, err = s.ResolveLabelRef("does-not-exist")
+	if err != nil {
+		t.Fatalf("ResolveLabelRef(missing): %v", err)
+	}
+	if id != "" {
+		t.Fatalf("resolved id for missing ref = %q, want empty", id)
 	}
 }
 

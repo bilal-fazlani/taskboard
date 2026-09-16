@@ -216,6 +216,54 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 	case "list_labels":
 		return s.store.ListLabels()
 
+	case "create_label":
+		var a models.CreateLabelRequest
+		json.Unmarshal(args, &a)
+		if strings.TrimSpace(a.Name) == "" {
+			return nil, fmt.Errorf("name is required")
+		}
+		if strings.TrimSpace(a.Color) == "" {
+			a.Color = db.DefaultLabelColor
+		}
+		return s.store.CreateLabel(a)
+
+	case "update_label":
+		var a struct {
+			ID string `json:"id"`
+			models.UpdateLabelRequest
+		}
+		json.Unmarshal(args, &a)
+		if a.Name == nil && a.Color == nil {
+			return nil, fmt.Errorf("nothing to update: provide name and/or color")
+		}
+		labelID, err := s.resolveLabelRefOrError(a.ID)
+		if err != nil {
+			return nil, err
+		}
+		l, err := s.store.UpdateLabel(labelID, a.UpdateLabelRequest)
+		if err != nil {
+			return nil, err
+		}
+		if l == nil {
+			return nil, fmt.Errorf("label not found")
+		}
+		return l, nil
+
+	case "delete_label":
+		var a struct {
+			ID string `json:"id"`
+		}
+		json.Unmarshal(args, &a)
+		labelID, err := s.resolveLabelRefOrError(a.ID)
+		if err != nil {
+			return nil, err
+		}
+		count, err := s.store.DeleteLabel(labelID)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"deleted": true, "detachedFromTickets": count}, nil
+
 	case "get_ticket":
 		var a struct {
 			ID string `json:"id"`
@@ -313,6 +361,25 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 	}
 }
 
+// resolveLabelRefOrError resolves a label id-or-exact-name argument the way
+// update_label and delete_label accept it, turning an empty argument or an
+// unresolvable reference into a clear error instead of silently operating on
+// no label (store.UpdateLabel/DeleteLabel on "" would match nothing or, for
+// delete, harmlessly no-op).
+func (s *MCPServer) resolveLabelRefOrError(ref string) (string, error) {
+	if strings.TrimSpace(ref) == "" {
+		return "", fmt.Errorf("id is required")
+	}
+	labelID, err := s.store.ResolveLabelRef(ref)
+	if err != nil {
+		return "", err
+	}
+	if labelID == "" {
+		return "", fmt.Errorf("no label matches %q", ref)
+	}
+	return labelID, nil
+}
+
 func (s *MCPServer) toolDefinitions() []toolDef {
 	return []toolDef{
 		// --- Projects (top-level grouping) ---
@@ -384,6 +451,49 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 			Name:        "list_labels",
 			Description: "List all labels with the number of tickets carrying each. Labels are global across projects.",
 			InputSchema: jsonSchema{Type: "object", Properties: map[string]schemaProp{}},
+		},
+		{
+			Name: "create_label",
+			Description: "Create a label with a name and color, for control over color that create_ticket's implicit " +
+				"label creation doesn't give. Fails if a label with the same name (case-insensitive) already exists.",
+			InputSchema: jsonSchema{
+				Type: "object",
+				Properties: map[string]schemaProp{
+					"name":  {Type: "string", Description: "Label name"},
+					"color": {Type: "string", Description: "Hex color code. Defaults to the standard gray when omitted."},
+				},
+				Required: []string{"name"},
+			},
+		},
+		{
+			Name: "update_label",
+			Description: "Update a label's name and/or color; at least one of name or color must be given. Renaming " +
+				"keeps the label attached to every ticket that carries it. A name that is blank after trimming is " +
+				"rejected; a blank color is treated as not given and leaves the existing color unchanged. The id field " +
+				"accepts either the label's id or its exact name, matched case-insensitively.",
+			InputSchema: jsonSchema{
+				Type: "object",
+				Properties: map[string]schemaProp{
+					"id":    {Type: "string", Description: "Label id, or its exact name (case-insensitive)"},
+					"name":  {Type: "string", Description: "New name; a blank name is rejected"},
+					"color": {Type: "string", Description: "New hex color code; a blank value leaves the color unchanged"},
+				},
+				Required: []string{"id"},
+			},
+		},
+		{
+			Name: "delete_label",
+			Description: "Delete a label, detaching it from every ticket that carries it. The response's " +
+				"detachedFromTickets field reports how many tickets it was removed from, so an accidental delete of a " +
+				"busy label is obvious. The id field accepts either the label's id or its exact name, matched " +
+				"case-insensitively.",
+			InputSchema: jsonSchema{
+				Type: "object",
+				Properties: map[string]schemaProp{
+					"id": {Type: "string", Description: "Label id, or its exact name (case-insensitive)"},
+				},
+				Required: []string{"id"},
+			},
 		},
 		// --- Tickets (tasks within a project) ---
 		{

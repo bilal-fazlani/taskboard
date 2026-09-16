@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
+	"github.com/tcarac/taskboard/internal/db"
 	"github.com/tcarac/taskboard/internal/models"
 )
 
@@ -54,25 +55,74 @@ func labelCommands() *cobra.Command {
 			return nil
 		},
 	}
-	createCmd.Flags().StringVar(&color, "color", "#6B7280", "hex color")
+	createCmd.Flags().StringVar(&color, "color", db.DefaultLabelColor, "hex color")
 
 	deleteCmd := &cobra.Command{
-		Use:   "delete [id]",
-		Short: "Delete a label and remove it from all tickets",
+		Use:   "delete [id-or-name]",
+		Short: "Delete a label (by id or exact name) and remove it from all tickets",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			store, err := openStore()
 			if err != nil {
 				return err
 			}
-			if err := store.DeleteLabel(args[0]); err != nil {
+			resolvedID, err := store.ResolveLabelRef(args[0])
+			if err != nil {
 				return err
 			}
-			fmt.Println("Label deleted.")
+			if resolvedID == "" {
+				return fmt.Errorf("label not found: %s", args[0])
+			}
+			count, err := store.DeleteLabel(resolvedID)
+			if err != nil {
+				return err
+			}
+			fmt.Printf("Label deleted. Detached from %d ticket(s).\n", count)
 			return nil
 		},
 	}
 
-	cmd.AddCommand(listCmd, createCmd, deleteCmd)
+	var updateName, updateColor string
+	updateCmd := &cobra.Command{
+		Use:   "update [id-or-name]",
+		Short: "Update a label's name or color, by id or exact name",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if !cmd.Flags().Changed("name") && !cmd.Flags().Changed("color") {
+				return fmt.Errorf("nothing to update: provide --name and/or --color")
+			}
+			store, err := openStore()
+			if err != nil {
+				return err
+			}
+			resolvedID, err := store.ResolveLabelRef(args[0])
+			if err != nil {
+				return err
+			}
+			if resolvedID == "" {
+				return fmt.Errorf("label not found: %s", args[0])
+			}
+			var req models.UpdateLabelRequest
+			if cmd.Flags().Changed("name") {
+				req.Name = &updateName
+			}
+			if cmd.Flags().Changed("color") {
+				req.Color = &updateColor
+			}
+			l, err := store.UpdateLabel(resolvedID, req)
+			if err != nil {
+				return err
+			}
+			if l == nil {
+				return fmt.Errorf("label not found: %s", args[0])
+			}
+			fmt.Printf("Updated label %s (%s)\n", l.Name, l.ID)
+			return nil
+		},
+	}
+	updateCmd.Flags().StringVar(&updateName, "name", "", "new name")
+	updateCmd.Flags().StringVar(&updateColor, "color", "", "new hex color")
+
+	cmd.AddCommand(listCmd, createCmd, deleteCmd, updateCmd)
 	return cmd
 }

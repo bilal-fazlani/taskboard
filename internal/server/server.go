@@ -377,7 +377,7 @@ func (s *Server) updateLabel(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) deleteLabel(w http.ResponseWriter, r *http.Request) {
-	if err := s.store.DeleteLabel(chi.URLParam(r, "id")); err != nil {
+	if _, err := s.store.DeleteLabel(chi.URLParam(r, "id")); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
