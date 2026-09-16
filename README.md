@@ -77,6 +77,22 @@ taskboard start
 taskboard start --port 8080
 ```
 
+#### Linking to a ticket
+
+Any view takes a `ticket` query parameter naming a ticket by display key (or by
+id), and opens that ticket's editor on top of the page:
+
+```
+http://localhost:3010/?ticket=AUTH-1        # the Dependencies view
+http://localhost:3010/kanban?ticket=AUTH-1  # the Kanban board
+```
+
+The editor's header shows the ticket's link with a button that copies it.
+Opening a ticket adds the parameter to the view you are on and closing it
+removes only that parameter, so the filters you had set stay put. Back closes
+the editor, and unsaved edits are never dropped without asking — however the
+close was asked for.
+
 ### API
 
 `GET /api/events` streams database changes as [Server-Sent Events](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events), so a client can refetch instead of polling:
@@ -112,6 +128,21 @@ taskboard ticket create --project <ID> --title "Implement login" --priority high
 taskboard ticket update <ID> --labels backend,urgent --depends-on AUTH-1
 taskboard ticket update <ID> --repo acme/auth-api,acme/auth-web  # replaces the set
 taskboard ticket list --repo acme/auth-api                       # tickets touching that repo
+```
+
+`ticket list`, `ticket create` and `ticket update` print each ticket's link
+alongside it, so an agent working through the CLI can hand a person a URL
+rather than a bare key.
+
+The link points at `http://localhost:<default port>` — 3010 for an installed
+build, 3011 for a development one. The CLI and the MCP server read the database
+directly rather than through a running server, so they cannot tell that
+`taskboard start --port 8080` moved the board; set `TASKBOARD_URL` to say where
+it is:
+
+```bash
+TASKBOARD_URL=http://localhost:8080 taskboard ticket list
+TASKBOARD_URL=https://board.example.com taskboard mcp
 ```
 
 ### MCP Server (for AI assistants)
@@ -190,6 +221,11 @@ The reverse direction is derived, not stored. When `BILL-5` depends on `BILL-2`,
 | `batch_create_subtasks` | Add multiple subtasks to a ticket at once        |
 | `toggle_subtask`        | Toggle subtask completion                        |
 | `delete_subtask`        | Remove a subtask from a ticket                   |
+
+`list_tickets`, `get_ticket`, `create_ticket` and `update_ticket` add a `url`
+field to each ticket — the link that opens it in the web UI — so an assistant
+can cite a ticket rather than just name it. It follows `TASKBOARD_URL` the same
+way the CLI does.
 
 #### Example Prompts
 

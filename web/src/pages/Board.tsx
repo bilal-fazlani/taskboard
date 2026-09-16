@@ -21,6 +21,7 @@ import TicketCard from "../components/TicketCard";
 import FilterPanel from "../components/FilterPanel";
 import { useFilters } from "../hooks/useFilters";
 import { useLiveRefresh } from "../hooks/useLiveRefresh";
+import { useTicketParam } from "../hooks/useTicketParam";
 import { matchesFilters, repoOptions } from "../lib/filters";
 import { STATUSES, STATUS_LABELS, STATUS_COLORS, isStatus, type Status } from "../lib/status";
 
@@ -103,7 +104,6 @@ export default function Board() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [columns, setColumns] = useState<BoardColumn[]>([]);
   const [activeTicket, setActiveTicket] = useState<Ticket | null>(null);
-  const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
   const [createForStatus, setCreateForStatus] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const filterState = useFilters();
@@ -128,9 +128,9 @@ export default function Board() {
       setColumns(board.columns || []);
     } catch {
       if (seq !== loadSeqRef.current) return;
-      setColumns(
-        STATUSES.map((status) => ({ status, tickets: [] }))
-      );
+      // A failed refetch keeps what is on screen — an open editor included —
+      // and only an outright failed first load falls back to empty columns.
+      setColumns((prev) => (prev.length > 0 ? prev : STATUSES.map((status) => ({ status, tickets: [] }))));
     }
     setLoading(false);
   }, []);
@@ -144,8 +144,9 @@ export default function Board() {
     loadBoard();
   }, [loadBoard]);
 
-  // A live update replaces the columns without touching the scroll position or
-  // the open editor, which keep their own state. A drag is the exception: it
+  // A live update replaces the columns without touching the scroll position,
+  // which keeps its own state, or the open editor, which the URL names and a
+  // refetch only refreshes. A drag is the exception: it
   // moves cards between columns optimistically, so swapping the columns under
   // it would yank the card away. The refetch waits for the drag to end.
   const draggingRef = useRef(false);
@@ -171,6 +172,16 @@ export default function Board() {
   // so moving it into a column its status filter excludes doesn't unmount it
   // mid-drag.
   const allTickets = useMemo(() => columns.flatMap((c) => c.tickets), [columns]);
+  // The open ticket comes from the URL, so ?ticket=KEY opens it on load.
+  const {
+    selected: selectedTicket,
+    closeRequested,
+    open: openTicket,
+    close: closeTicket,
+    cancelClose,
+    onDirtyChange,
+    url: ticketUrl,
+  } = useTicketParam(allTickets);
   const isShown = (ticket: Ticket) => ticket.id === activeTicket?.id || matchesFilters(ticket, filters);
   const getColumnTickets = (status: string) =>
     (columns.find((c) => c.status === status)?.tickets || []).filter(isShown);
@@ -252,7 +263,7 @@ export default function Board() {
   };
 
   const handleTicketClick = (ticket: Ticket) => {
-    setSelectedTicket(ticket);
+    openTicket(ticket);
   };
 
   const handleUpdate = async (id: string, data: TicketWrite) => {
@@ -336,8 +347,12 @@ export default function Board() {
         <TicketEditor
           ticket={selectedTicket}
           projects={projects}
+          ticketUrl={ticketUrl}
+          closeRequested={closeRequested}
+          onCloseCancelled={cancelClose}
+          onDirtyChange={onDirtyChange}
           onClose={() => {
-            setSelectedTicket(null);
+            closeTicket();
             loadBoard();
           }}
           onUpdate={handleUpdate}

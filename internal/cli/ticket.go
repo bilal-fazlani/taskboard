@@ -6,6 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/tcarac/taskboard/internal/models"
+	"github.com/tcarac/taskboard/internal/weburl"
 )
 
 func ticketCommands() *cobra.Command {
@@ -37,6 +38,7 @@ func ticketCommands() *cobra.Command {
 				fmt.Println("No tickets found.")
 				return nil
 			}
+			base := weburl.Base()
 			for _, t := range tickets {
 				line := fmt.Sprintf("[%s] %s - %s (%s", t.DisplayKey(), t.Title, t.Status, t.Priority)
 				if len(t.Repos) > 0 {
@@ -57,7 +59,7 @@ func ticketCommands() *cobra.Command {
 					}
 					line += " depends on " + strings.Join(keys, ", ")
 				}
-				fmt.Printf("%s  (%s)\n", line, t.ID)
+				fmt.Printf("%s  (%s)  %s\n", line, t.ID, weburl.Ticket(base, weburl.Ref(t)))
 			}
 			return nil
 		},
@@ -94,7 +96,7 @@ func ticketCommands() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Printf("Created ticket %s: %s (%s)\n", t.DisplayKey(), t.Title, t.ID)
+			fmt.Printf("Created ticket %s: %s (%s)\n  %s\n", t.DisplayKey(), t.Title, t.ID, weburl.Ticket(weburl.Base(), weburl.Ref(*t)))
 			return nil
 		},
 	}
@@ -215,7 +217,7 @@ func ticketCommands() *cobra.Command {
 			if t == nil {
 				return fmt.Errorf("ticket not found")
 			}
-			fmt.Printf("Updated %s: %s\n", t.DisplayKey(), t.Title)
+			fmt.Printf("Updated %s: %s\n  %s\n", t.DisplayKey(), t.Title, weburl.Ticket(weburl.Base(), weburl.Ref(*t)))
 			return nil
 		},
 	}

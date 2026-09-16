@@ -34,6 +34,11 @@ type Ticket struct {
 	Subtasks      []Subtask   `json:"subtasks,omitempty"`
 	DependsOn     []TicketRef `json:"dependsOn,omitempty"`
 	Blocks        []TicketRef `json:"blocks,omitempty"`
+
+	// URL is where the ticket opens in the web UI. The CLI and the MCP server
+	// fill it in so an agent can print a link; the HTTP API leaves it empty,
+	// since a browser already knows where the board is. See internal/weburl.
+	URL string `json:"url,omitempty"`
 }
 
 // TicketRef is a lightweight pointer to another ticket, carrying enough

@@ -62,10 +62,15 @@ function makeTicket(overrides: Partial<Ticket> = {}): Ticket {
   };
 }
 
-function renderEditor(ticket = makeTicket(), extra: { ticketUrl?: string } = {}) {
+function renderEditor(
+  ticket = makeTicket(),
+  extra: { ticketUrl?: string; closeRequested?: boolean } = {},
+) {
   const onClose = vi.fn();
   const onUpdate = vi.fn();
   const onDelete = vi.fn();
+  const onCloseCancelled = vi.fn();
+  const onDirtyChange = vi.fn();
   const utils = render(
     <TicketEditor
       ticket={ticket}
@@ -73,10 +78,26 @@ function renderEditor(ticket = makeTicket(), extra: { ticketUrl?: string } = {})
       onClose={onClose}
       onUpdate={onUpdate}
       onDelete={onDelete}
+      onCloseCancelled={onCloseCancelled}
+      onDirtyChange={onDirtyChange}
       {...extra}
     />,
   );
-  return { ...utils, onClose, onUpdate, onDelete };
+  const rerenderWith = (props: { closeRequested?: boolean }) =>
+    utils.rerender(
+      <TicketEditor
+        ticket={ticket}
+        projects={[project]}
+        onClose={onClose}
+        onUpdate={onUpdate}
+        onDelete={onDelete}
+        onCloseCancelled={onCloseCancelled}
+        onDirtyChange={onDirtyChange}
+        {...extra}
+        {...props}
+      />,
+    );
+  return { ...utils, rerenderWith, onClose, onUpdate, onDelete, onCloseCancelled, onDirtyChange };
 }
 
 const saveButton = () => screen.queryByRole("button", { name: "Save Changes" });
@@ -595,5 +616,84 @@ describe("deleting", () => {
     fireEvent.click(screen.getByRole("button", { name: "Delete ticket" }));
     expect(onDelete).toHaveBeenCalledWith("t1");
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+});
+
+// The URL owns which ticket is open, so a Back that drops the `ticket`
+// parameter asks the editor to close rather than unmounting it. Unsaved edits
+// must be no easier to lose that way than through the close button.
+describe("a close asked for by the URL", () => {
+  it("reports unsaved edits, so the URL's owner knows it cannot just unmount", () => {
+    const { onDirtyChange } = renderEditor();
+    expect(onDirtyChange).toHaveBeenLastCalledWith(false);
+    editTitle();
+    expect(onDirtyChange).toHaveBeenLastCalledWith(true);
+  });
+
+  it("closes straight away when nothing is unsaved", () => {
+    const { rerenderWith, onClose, onCloseCancelled } = renderEditor();
+    rerenderWith({ closeRequested: true });
+    expect(confirmDialog()).toBeNull();
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(onCloseCancelled).not.toHaveBeenCalled();
+  });
+
+  it("asks before discarding unsaved edits", () => {
+    const { rerenderWith, onClose } = renderEditor();
+    editTitle();
+    rerenderWith({ closeRequested: true });
+    expect(confirmDialog()).toBeTruthy();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("closes once the discard is confirmed", () => {
+    const { rerenderWith, onClose, onCloseCancelled } = renderEditor();
+    editTitle();
+    rerenderWith({ closeRequested: true });
+    fireEvent.click(screen.getByRole("button", { name: "Discard" }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(onCloseCancelled).not.toHaveBeenCalled();
+  });
+
+  it("asks for the parameter back when the discard is cancelled", () => {
+    const { rerenderWith, onClose, onCloseCancelled } = renderEditor();
+    editTitle();
+    rerenderWith({ closeRequested: true });
+    fireEvent.click(screen.getByRole("button", { name: "Keep editing" }));
+    expect(onCloseCancelled).toHaveBeenCalledTimes(1);
+    expect(onClose).not.toHaveBeenCalled();
+
+    // The request stands until the URL's owner has put the parameter back; the
+    // question goes with it, and the edits are still there to keep editing.
+    rerenderWith({ closeRequested: false });
+    expect(confirmDialog()).toBeNull();
+    expect(screen.getByLabelText("Title")).toHaveProperty("value", "Edited title");
+  });
+
+  it("asks for the parameter back when Escape cancels the discard", () => {
+    const { rerenderWith, onClose, onCloseCancelled } = renderEditor();
+    editTitle();
+    rerenderWith({ closeRequested: true });
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(onCloseCancelled).toHaveBeenCalledTimes(1);
+    expect(onClose).not.toHaveBeenCalled();
+    rerenderWith({ closeRequested: false });
+    expect(confirmDialog()).toBeNull();
+  });
+
+  // Back pressed while the close button's question is already up: cancelling
+  // has to undo that Back too, or the editor would sit on a URL that no longer
+  // names it.
+  it("undoes a URL close asked for behind the question already on screen", () => {
+    const { rerenderWith, onClose, onCloseCancelled } = renderEditor();
+    editTitle();
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(confirmDialog()).toBeTruthy();
+    rerenderWith({ closeRequested: true });
+    fireEvent.click(screen.getByRole("button", { name: "Keep editing" }));
+    expect(onCloseCancelled).toHaveBeenCalledTimes(1);
+    expect(onClose).not.toHaveBeenCalled();
+    rerenderWith({ closeRequested: false });
+    expect(confirmDialog()).toBeNull();
   });
 });

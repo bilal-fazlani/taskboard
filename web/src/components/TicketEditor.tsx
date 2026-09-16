@@ -38,15 +38,27 @@ export default function TicketEditor({
   ticket,
   projects,
   ticketUrl,
+  closeRequested = false,
+  onCloseCancelled,
+  onDirtyChange,
   onClose,
   onUpdate,
   onDelete,
 }: {
   ticket: Ticket;
   projects: Project[];
-  // The ticket's shareable URL. Until tickets are URL-addressable nothing
-  // passes it, and the header shows no link or copy button.
+  // The ticket's shareable URL, from useTicketParam. Without one the header
+  // shows no link or copy button.
   ticketUrl?: string;
+  // A close asked for from outside the editor: the browser's Back button, or
+  // anything else that drops the `ticket` parameter. It goes through the same
+  // discard question as the close button, and cancelling it calls
+  // onCloseCancelled, which puts the parameter back.
+  closeRequested?: boolean;
+  onCloseCancelled?: () => void;
+  // Reports unsaved edits, so whoever owns the URL knows the editor cannot
+  // just be unmounted.
+  onDirtyChange?: (dirty: boolean) => void;
   onClose: () => void;
   onUpdate: (id: string, data: TicketWrite) => void;
   onDelete: (id: string) => void;
@@ -72,9 +84,16 @@ export default function TicketEditor({
 
   const dialogRef = useRef<HTMLDivElement>(null);
   const confirmRef = useRef<HTMLDivElement>(null);
-  // The action waiting on "Discard unsaved changes?", and the element that had
-  // focus when the question was asked, so Cancel can give focus back.
-  const [confirmOpen, setConfirmOpen] = useState(false);
+  // "Discard unsaved changes?" is up for one of two reasons: the editor itself
+  // asked (the close button, Escape, the scrim), which is `asking`, or the URL
+  // stopped naming this ticket while there were unsaved edits, which is
+  // derived rather than stored — that request stands until whoever owns the
+  // URL has acted on the answer. `pendingActionRef` is what the editor's own
+  // question is waiting on, and `focusBeforeConfirmRef` the element to give
+  // focus back to when it is cancelled.
+  const [asking, setAsking] = useState(false);
+  const urlAsking = closeRequested && dirty;
+  const confirmOpen = asking || urlAsking;
   const pendingActionRef = useRef<(() => void) | null>(null);
   const focusBeforeConfirmRef = useRef<HTMLElement | null>(null);
   const ids = useId();
@@ -116,9 +135,9 @@ export default function TicketEditor({
 
   // Runs an action that would throw away unsaved edits: straight away when
   // there are none, otherwise once the user confirms the discard. Every close
-  // path goes through here, and so can anything else that drops edits. While
-  // the question is already on screen it does nothing, so the pending action
-  // and the element to give focus back to stay as they were.
+  // path inside the editor goes through here, and so can anything else that
+  // drops edits. While the question is already on screen it does nothing, so
+  // the pending action and the element to give focus back to stay as they were.
   const confirmDiscardThen = useCallback(
     (action: () => void) => {
       if (confirmOpen) return;
@@ -129,16 +148,42 @@ export default function TicketEditor({
       const active = document.activeElement;
       focusBeforeConfirmRef.current = active instanceof HTMLElement ? active : null;
       pendingActionRef.current = action;
-      setConfirmOpen(true);
+      setAsking(true);
     },
     [dirty, confirmOpen],
   );
 
   const requestClose = useCallback(() => confirmDiscardThen(onClose), [confirmDiscardThen, onClose]);
 
+  // Tell whoever owns the URL about unsaved edits, so a Back that drops the
+  // `ticket` parameter keeps the editor mounted long enough to ask about them
+  // rather than unmounting it.
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+  }, [dirty, onDirtyChange]);
+
+  // A close the URL asked for with nothing left to lose. Normally the owner of
+  // the URL has already dropped the editor by the time this could run, since it
+  // knows the edits are gone; this covers the beat before that report lands,
+  // say just after a save.
+  //
+  // onClose is read from a ref, the way useLiveRefresh reads its callback, so
+  // the inline arrow every page passes does not re-run this on each render.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+  useEffect(() => {
+    if (closeRequested && !dirty) onCloseRef.current();
+  }, [closeRequested, dirty]);
+
   const cancelDiscard = useCallback(() => {
+    // Cancelling a close the URL asked for has to undo it as well, or the
+    // editor would be left sitting on a URL that no longer names its ticket.
+    const undoUrlClose = urlAsking;
     pendingActionRef.current = null;
-    setConfirmOpen(false);
+    setAsking(false);
+    if (undoUrlClose) onCloseCancelled?.();
     const previous = focusBeforeConfirmRef.current;
     const dialog = dialogRef.current;
     // Give focus back inside the editor once the confirm has gone.
@@ -146,12 +191,14 @@ export default function TicketEditor({
       if (previous && previous.isConnected && dialog?.contains(previous)) previous.focus();
       else dialog?.focus();
     });
-  }, []);
+  }, [urlAsking, onCloseCancelled]);
 
   const acceptDiscard = () => {
-    const action = pendingActionRef.current;
+    // With no action of the editor's own waiting, the question came from the
+    // URL and the answer is simply to go.
+    const action = pendingActionRef.current ?? (urlAsking ? onClose : null);
     pendingActionRef.current = null;
-    setConfirmOpen(false);
+    setAsking(false);
     action?.();
   };
 

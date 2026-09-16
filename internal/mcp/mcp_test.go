@@ -7,6 +7,7 @@ import (
 
 	"github.com/tcarac/taskboard/internal/db"
 	"github.com/tcarac/taskboard/internal/models"
+	"github.com/tcarac/taskboard/internal/weburl"
 )
 
 // newTestServer returns an MCPServer backed by a throwaway database in the
@@ -239,5 +240,79 @@ func TestDeleteLabelToolReportsDetachedCount(t *testing.T) {
 	// An unresolvable reference is an error, not a silent no-op.
 	if _, err := s.callTool("delete_label", mustJSON(t, map[string]any{"id": "does-not-exist"})); err == nil {
 		t.Fatal("expected an error for an unresolvable label reference")
+	}
+}
+
+// Every ticket an agent gets back carries the URL that opens it in the web UI,
+// so the agent can print a link instead of a bare key.
+func TestTicketToolsIncludeTheTicketURL(t *testing.T) {
+	t.Setenv(weburl.BaseEnv, "http://localhost:3013")
+	s := newTestServer(t)
+
+	project, err := s.store.CreateProject(models.CreateProjectRequest{Name: "Agent control plane", Prefix: "ACP"})
+	if err != nil {
+		t.Fatalf("CreateProject: %v", err)
+	}
+
+	created, err := s.callTool("create_ticket", mustJSON(t, map[string]any{
+		"projectId": project.ID,
+		"title":     "URL-addressable tickets",
+	}))
+	if err != nil {
+		t.Fatalf("create_ticket: %v", err)
+	}
+	ticket := created.(*models.Ticket)
+	want := "http://localhost:3013/?ticket=" + ticket.DisplayKey()
+	if ticket.URL != want {
+		t.Fatalf("create_ticket URL = %q, want %q", ticket.URL, want)
+	}
+
+	got, err := s.callTool("get_ticket", mustJSON(t, map[string]any{"id": ticket.ID}))
+	if err != nil {
+		t.Fatalf("get_ticket: %v", err)
+	}
+	if url := got.(*models.Ticket).URL; url != want {
+		t.Fatalf("get_ticket URL = %q, want %q", url, want)
+	}
+
+	updated, err := s.callTool("update_ticket", mustJSON(t, map[string]any{
+		"id":       ticket.ID,
+		"priority": "high",
+	}))
+	if err != nil {
+		t.Fatalf("update_ticket: %v", err)
+	}
+	if url := updated.(*models.Ticket).URL; url != want {
+		t.Fatalf("update_ticket URL = %q, want %q", url, want)
+	}
+
+	listed, err := s.callTool("list_tickets", mustJSON(t, map[string]any{}))
+	if err != nil {
+		t.Fatalf("list_tickets: %v", err)
+	}
+	tickets := listed.([]models.Ticket)
+	if len(tickets) != 1 || tickets[0].URL != want {
+		t.Fatalf("list_tickets URLs = %+v, want one %q", tickets, want)
+	}
+
+	// The URL travels as a `url` field beside the other ticket fields.
+	data, err := json.Marshal(got)
+	if err != nil {
+		t.Fatalf("marshaling get_ticket result: %v", err)
+	}
+	var shape map[string]any
+	if err := json.Unmarshal(data, &shape); err != nil {
+		t.Fatalf("unmarshaling get_ticket result: %v", err)
+	}
+	if shape["url"] != want {
+		t.Fatalf("serialized url = %v, want %q", shape["url"], want)
+	}
+}
+
+// A tool that returns no ticket must not start returning an empty one.
+func TestGetTicketToolStillReportsNotFound(t *testing.T) {
+	s := newTestServer(t)
+	if _, err := s.callTool("get_ticket", mustJSON(t, map[string]any{"id": "nope"})); err == nil {
+		t.Fatal("expected an error for a ticket that does not exist")
 	}
 }

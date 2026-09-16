@@ -15,6 +15,7 @@ import CreateTicketModal from "../components/CreateTicketModal";
 import FilterPanel from "../components/FilterPanel";
 import { useFilters } from "../hooks/useFilters";
 import { useLiveRefresh } from "../hooks/useLiveRefresh";
+import { useTicketParam } from "../hooks/useTicketParam";
 import { matchesFilters, repoOptions } from "../lib/filters";
 import { STATUS_LABELS, STATUS_STYLES, isStatus, isDone } from "../lib/status";
 
@@ -58,10 +59,19 @@ export default function Tickets() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
-  const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
 
   const filterState = useFilters();
   const { filters } = filterState;
+  // The open ticket comes from the URL, so ?ticket=KEY opens it on load.
+  const {
+    selected: selectedTicket,
+    closeRequested,
+    open: openTicket,
+    close: closeTicket,
+    cancelClose,
+    onDirtyChange,
+    url: ticketUrl,
+  } = useTicketParam(tickets);
 
   const load = useCallback(async () => {
     try {
@@ -69,8 +79,8 @@ export default function Tickets() {
       setTickets(t || []);
       setProjects(p || []);
     } catch {
-      setTickets([]);
-      setProjects([]);
+      // A failed refetch keeps what is on screen, so an open editor stays open.
+      // The first load has nothing to keep and falls through to the empty state.
     }
     setLoading(false);
   }, []);
@@ -81,8 +91,8 @@ export default function Tickets() {
 
   // A live update only replaces the rows. `load` never sets `loading` back to
   // true, so the table isn't torn down and its scroll position stays; the
-  // filters live in the URL and the open editor in its own state, so neither
-  // notices.
+  // filters and the open editor both live in the URL, so neither notices —
+  // the editor is handed the refreshed ticket and stays where it is.
   useLiveRefresh(load);
 
   // Filters apply client-side, so changing one never refetches.
@@ -155,7 +165,7 @@ export default function Tickets() {
               {filtered.map((ticket) => (
                 <tr
                   key={ticket.id}
-                  onClick={() => setSelectedTicket(ticket)}
+                  onClick={() => openTicket(ticket)}
                   className="border-b border-slate-800/50 hover:bg-slate-900/50 cursor-pointer transition-colors"
                 >
                   <td className="px-6 py-3">
@@ -245,8 +255,12 @@ export default function Tickets() {
         <TicketEditor
           ticket={selectedTicket}
           projects={projects}
+          ticketUrl={ticketUrl}
+          closeRequested={closeRequested}
+          onCloseCancelled={cancelClose}
+          onDirtyChange={onDirtyChange}
           onClose={() => {
-            setSelectedTicket(null);
+            closeTicket();
             load();
           }}
           onUpdate={handleUpdate}

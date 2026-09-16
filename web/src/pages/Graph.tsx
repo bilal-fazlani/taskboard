@@ -7,6 +7,7 @@ import TicketCard from "../components/TicketCard";
 import FilterPanel from "../components/FilterPanel";
 import { useFilters } from "../hooks/useFilters";
 import { useLiveRefresh } from "../hooks/useLiveRefresh";
+import { useTicketParam } from "../hooks/useTicketParam";
 import { matchesFilters, repoOptions } from "../lib/filters";
 import {
   chainFinder,
@@ -146,7 +147,6 @@ export default function Graph() {
   const [fetched, setFetched] = useState<Ticket[] | null>(null);
   // Bumped after an edit to refetch.
   const [version, setVersion] = useState(0);
-  const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
   const [sizes, setSizes] = useState(NO_SIZES);
   // What the cards' pointer and focus events have lit. It is not tied to the
   // topology it was picked on: a refetch leaves the cards where they are, so a
@@ -170,10 +170,13 @@ export default function Graph() {
     let cancelled = false;
     api.tickets
       .list()
-      .then((tickets) => tickets || [])
-      .catch((): Ticket[] => [])
       .then((tickets) => {
-        if (!cancelled) setFetched(tickets);
+        if (!cancelled) setFetched(tickets || []);
+      })
+      .catch(() => {
+        // A failed refetch keeps the graph that is on screen — an open editor
+        // included. Only a failed first load settles on an empty graph.
+        if (!cancelled) setFetched((prev) => prev ?? []);
       });
     return () => {
       cancelled = true;
@@ -182,9 +185,20 @@ export default function Graph() {
 
   const refresh = useCallback(() => setVersion((v) => v + 1), []);
   const loading = fetched === null;
+  // The open ticket comes from the URL, so ?ticket=KEY opens it on load.
+  const {
+    selected: selectedTicket,
+    closeRequested,
+    open: openSelected,
+    close: closeSelected,
+    cancelClose,
+    onDirtyChange,
+    url: ticketUrl,
+  } = useTicketParam(fetched);
 
-  // Pan, zoom, the lit chain and an open editor all live outside `fetched`, so
-  // refetching leaves them as they are.
+  // Pan, zoom and the lit chain all live outside `fetched`, so refetching
+  // leaves them as they are; the open editor is named by the URL, so a refetch
+  // only hands it the refreshed ticket.
   useLiveRefresh(refresh);
 
   // Once per fetched ticket set; measuring only repositions.
@@ -248,7 +262,7 @@ export default function Graph() {
   // came from are about to move.
   const openTicket = (ticket: Ticket) => {
     onHighlight({ type: "editorOpened" });
-    setSelectedTicket(ticket);
+    openSelected(ticket);
   };
 
   // One ResizeObserver watches every card wrapper through the stable ref
@@ -681,8 +695,12 @@ export default function Graph() {
         <TicketEditor
           ticket={selectedTicket}
           projects={projects}
+          ticketUrl={ticketUrl}
+          closeRequested={closeRequested}
+          onCloseCancelled={cancelClose}
+          onDirtyChange={onDirtyChange}
           onClose={() => {
-            setSelectedTicket(null);
+            closeSelected();
             refresh();
           }}
           onUpdate={handleUpdate}

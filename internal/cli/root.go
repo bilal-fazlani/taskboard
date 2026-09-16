@@ -14,9 +14,9 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/tcarac/taskboard/internal/db"
-	"github.com/tcarac/taskboard/internal/livebuild"
 	"github.com/tcarac/taskboard/internal/mcp"
 	"github.com/tcarac/taskboard/internal/server"
+	"github.com/tcarac/taskboard/internal/weburl"
 )
 
 var (
@@ -25,18 +25,9 @@ var (
 	dbPath     string
 )
 
-const (
-	livePort = 3010 // default for the live build installed by `make install`
-	devPort  = 3011 // default for every other build, so it never collides with the live server
-)
-
-// defaultPort keeps development builds off the live server's port.
-func defaultPort() int {
-	if livebuild.Enabled() {
-		return livePort
-	}
-	return devPort
-}
+// defaultPort keeps development builds off the live server's port. The ports
+// themselves live in weburl, which also builds links against them.
+func defaultPort() int { return weburl.DefaultPort() }
 
 func NewRootCmd(webFS fs.FS) *cobra.Command {
 	root := &cobra.Command{

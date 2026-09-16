@@ -10,6 +10,7 @@ import (
 
 	"github.com/tcarac/taskboard/internal/db"
 	"github.com/tcarac/taskboard/internal/models"
+	"github.com/tcarac/taskboard/internal/weburl"
 )
 
 type MCPServer struct {
@@ -211,7 +212,11 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 	case "list_tickets":
 		var a models.TicketFilter
 		json.Unmarshal(args, &a)
-		return s.store.ListTickets(a)
+		tickets, err := s.store.ListTickets(a)
+		if err != nil {
+			return nil, err
+		}
+		return weburl.FillAll(tickets), nil
 
 	case "list_labels":
 		return s.store.ListLabels()
@@ -273,12 +278,16 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 		if t == nil && err == nil {
 			return nil, fmt.Errorf("ticket not found")
 		}
-		return t, err
+		return weburl.Fill(t), err
 
 	case "create_ticket":
 		var a models.CreateTicketRequest
 		json.Unmarshal(args, &a)
-		return s.store.CreateTicket(a)
+		t, err := s.store.CreateTicket(a)
+		if err != nil {
+			return nil, err
+		}
+		return weburl.Fill(t), nil
 
 	case "update_ticket":
 		var a struct {
@@ -286,7 +295,11 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 			models.UpdateTicketRequest
 		}
 		json.Unmarshal(args, &a)
-		return s.store.UpdateTicket(a.ID, a.UpdateTicketRequest)
+		t, err := s.store.UpdateTicket(a.ID, a.UpdateTicketRequest)
+		if err != nil {
+			return nil, err
+		}
+		return weburl.Fill(t), nil
 
 	case "move_ticket":
 		var a struct {
