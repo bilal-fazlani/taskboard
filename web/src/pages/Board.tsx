@@ -15,7 +15,7 @@ import {
 } from "@dnd-kit/core";
 import { Plus } from "lucide-react";
 import { api, type Ticket, type Project, type BoardColumn, type TicketWrite } from "../api/client";
-import TicketPanel from "../components/TicketPanel";
+import TicketEditor from "../components/TicketEditor";
 import CreateTicketModal from "../components/CreateTicketModal";
 import TicketCard from "../components/TicketCard";
 import { STATUSES, STATUS_LABELS, STATUS_COLORS, isStatus, type Status } from "../lib/status";
@@ -280,7 +280,7 @@ export default function Board() {
       )}
 
       {selectedTicket && (
-        <TicketPanel
+        <TicketEditor
           ticket={selectedTicket}
           projects={projects}
           onClose={() => {

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { Maximize, ZoomIn, ZoomOut } from "lucide-react";
 import { api, type Ticket, type Project, type TicketWrite } from "../api/client";
-import TicketPanel from "../components/TicketPanel";
+import TicketEditor from "../components/TicketEditor";
 import TicketCard from "../components/TicketCard";
 import {
   chainFinder,
@@ -639,7 +639,7 @@ export default function Graph() {
       </div>
 
       {selectedTicket && (
-        <TicketPanel
+        <TicketEditor
           ticket={selectedTicket}
           projects={projects}
           onClose={() => {

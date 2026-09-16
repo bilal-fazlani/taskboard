@@ -10,7 +10,7 @@ import {
   Ticket as TicketIcon,
 } from "lucide-react";
 import { api, type Ticket, type Project, type TicketWrite, type Label } from "../api/client";
-import TicketPanel from "../components/TicketPanel";
+import TicketEditor from "../components/TicketEditor";
 import CreateTicketModal from "../components/CreateTicketModal";
 import { STATUSES, STATUS_LABELS, STATUS_STYLES, isStatus, isDone } from "../lib/status";
 
@@ -292,7 +292,7 @@ export default function Tickets() {
       )}
 
       {selectedTicket && (
-        <TicketPanel
+        <TicketEditor
           ticket={selectedTicket}
           projects={projects}
           onClose={() => {
