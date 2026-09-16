@@ -215,6 +215,37 @@ describe("fitTransform", () => {
     );
   });
 
+  it("frames a rectangle away from the canvas origin", () => {
+    // The same 1904x552 extent, but sitting at (100, 40) on the canvas.
+    const box = { x: 100, y: 40, width: 1904, height: 552 };
+    const t = fitTransform(box, viewport);
+    const plain = fitTransform({ width: box.width, height: box.height }, viewport);
+    expect(t.k).toBeCloseTo(plain.k, 10);
+    // The box lands where a graph of the same size at the origin would.
+    const topLeft = toScreen(t, { x: box.x, y: box.y });
+    expect(topLeft.x).toBeCloseTo(plain.x, 10);
+    expect(topLeft.y).toBeCloseTo(plain.y, 10);
+    const bottomRight = toScreen(t, { x: box.x + box.width, y: box.y + box.height });
+    expect(bottomRight.x).toBeCloseTo(viewport.width - FIT_PADDING, 9);
+    expect(bottomRight.y).toBeCloseTo(plain.y + box.height * plain.k, 9);
+    // What lies left of and above the box is pushed off the top left.
+    expect(toScreen(t, { x: 0, y: 0 }).x).toBeLessThan(FIT_PADDING);
+  });
+
+  it("centres a small rectangle at the maximum scale, wherever it sits", () => {
+    const t = fitTransform({ x: 1800, y: 900, width: 256, height: 96 }, viewport, 24);
+    expect(t.k).toBe(MAX_SCALE);
+    const centre = toScreen(t, { x: 1800 + 128, y: 900 + 48 });
+    expect(centre.x).toBeCloseTo(viewport.width / 2, 9);
+    expect(centre.y).toBeCloseTo(viewport.height / 2, 9);
+  });
+
+  it("treats an origin of (0, 0) as no origin at all", () => {
+    expect(fitTransform({ x: 0, y: 0, width: 700, height: 300 }, viewport)).toEqual(
+      fitTransform({ width: 700, height: 300 }, viewport),
+    );
+  });
+
   it("takes a custom padding and survives degenerate sizes", () => {
     const t = fitTransform({ width: 500, height: 500 }, { width: 600, height: 600 }, 50);
     expect(t).toEqual({ x: 50, y: 50, k: 1 });

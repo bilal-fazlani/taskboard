@@ -445,6 +445,42 @@ export function positionGraph<T extends GraphTicket>(
   };
 }
 
+/** A rectangle on the canvas: a size at a top-left corner. */
+export interface Bounds extends Point, Size {}
+
+/** The part of a positioned card a bounding box reads. */
+export type CardBox = Bounds & { id: string };
+
+/**
+ * The smallest rectangle covering the cards whose ids are in `ids`, which is
+ * what the Fit button frames while filters narrow the graph down.
+ *
+ * The answer is null whenever there is nothing narrower than the canvas to
+ * frame: `ids` is null because no filter is set, no card matches, or every
+ * card does. The caller falls back to the whole canvas then, which is more
+ * than the cards' own box — it starts at the origin, so the column headers
+ * and the back edges' lanes above the cards come with it, and it includes the
+ * gutter those edges run down on the right.
+ */
+export function matchingBounds(cards: readonly CardBox[], ids: ReadonlySet<string> | null): Bounds | null {
+  if (ids === null) return null;
+  let matched = 0;
+  let left = Infinity;
+  let top = Infinity;
+  let right = -Infinity;
+  let bottom = -Infinity;
+  for (const card of cards) {
+    if (!ids.has(card.id)) continue;
+    matched++;
+    left = Math.min(left, card.x);
+    top = Math.min(top, card.y);
+    right = Math.max(right, card.x + card.width);
+    bottom = Math.max(bottom, card.y + card.height);
+  }
+  if (matched === 0 || matched === cards.length) return null;
+  return { x: left, y: top, width: right - left, height: bottom - top };
+}
+
 /** Both stages in one call, for callers that have no measured sizes to pass in between. */
 export function layoutGraph<T extends GraphTicket>(
   tickets: readonly T[],

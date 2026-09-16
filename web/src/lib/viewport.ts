@@ -22,6 +22,15 @@ export interface Extent {
   height: number;
 }
 
+/**
+ * A rectangle in graph coordinates: a size and, when it isn't the whole
+ * canvas, the top-left corner it starts at. A missing corner is (0, 0).
+ */
+export interface Box extends Extent {
+  x?: number;
+  y?: number;
+}
+
 /** Room to leave on each side of the viewport. */
 export interface Insets {
   top: number;
@@ -127,15 +136,20 @@ export function zoomPercent(k: number): string {
 }
 
 /**
- * The transform that shows the whole graph in the viewport, leaving `padding`
- * free on each side (one number for all four, or per side), at a scale
- * clamped to [MIN_SCALE, MAX_SCALE]. On an axis where the graph fits it is
- * centred in the room between the paddings. On an axis where it doesn't,
- * because the scale stopped at MIN_SCALE, it starts at the padding instead,
- * so the column headers and the Ready column stay in view rather than the
- * middle of the graph.
+ * The transform that shows `graph` in the viewport, leaving `padding` free on
+ * each side (one number for all four, or per side), at a scale clamped to
+ * [MIN_SCALE, MAX_SCALE]. On an axis where it fits it is centred in the room
+ * between the paddings. On an axis where it doesn't, because the scale
+ * stopped at MIN_SCALE, it starts at the padding instead, so the column
+ * headers and the Ready column stay in view rather than the middle of the
+ * graph.
+ *
+ * `graph` is usually the whole canvas, its corner at the origin. A box with a
+ * corner of its own frames that part of the canvas instead, e.g. the cards
+ * the filters match; the rest of the canvas keeps its place around it and may
+ * fall outside the viewport.
  */
-export function fitTransform(graph: Extent, viewport: Extent, padding: number | Insets = FIT_PADDING): Transform {
+export function fitTransform(graph: Box, viewport: Extent, padding: number | Insets = FIT_PADDING): Transform {
   if (graph.width <= 0 || graph.height <= 0) return IDENTITY;
   const inset = typeof padding === "number" ? { top: padding, right: padding, bottom: padding, left: padding } : padding;
   const room = {
@@ -145,7 +159,13 @@ export function fitTransform(graph: Extent, viewport: Extent, padding: number | 
   const k = clampScale(Math.min(room.width / graph.width, room.height / graph.height));
   const place = (size: number, available: number, start: number) =>
     size * k <= available + EPSILON ? start + (available - size * k) / 2 : start;
-  return { x: place(graph.width, room.width, inset.left), y: place(graph.height, room.height, inset.top), k };
+  // The box's own corner, scaled, comes off the placement: the corner is what
+  // lands at the padding, not the canvas origin.
+  return {
+    x: place(graph.width, room.width, inset.left) - (graph.x ?? 0) * k,
+    y: place(graph.height, room.height, inset.top) - (graph.y ?? 0) * k,
+    k,
+  };
 }
 
 /** A wheel delta in pixels, whatever unit the event reported it in. */

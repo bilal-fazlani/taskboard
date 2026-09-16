@@ -5,6 +5,7 @@ import {
   DEFAULT_ROW_GAP,
   computeGraphTopology,
   layoutGraph,
+  matchingBounds,
   positionGraph,
   type GraphTicket,
   type GraphTopology,
@@ -659,5 +660,64 @@ describe("positionGraph", () => {
 
   it("returns an empty layout for no tickets", () => {
     expect(layoutGraph([], { origin: { x: 4, y: 8 } })).toEqual({ nodes: [], edges: [], columns: [], width: 4, height: 8 });
+  });
+});
+
+describe("matchingBounds", () => {
+  const cards = [
+    { id: "A-1", x: 0, y: 0, width: 256, height: 96 },
+    { id: "A-2", x: 0, y: 112, width: 256, height: 140 },
+    { id: "A-3", x: 336, y: 40, width: 200, height: 96 },
+  ];
+
+  it("covers the cards whose ids match and leaves the rest out", () => {
+    expect(matchingBounds(cards, new Set(["A-2", "A-3"]))).toEqual({ x: 0, y: 40, width: 536, height: 212 });
+    // One short of the whole set is still a narrower box than the canvas.
+    expect(matchingBounds(cards, new Set(["A-1", "A-2"]))).toEqual({ x: 0, y: 0, width: 256, height: 252 });
+  });
+
+  it("gives a single match its own card", () => {
+    expect(matchingBounds(cards, new Set(["A-3"]))).toEqual({ x: 336, y: 40, width: 200, height: 96 });
+  });
+
+  it("answers null with no ids to match, so the caller frames the whole graph", () => {
+    expect(matchingBounds(cards, null)).toBeNull();
+  });
+
+  it("answers null when no card matches", () => {
+    expect(matchingBounds(cards, new Set())).toBeNull();
+    expect(matchingBounds(cards, new Set(["Z-9"]))).toBeNull();
+    expect(matchingBounds([], new Set(["A-1"]))).toBeNull();
+  });
+
+  it("answers null when every card matches, so a no-op filter frames the canvas", () => {
+    expect(matchingBounds(cards, new Set(["A-1", "A-2", "A-3"]))).toBeNull();
+    // Ids that name no card don't stop the set from covering every card.
+    expect(matchingBounds(cards, new Set(["A-1", "A-2", "A-3", "Z-9"]))).toBeNull();
+  });
+
+  it("reads a layout's positioned nodes, whose box is not the canvas", () => {
+    // The page lays the graph out below the column headers and the back
+    // edges' lanes, and leaves a gutter right of the last column, so the
+    // cards' box is smaller than the canvas on every side but the left.
+    const origin = { x: 12, y: 84 };
+    const layout = layoutGraph(
+      tickets([
+        ["A-1", "todo"],
+        ["A-2", "todo"],
+        ["A-3", "todo", ["A-1"]],
+      ]),
+      { origin },
+    );
+    const { width, height } = DEFAULT_NODE_SIZE;
+    expect(matchingBounds(layout.nodes, new Set(["A-2", "A-3"]))).toEqual({
+      x: origin.x,
+      y: origin.y,
+      width: 2 * width + DEFAULT_COLUMN_GAP,
+      height: 2 * height + DEFAULT_ROW_GAP,
+    });
+    // Every node matching falls back to null rather than to this box, which
+    // starts below the headers and stops short of the right-hand gutter.
+    expect(matchingBounds(layout.nodes, new Set(layout.nodes.map((n) => n.id)))).toBeNull();
   });
 });

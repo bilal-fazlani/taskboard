@@ -16,6 +16,7 @@ import {
   chainRole,
   computeGraphTopology,
   edgeChainRole,
+  matchingBounds,
   positionGraph,
   type ChainRole,
   type EdgeChainRole,
@@ -501,8 +502,15 @@ export default function Graph() {
   };
 
   const centre: Point = { x: (viewportSize?.width ?? 0) / 2, y: (viewportSize?.height ?? 0) / 2 };
+  // Fit frames the cards the filters match; the dimmed ones keep their places
+  // and may end up outside the view, and so may a back edge's lane or a
+  // self-loop between two matching cards, which run outside their box. With no
+  // filter set, or with every card or none of them matching, matchingBounds
+  // answers null and Fit frames the whole canvas, as first load always does.
   const fit = () => {
-    if (viewportSize) setTransform(fitTransform({ width: canvasWidth, height: canvasHeight }, viewportSize, FIT_INSETS));
+    if (!viewportSize) return;
+    const box = matchingBounds(layout.nodes, matching) ?? { width: canvasWidth, height: canvasHeight };
+    setTransform(fitTransform(box, viewportSize, FIT_INSETS));
   };
 
   return (
