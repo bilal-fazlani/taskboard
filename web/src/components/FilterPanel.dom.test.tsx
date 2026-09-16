@@ -5,11 +5,54 @@ import { createRoot, type Root } from "react-dom/client";
 import { BrowserRouter, useNavigate, type NavigateFunction } from "react-router-dom";
 import FilterPanel from "./FilterPanel";
 import { useFilters, type FilterState } from "../hooks/useFilters";
+import { DEBOUNCE_MS } from "../lib/liveRefresh";
 
-// Web tests never reach a server: the panel only loads labels.
+// Web tests never reach a server: the bar loads the projects and labels it
+// offers, and nothing else.
+const { labelList, projectList } = vi.hoisted(() => ({ labelList: vi.fn(), projectList: vi.fn() }));
 vi.mock("../api/client", () => ({
-  api: { labels: { list: () => Promise.resolve([{ id: "1", name: "web", color: "#fff", ticketCount: 0 }]) } },
+  api: { labels: { list: labelList }, projects: { list: projectList } },
 }));
+
+// jsdom has no EventSource. This stand-in lets one test deliver the `changed`
+// event the server would send, so the panel's live reload runs for real.
+class FakeEvents {
+  static opened: FakeEvents[] = [];
+  private readonly listeners = new Map<string, Set<() => void>>();
+
+  constructor() {
+    FakeEvents.opened.push(this);
+  }
+
+  addEventListener(type: string, listener: () => void) {
+    let set = this.listeners.get(type);
+    if (!set) this.listeners.set(type, (set = new Set()));
+    set.add(listener);
+  }
+
+  removeEventListener(type: string, listener: () => void) {
+    this.listeners.get(type)?.delete(listener);
+  }
+
+  close() {}
+
+  emit(type: string) {
+    for (const listener of [...(this.listeners.get(type) ?? [])]) listener();
+  }
+}
+
+const label = (name: string) => ({ id: name, name, color: "#fff", ticketCount: 0 });
+const project = (prefix: string) => ({
+  id: prefix,
+  name: "Alpha",
+  prefix,
+  description: "",
+  icon: "",
+  color: "",
+  status: "",
+  createdAt: "",
+  updatedAt: "",
+});
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -26,13 +69,7 @@ function Harness({ panel, onCommit }: { panel: boolean; onCommit: (s: FilterStat
   const state = useFilters();
   const navigate = useNavigate();
   useEffect(() => onCommit(state, navigate));
-  return panel ? (
-    <FilterPanel
-      state={state}
-      projects={[{ id: "p", name: "Alpha", prefix: "ALP", description: "", icon: "", color: "", status: "", createdAt: "", updatedAt: "" }]}
-      repos={[]}
-    />
-  ) : null;
+  return panel ? <FilterPanel state={state} repos={[]} /> : null;
 }
 
 async function mount(url: string, panel = false) {
@@ -57,6 +94,8 @@ async function mount(url: string, panel = false) {
 
 beforeEach(() => {
   window.history.replaceState(null, "", "/");
+  labelList.mockResolvedValue([label("web")]);
+  projectList.mockResolvedValue([project("ALP")]);
 });
 
 afterEach(() => {
@@ -199,9 +238,10 @@ describe("filter panel dropdowns", () => {
     expect([...select("Project").options].map((o) => o.value)).toEqual(["", "ALP"]);
   });
 
-  it("still shows a value that matches no option", async () => {
-    await mount("/?label=gone&repo=a%2Fb", true);
-    expect(select("Label").value).toBe("gone");
+  it("still shows a repo that matches no option", async () => {
+    // A repo is a string the tickets carry rather than a record that can be
+    // deleted, so it is never dropped and has to show whatever the URL says.
+    await mount("/?repo=a%2Fb", true);
     expect(select("Repo").value).toBe("a/b");
   });
 
@@ -216,5 +256,92 @@ describe("filter panel dropdowns", () => {
     ]);
     expect([...select("Status").options].map((o) => o.textContent)).toContain("Agent Review");
     expect(select("Status").value).toBe("agent_review");
+  });
+});
+
+// A filter naming a project or label that no longer exists would leave the
+// view empty for a reason the user cannot see, so it leaves the URL. Status
+// and priority are fixed sets and always stay.
+describe("filters that no longer name anything", () => {
+  it("drops a label that no longer exists, keeping every other filter", async () => {
+    await mount("/table?project=ALP&status=todo&priority=high&label=gone&repo=a%2Fb&q=hook&ticket=ACP-7", true);
+    expect(search()).toBe("?project=ALP&status=todo&priority=high&repo=a/b&q=hook&ticket=ACP-7");
+    expect(select("Label").value).toBe("");
+  });
+
+  it("drops a project that no longer exists, keeping the label", async () => {
+    await mount("/?project=GONE&label=web", true);
+    expect(search()).toBe("?label=web");
+    expect(select("Project").value).toBe("");
+  });
+
+  it("keeps a project and a label that still exist, whatever their case", async () => {
+    await mount("/?project=alp&label=WEB", true);
+    expect(search()).toBe("?project=alp&label=WEB");
+  });
+
+  it("keeps a label until the labels have loaded, and drops it once they have", async () => {
+    let load!: (labels: ReturnType<typeof label>[]) => void;
+    labelList.mockReturnValue(new Promise((resolve) => (load = resolve)));
+    await mount("/?label=web", true);
+    expect(search()).toBe("?label=web");
+    await act(async () => load([]));
+    expect(search()).toBe("");
+  });
+
+  it("keeps a label the panel could not load, rather than claiming there are none", async () => {
+    labelList.mockRejectedValue(new Error("offline"));
+    await mount("/?label=web", true);
+    await act(async () => {});
+    expect(search()).toBe("?label=web");
+  });
+
+  it("keeps a project filter until the projects have loaded", async () => {
+    let load!: (projects: ReturnType<typeof project>[]) => void;
+    projectList.mockReturnValue(new Promise((resolve) => (load = resolve)));
+    await mount("/?project=ALP", true);
+    expect(search()).toBe("?project=ALP");
+    await act(async () => load([project("ALP")]));
+    expect(search()).toBe("?project=ALP");
+  });
+
+  it("drops a project filter once the last project is gone", async () => {
+    // An empty list that really has loaded is not "nothing has arrived yet":
+    // the project the filter names has been deleted, so the filter goes.
+    projectList.mockResolvedValue([]);
+    await mount("/?project=ALP&status=todo", true);
+    expect(search()).toBe("?status=todo");
+  });
+
+  it("keeps a project filter the bar could not load, rather than claiming there are none", async () => {
+    projectList.mockRejectedValue(new Error("offline"));
+    await mount("/?project=ALP", true);
+    await act(async () => {});
+    expect(search()).toBe("?project=ALP");
+  });
+
+  it("drops the filter without adding a history entry", async () => {
+    await mount("/?label=gone", true);
+    const length = window.history.length;
+    expect(search()).toBe("");
+    expect(window.history.length).toBe(length);
+  });
+
+  it("drops a filter on a live change, with no reload", async () => {
+    (globalThis as unknown as { EventSource?: unknown }).EventSource = FakeEvents;
+    try {
+      await mount("/kanban?label=web&status=todo&zoom=2", true);
+      expect(search()).toBe("?label=web&status=todo&zoom=2");
+      // The label is deleted elsewhere and the stream says so: the panel
+      // reloads its labels and the filter naming the deleted one goes.
+      labelList.mockResolvedValue([]);
+      await act(async () => {
+        FakeEvents.opened[FakeEvents.opened.length - 1].emit("changed");
+        await new Promise((resolve) => setTimeout(resolve, DEBOUNCE_MS + 20));
+      });
+      expect(search()).toBe("?status=todo&zoom=2");
+    } finally {
+      delete (globalThis as unknown as { EventSource?: unknown }).EventSource;
+    }
   });
 });

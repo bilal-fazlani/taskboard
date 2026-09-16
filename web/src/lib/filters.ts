@@ -67,10 +67,13 @@ export function withFilter(params: URLSearchParams, key: FilterKey, value: strin
   return next;
 }
 
-/** The params without any filter; every other parameter is kept. */
-export function withoutFilters(params: URLSearchParams): URLSearchParams {
+/**
+ * The params without the given filters, or without any of them by default.
+ * Every other parameter is kept.
+ */
+export function withoutFilters(params: URLSearchParams, keys: readonly FilterKey[] = FILTER_KEYS): URLSearchParams {
   const next = new URLSearchParams(params);
-  for (const key of FILTER_KEYS) next.delete(key);
+  for (const key of keys) next.delete(key);
   return next;
 }
 

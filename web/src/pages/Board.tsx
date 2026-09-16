@@ -135,9 +135,20 @@ export default function Board() {
     setLoading(false);
   }, []);
 
-  useEffect(() => {
-    api.projects.list().then(setProjects).catch(() => setProjects([]));
+  // A failed reload keeps the projects already loaded, and only the newest
+  // reply is taken, the way loadBoard above takes only the newest board.
+  const projectSeqRef = useRef(0);
+  const loadProjects = useCallback(() => {
+    const seq = ++projectSeqRef.current;
+    api.projects
+      .list()
+      .then((loaded) => {
+        if (seq === projectSeqRef.current) setProjects(loaded);
+      })
+      .catch(() => {});
   }, []);
+
+  useEffect(() => loadProjects(), [loadProjects]);
 
   useEffect(() => {
     setLoading(true);
@@ -152,12 +163,14 @@ export default function Board() {
   const draggingRef = useRef(false);
   const missedRefreshRef = useRef(false);
   const liveRefresh = useCallback(() => {
+    // The projects come along, so the editor names a project renamed elsewhere.
+    loadProjects();
     if (draggingRef.current) {
       missedRefreshRef.current = true;
       return;
     }
     loadBoard();
-  }, [loadBoard]);
+  }, [loadBoard, loadProjects]);
   useLiveRefresh(liveRefresh);
 
   // Called when a drag ends, however it ended.
@@ -290,7 +303,6 @@ export default function Board() {
 
       <FilterPanel
         state={filterState}
-        projects={projects}
         repos={repos}
         count={loading ? undefined : { shown: shownCount, total: allTickets.length }}
       />

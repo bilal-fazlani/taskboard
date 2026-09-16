@@ -165,9 +165,21 @@ export default function Graph() {
   const filterState = useFilters();
   const { filters } = filterState;
 
+  // Reloaded with the tickets, so the editor names a project that was renamed
+  // elsewhere. A failed reload keeps the projects already loaded, and a reply
+  // to a fetch a newer one has overtaken is dropped rather than put on screen.
   useEffect(() => {
-    api.projects.list().then(setProjects).catch(() => setProjects([]));
-  }, []);
+    let cancelled = false;
+    api.projects
+      .list()
+      .then((loaded) => {
+        if (!cancelled) setProjects(loaded);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [version]);
 
   useEffect(() => {
     let cancelled = false;
@@ -521,7 +533,6 @@ export default function Graph() {
 
       <FilterPanel
         state={filterState}
-        projects={projects}
         repos={repos}
         count={loading ? undefined : { shown: matching?.size ?? topology.nodes.length, total: topology.nodes.length }}
       />

@@ -130,7 +130,6 @@ export default function Tickets() {
 
       <FilterPanel
         state={filterState}
-        projects={projects}
         repos={repos}
         count={loading ? undefined : { shown: filtered.length, total: tickets.length }}
       />

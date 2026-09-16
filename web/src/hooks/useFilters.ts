@@ -10,6 +10,8 @@ export interface FilterState {
   /** The filters in the URL right now, which can be ahead of `filters` while a navigation renders. */
   latestFilters: () => Filters;
   setFilter: (key: FilterKey, value: string) => void;
+  /** Remove several filters at once, for ones that no longer name anything. */
+  dropFilters: (keys: readonly FilterKey[]) => void;
   clearFilters: () => void;
 }
 
@@ -26,9 +28,16 @@ export function useFilters(): FilterState {
       setParams(withFilter(latestSearchParams(params), key, value), { replace: true }),
     [params, setParams],
   );
+  const dropFilters = useCallback(
+    (keys: readonly FilterKey[]) => {
+      if (keys.length === 0) return;
+      setParams(withoutFilters(latestSearchParams(params), keys), { replace: true });
+    },
+    [params, setParams],
+  );
   const clearFilters = useCallback(
     () => setParams(withoutFilters(latestSearchParams(params)), { replace: true }),
     [params, setParams],
   );
-  return { filters, active: hasFilters(filters), latestFilters, setFilter, clearFilters };
+  return { filters, active: hasFilters(filters), latestFilters, setFilter, dropFilters, clearFilters };
 }
