@@ -1463,3 +1463,63 @@ func TestConcurrentWriterWaitsRatherThanFailing(t *testing.T) {
 		t.Fatalf("second writer returned in %v, so it never actually contended for the lock", elapsed)
 	}
 }
+
+func TestMoveTicketToAgentReview(t *testing.T) {
+	s := newTestStore(t)
+	p := seedProject(t, s, "Agent Control Plane", "ACP")
+	tk := seedTicket(t, s, p.ID, "Bounces to the review agent")
+
+	moved, err := s.MoveTicket(tk.ID, models.MoveTicketRequest{Status: models.StatusAgentReview})
+	if err != nil {
+		t.Fatalf("moving to agent_review: %v", err)
+	}
+	if moved.Status != models.StatusAgentReview {
+		t.Fatalf("status after move = %q, want %q", moved.Status, models.StatusAgentReview)
+	}
+
+	got, err := s.GetTicket(tk.ID)
+	if err != nil {
+		t.Fatalf("reading the moved ticket: %v", err)
+	}
+	if got.Status != models.StatusAgentReview {
+		t.Fatalf("stored status = %q, want %q", got.Status, models.StatusAgentReview)
+	}
+
+	listed, err := s.ListTickets(models.TicketFilter{Status: models.StatusAgentReview})
+	if err != nil {
+		t.Fatalf("listing agent_review tickets: %v", err)
+	}
+	if len(listed) != 1 || listed[0].ID != tk.ID {
+		t.Fatalf("filtering by agent_review returned %d tickets, want just the moved one", len(listed))
+	}
+}
+
+func TestGetBoardHasAColumnPerStatusInOrder(t *testing.T) {
+	s := newTestStore(t)
+	p := seedProject(t, s, "Agent Control Plane", "ACP")
+	tk := seedTicket(t, s, p.ID, "Bounces to the review agent")
+	if _, err := s.MoveTicket(tk.ID, models.MoveTicketRequest{Status: models.StatusAgentReview}); err != nil {
+		t.Fatalf("moving to agent_review: %v", err)
+	}
+
+	board, err := s.GetBoard(p.ID)
+	if err != nil {
+		t.Fatalf("reading the board: %v", err)
+	}
+	if len(board.Columns) != len(models.Statuses) {
+		t.Fatalf("board has %d columns, want %d", len(board.Columns), len(models.Statuses))
+	}
+	for i, status := range models.Statuses {
+		if board.Columns[i].Status != status {
+			t.Fatalf("column %d is %q, want %q", i, board.Columns[i].Status, status)
+		}
+	}
+
+	review := board.Columns[2]
+	if review.Status != models.StatusAgentReview {
+		t.Fatalf("third column is %q, want %q", review.Status, models.StatusAgentReview)
+	}
+	if len(review.Tickets) != 1 || review.Tickets[0].ID != tk.ID {
+		t.Fatalf("agent_review column holds %d tickets, want just the moved one", len(review.Tickets))
+	}
+}
