@@ -19,6 +19,13 @@ import {
   type PositionedColumn,
   type Size,
 } from "../lib/graphLayout";
+import {
+  NO_HIGHLIGHT,
+  highlightedCard,
+  nextHighlight,
+  type HighlightEvent,
+  type HighlightState,
+} from "../lib/graphHighlight";
 import { MIN_COLUMN_GAP, laneCount, lanesHeight, planGutters, routeEdges } from "../lib/graphEdges";
 import { mergeSizes } from "../lib/graphSizes";
 import { columnHeading } from "../lib/graphText";
@@ -140,10 +147,13 @@ export default function Graph() {
   const [version, setVersion] = useState(0);
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
   const [sizes, setSizes] = useState(NO_SIZES);
-  // The card whose chains are lit, by hover or keyboard focus, with the
-  // topology it was picked from. A refetch builds a new topology, which drops
-  // the pick without an effect, so the graph never comes back dimmed.
-  const [active, setActive] = useState<{ topology: GraphTopology<Ticket>; id: string } | null>(null);
+  // What the cards' pointer and focus events have lit, with the topology they
+  // were seen on. A refetch builds a new topology, which drops the highlight
+  // without an effect, so the graph never comes back dimmed.
+  const [picked, setPicked] = useState<{ topology: GraphTopology<Ticket> | null; state: HighlightState }>({
+    topology: null,
+    state: NO_HIGHLIGHT,
+  });
   // Pan and zoom: screen = translate + scale * canvas. `fitPending` is true
   // from first load until the fit has run.
   const [transform, setTransform] = useState<Transform>(IDENTITY);
@@ -219,17 +229,21 @@ export default function Graph() {
   const repos = useMemo(() => repoOptions(fetched ?? [], filters.repo), [fetched, filters.repo]);
   // Adjacency once per topology; the chains once per pick, not per render.
   const findChains = useMemo(() => chainFinder(topology), [topology]);
-  const chains = useMemo(
-    () => (active && active.topology === topology ? findChains(active.id) : null),
-    [active, topology, findChains],
-  );
-  const highlight = (id: string) =>
-    setActive((prev) => (prev && prev.id === id && prev.topology === topology ? prev : { topology, id }));
-  const clearHighlight = () => setActive(null);
+  const lit = picked.topology === topology ? highlightedCard(picked.state) : null;
+  const chains = useMemo(() => (lit === null ? null : findChains(lit)), [lit, findChains]);
+  // graphHighlight.ts holds the rule; the cards below only report what they
+  // see. A state it leaves unchanged leaves this state object alone, so
+  // pointermoves over the card already lit re-render nothing.
+  const onHighlight = (event: HighlightEvent) =>
+    setPicked((prev) => {
+      const from = prev.topology === topology ? prev.state : NO_HIGHLIGHT;
+      const state = nextHighlight(from, event);
+      return state === prev.state && prev.topology === topology ? prev : { topology, state };
+    });
   // Opening the panel clears the highlight, since the pointer and focus it
   // came from are about to move.
   const openTicket = (ticket: Ticket) => {
-    clearHighlight();
+    onHighlight({ type: "editorOpened" });
     setSelectedTicket(ticket);
   };
 
@@ -513,25 +527,14 @@ export default function Graph() {
               height: canvasHeight,
               transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.k})`,
             }}
-            // Only leaving the whole graph clears the highlight, so moving
-            // from card to card never flashes back to undimmed. A card
-            // showing a focus ring takes the highlight back, unless the panel
-            // is open over the graph. :focus-visible is what tells that from
-            // a card the pointer merely pressed on, which must not hold the
-            // graph dimmed once the pointer leaves.
-            onPointerLeave={(e) => {
-              const focused = document.activeElement;
-              const focusedId =
-                focused instanceof HTMLElement &&
-                e.currentTarget.contains(focused) &&
-                focused.matches(":focus-visible")
-                  ? focused.dataset.ticketId
-                  : undefined;
-              if (focusedId && !selectedTicket) highlight(focusedId);
-              else clearHighlight();
-            }}
+            // Each card clears its own highlight as the pointer leaves it, so
+            // this is only a safety net for a pointer that leaves the graph
+            // without the card under it seeing its own leave. Focus moving
+            // out of the graph altogether clears the focus ring's highlight;
+            // moving from card to card is left to the cards.
+            onPointerLeave={() => onHighlight({ type: "pointerLeftGraph" })}
             onBlur={(e) => {
-              if (!e.currentTarget.contains(e.relatedTarget)) clearHighlight();
+              if (!e.currentTarget.contains(e.relatedTarget)) onHighlight({ type: "focusLeftGraph" });
             }}
           >
             {layout.columns.map((column) => (
@@ -604,11 +607,21 @@ export default function Graph() {
                 }}
                 // Move as well as enter: after a re-render under a still
                 // pointer (the panel closing, a refetch) React sends no enter
-                // for the card already under it, and highlight() bails out
-                // when the pick is unchanged.
-                onPointerEnter={() => highlight(node.id)}
-                onPointerMove={() => highlight(node.id)}
-                onFocus={() => highlight(node.id)}
+                // for the card already under it, and the rule ignores a move
+                // over the card already lit.
+                onPointerEnter={() => onHighlight({ type: "pointerOverCard", id: node.id })}
+                onPointerMove={() => onHighlight({ type: "pointerOverCard", id: node.id })}
+                onPointerLeave={() => onHighlight({ type: "pointerLeftCard", id: node.id })}
+                // A card the pointer pressed on is focused without a ring,
+                // and must not hold the graph dimmed once the pointer leaves.
+                onFocus={(e) =>
+                  onHighlight({
+                    type: "cardFocused",
+                    id: node.id,
+                    focusVisible: e.currentTarget.matches(":focus-visible"),
+                  })
+                }
+                onBlur={() => onHighlight({ type: "cardBlurred", id: node.id })}
                 className={`absolute w-64 rounded-lg transition-[opacity,box-shadow] duration-150 ${
                   chains ? CARD_CHAIN_CLASSES[chainRole(chains, node.id)] : dimmed(node.id) ? FILTERED_OUT : ""
                 }`}
