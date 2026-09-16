@@ -59,6 +59,18 @@ function mount(onChange: () => void) {
   });
 }
 
+/** Two pages' worth of the hook, as the views and the filter bar are. */
+function mountBoth(first: () => void, second: () => void) {
+  act(() => {
+    root.render(
+      <>
+        <Probe onChange={first} />
+        <Probe onChange={second} />
+      </>,
+    );
+  });
+}
+
 /** The stream the hook has open right now. */
 function current(): FakeEventSource {
   const last = FakeEventSource.opened[FakeEventSource.opened.length - 1];
@@ -185,6 +197,49 @@ describe("useLiveRefresh", () => {
     act(() => vi.advanceTimersByTime(DEBOUNCE_MS));
     expect(first).not.toHaveBeenCalled();
     expect(second).toHaveBeenCalledTimes(1);
+  });
+
+  // A browser allows six connections to an origin, and a stream is held open
+  // for as long as its page is shown, so several subscribers on one page
+  // share the one stream rather than each holding a connection of its own.
+  it("opens one stream for several subscribers and calls them all", () => {
+    const page = vi.fn();
+    const panel = vi.fn();
+    mountBoth(page, panel);
+    expect(FakeEventSource.opened).toHaveLength(1);
+
+    act(() => current().emit("changed"));
+    act(() => vi.advanceTimersByTime(DEBOUNCE_MS));
+    expect(page).toHaveBeenCalledTimes(1);
+    expect(panel).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the stream while one subscriber remains, and closes it with the last", () => {
+    const page = vi.fn();
+    const panel = vi.fn();
+    mountBoth(page, panel);
+    const stream = current();
+
+    // The second subscriber goes; the stream stays, and still feeds the first.
+    act(() => root.render(<Probe onChange={page} />));
+    expect(stream.closed).toBe(false);
+    act(() => stream.emit("changed"));
+    act(() => vi.advanceTimersByTime(DEBOUNCE_MS));
+    expect(page).toHaveBeenCalledTimes(1);
+    expect(panel).not.toHaveBeenCalled();
+
+    act(() => root.render(null));
+    expect(stream.closed).toBe(true);
+    expect(FakeEventSource.opened).toHaveLength(1);
+  });
+
+  it("opens a stream again for a subscriber arriving after the last one left", () => {
+    mount(vi.fn());
+    act(() => root.render(null));
+    expect(current().closed).toBe(true);
+    mount(vi.fn());
+    expect(FakeEventSource.opened).toHaveLength(2);
+    expect(current().closed).toBe(false);
   });
 
   it("closes the stream on unmount and stops reconnecting", () => {
