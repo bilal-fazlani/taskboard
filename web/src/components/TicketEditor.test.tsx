@@ -83,10 +83,10 @@ function renderEditor(
       {...extra}
     />,
   );
-  const rerenderWith = (props: { closeRequested?: boolean }) =>
+  const rerenderWith = (props: { closeRequested?: boolean; ticket?: Ticket }) =>
     utils.rerender(
       <TicketEditor
-        ticket={ticket}
+        ticket={props.ticket ?? ticket}
         projects={[project]}
         onClose={onClose}
         onUpdate={onUpdate}
@@ -94,7 +94,7 @@ function renderEditor(
         onCloseCancelled={onCloseCancelled}
         onDirtyChange={onDirtyChange}
         {...extra}
-        {...props}
+        closeRequested={props.closeRequested ?? extra.closeRequested}
       />,
     );
   return { ...utils, rerenderWith, onClose, onUpdate, onDelete, onCloseCancelled, onDirtyChange };
@@ -191,12 +191,21 @@ describe("the due date input", () => {
     expect((screen.getByLabelText("Due Date") as HTMLInputElement).value).toBe("");
   });
 
-  it("re-sends an RFC 3339 due date as a plain date after an unrelated edit, matching the API's real shape", () => {
+  it("leaves an untouched due date out of the save, whatever shape it arrived in", () => {
+    // An omitted field is the API's "leave it unchanged", so a due date the
+    // user never touched is never re-sent — not even as the same day.
     const { onUpdate } = renderEditor(makeTicket({ dueDate: "2026-10-01T00:00:00Z" }));
     expect((screen.getByLabelText("Due Date") as HTMLInputElement).value).toBe("2026-10-01");
     editTitle();
     fireEvent.click(saveButton()!);
-    expect(onUpdate.mock.calls[0][1].dueDate).toBe("2026-10-01");
+    expect("dueDate" in onUpdate.mock.calls[0][1]).toBe(false);
+  });
+
+  it("sends an edited due date as a plain date, matching the API's real shape", () => {
+    const { onUpdate } = renderEditor(makeTicket({ dueDate: "2026-10-01T00:00:00Z" }));
+    fireEvent.change(screen.getByLabelText("Due Date"), { target: { value: "2026-12-24" } });
+    fireEvent.click(saveButton()!);
+    expect(onUpdate.mock.calls[0][1].dueDate).toBe("2026-12-24");
   });
 });
 
@@ -380,10 +389,12 @@ describe("closing with unsaved edits", () => {
     expect(document.activeElement).toBe(keep);
   });
 
-  it("closes straight away once the edits are saved", () => {
+  it("closes straight away once the edits are saved", async () => {
     const { onClose, onUpdate } = renderEditor();
     editTitle();
-    fireEvent.click(saveButton()!);
+    // Saving is asynchronous now: the edits are only let go once the save has
+    // come back, so every one of these waits for it.
+    await act(async () => fireEvent.click(saveButton()!));
     expect(onUpdate).toHaveBeenCalledTimes(1);
     fireEvent.keyDown(document, { key: "Escape" });
     expect(confirmDialog()).toBeNull();
@@ -427,25 +438,88 @@ describe("focus", () => {
 });
 
 describe("the dirty flag and saving", () => {
-  it("shows Save only after an edit and saves every field", () => {
+  it("shows Save only after an edit, and sends just the fields that changed", async () => {
     const { onUpdate } = renderEditor();
     expect(saveButton()).toBeNull();
 
     fireEvent.change(screen.getByLabelText("Title"), { target: { value: "New title" } });
     expect(saveButton()).not.toBeNull();
 
-    fireEvent.click(saveButton()!);
-    expect(onUpdate).toHaveBeenCalledWith("t1", {
-      title: "New title",
-      description: "Some **markdown**",
-      status: "todo",
-      priority: "high",
-      dueDate: "2026-10-01",
-      repos: ["acme/auth-web"],
-      labels: ["frontend"],
-      dependsOn: ["t2"],
-    });
+    await act(async () => fireEvent.click(saveButton()!));
+    // Every other field is left out, so whatever the server holds for it
+    // stays: Save merges by field rather than writing the whole ticket back.
+    expect(onUpdate).toHaveBeenCalledWith("t1", { title: "New title" });
     expect(saveButton()).toBeNull();
+  });
+
+  it("keeps the edits, and says why, when the save fails", async () => {
+    const { onUpdate, onDirtyChange } = renderEditor();
+    await waitFor(() => expect(mockApi.tickets.get).toHaveBeenCalled());
+    await act(async () => {});
+    editTitle("Mine");
+    fireEvent.change(screen.getByLabelText("Priority"), { target: { value: "low" } });
+    // The ticket was deleted while the editor was open: the PUT 404s.
+    onUpdate.mockRejectedValue(new Error('API error 404: {"error":"ticket not found"}'));
+
+    await act(async () => fireEvent.click(saveButton()!));
+
+    const error = screen.getByTestId("ticket-save-error");
+    expect(error.getAttribute("role")).toBe("alert");
+    expect(error.textContent).toContain("no longer exists");
+    expect(error.textContent).toContain("Your edits are still here");
+    // Nothing was given up: the edits, the dirty flag and the editor all stay.
+    expect((screen.getByLabelText("Title") as HTMLInputElement).value).toBe("Mine");
+    expect((screen.getByLabelText("Priority") as HTMLSelectElement).value).toBe("low");
+    expect(saveButton()).not.toBeNull();
+    expect(onDirtyChange).toHaveBeenLastCalledWith(true);
+  });
+
+  it("sends the same fields again when a failed save is retried, and clears the error", async () => {
+    const { onUpdate } = renderEditor();
+    await waitFor(() => expect(mockApi.tickets.get).toHaveBeenCalled());
+    await act(async () => {});
+    editTitle("Mine");
+    onUpdate.mockRejectedValueOnce(new Error("API error 500: {}"));
+    await act(async () => fireEvent.click(saveButton()!));
+    expect(screen.getByTestId("ticket-save-error")).toBeTruthy();
+
+    await act(async () => fireEvent.click(saveButton()!));
+    expect(onUpdate.mock.calls).toEqual([
+      ["t1", { title: "Mine" }],
+      ["t1", { title: "Mine" }],
+    ]);
+    expect(screen.queryByTestId("ticket-save-error")).toBeNull();
+    expect(saveButton()).toBeNull();
+  });
+
+  it("waits for the save before letting the edits go", async () => {
+    let finish!: () => void;
+    const { onUpdate, onDirtyChange } = renderEditor();
+    await waitFor(() => expect(mockApi.tickets.get).toHaveBeenCalled());
+    await act(async () => {});
+    editTitle("Mine");
+    onUpdate.mockReturnValue(new Promise<void>((resolve) => (finish = resolve)));
+
+    await act(async () => fireEvent.click(saveButton()!));
+    // Still unsaved while the request is in flight, so nothing can unmount the
+    // editor on the strength of a save that has not landed.
+    expect(onDirtyChange).toHaveBeenLastCalledWith(true);
+    expect(saveButton()).not.toBeNull();
+
+    await act(async () => finish());
+    expect(onDirtyChange).toHaveBeenLastCalledWith(false);
+    expect(saveButton()).toBeNull();
+  });
+
+  it("sends only what changed since the last save", async () => {
+    const { onUpdate } = renderEditor();
+    await waitFor(() => expect(mockApi.tickets.get).toHaveBeenCalled());
+    await act(async () => {});
+    editTitle("First");
+    await act(async () => fireEvent.click(saveButton()!));
+    fireEvent.change(screen.getByLabelText("Priority"), { target: { value: "low" } });
+    await act(async () => fireEvent.click(saveButton()!));
+    expect(onUpdate.mock.calls[1][1]).toEqual({ priority: "low" });
   });
 
   it("sends an explicit clear once the due date is cleared", () => {
@@ -553,6 +627,196 @@ describe("the dirty flag and saving", () => {
     await screen.findByText("server");
     expect(screen.getByText("Deploy")).toBeTruthy();
     expect(saveButton()).toBeNull();
+  });
+});
+
+// The ticket can change under the editor: a live refresh (ACP-7) hands the
+// page a newer version while the editor is open. What happens next depends on
+// whether there is anything unsaved to lose.
+describe("a ticket that changed elsewhere", () => {
+  const notice = () => screen.queryByTestId("ticket-changed-notice");
+  const reload = () => screen.getByRole("button", { name: "Reload" });
+
+  // What a live refresh does: the page passes the refreshed ticket down, and
+  // the editor's own fetch for the full one answers with it too.
+  async function changeTo(
+    rerenderWith: (props: { ticket?: Ticket }) => void,
+    overrides: Partial<Ticket>,
+  ) {
+    const next = makeTicket({ updatedAt: "2026-09-16T23:00:00Z", ...overrides });
+    mockApi.tickets.get.mockResolvedValue(next);
+    await act(async () => rerenderWith({ ticket: next }));
+    return next;
+  }
+
+  async function settled() {
+    await waitFor(() => expect(mockApi.tickets.get).toHaveBeenCalled());
+    await act(async () => {});
+  }
+
+  it("refreshes a clean editor quietly", async () => {
+    const { rerenderWith } = renderEditor();
+    await settled();
+
+    await changeTo(rerenderWith, {
+      title: "Renamed elsewhere",
+      status: "in_progress",
+      priority: "low",
+      dueDate: "2026-12-24",
+      labels: [{ id: "l9", name: "server", color: "#fff", ticketCount: 0 }],
+    });
+
+    expect((screen.getByLabelText("Title") as HTMLInputElement).value).toBe("Renamed elsewhere");
+    expect((screen.getByLabelText("Status") as HTMLSelectElement).value).toBe("in_progress");
+    expect((screen.getByLabelText("Priority") as HTMLSelectElement).value).toBe("low");
+    expect((screen.getByLabelText("Due Date") as HTMLInputElement).value).toBe("2026-12-24");
+    expect(screen.getByText("server")).toBeTruthy();
+    expect(screen.getByTestId("ticket-editor-status").textContent).toBe("In Progress");
+    // Quietly: no notice, and nothing to save.
+    expect(notice()).toBeNull();
+    expect(saveButton()).toBeNull();
+  });
+
+  it("leaves the focused control and its caret where they are", async () => {
+    const { rerenderWith } = renderEditor();
+    await settled();
+    const title = screen.getByLabelText("Title") as HTMLInputElement;
+    title.focus();
+    title.setSelectionRange(4, 4);
+
+    await changeTo(rerenderWith, { status: "in_progress" });
+
+    // The controls are filled in, not rebuilt, so a refresh under someone
+    // reading or about to type takes neither the focus nor the caret away.
+    expect(screen.getByLabelText("Title")).toBe(title);
+    expect(document.activeElement).toBe(title);
+    expect(title.selectionStart).toBe(4);
+    expect((screen.getByLabelText("Status") as HTMLSelectElement).value).toBe("in_progress");
+  });
+
+  it("keeps every edit and says the ticket changed when there are unsaved edits", async () => {
+    const { rerenderWith, onDirtyChange } = renderEditor();
+    await settled();
+    editTitle();
+    fireEvent.change(screen.getByLabelText("Priority"), { target: { value: "low" } });
+
+    await changeTo(rerenderWith, { title: "Renamed elsewhere", status: "done" });
+
+    // Not one control is filled in from the server behind the user's back.
+    expect((screen.getByLabelText("Title") as HTMLInputElement).value).toBe("Edited title");
+    expect((screen.getByLabelText("Priority") as HTMLSelectElement).value).toBe("low");
+    expect((screen.getByLabelText("Status") as HTMLSelectElement).value).toBe("todo");
+    expect(saveButton()).not.toBeNull();
+    expect(onDirtyChange).toHaveBeenLastCalledWith(true);
+    expect(notice()!.textContent).toContain("This ticket changed");
+    expect(notice()!.getAttribute("role")).toBe("status");
+  });
+
+  it("says nothing when the change touched no field the editor holds", async () => {
+    const { rerenderWith } = renderEditor();
+    await settled();
+    editTitle();
+    // A subtask added elsewhere, say: a newer ticket with the same fields.
+    await changeTo(rerenderWith, { subtasks: [sub("s1", "Write tests"), sub("s2", "Deploy")] });
+    expect(notice()).toBeNull();
+    expect((screen.getByLabelText("Title") as HTMLInputElement).value).toBe("Edited title");
+  });
+
+  it("asks before the reload discards the edits, and keeps them when cancelled", async () => {
+    const { rerenderWith } = renderEditor();
+    await settled();
+    editTitle();
+    await changeTo(rerenderWith, { title: "Renamed elsewhere" });
+
+    fireEvent.click(reload());
+    expect(confirmDialog()).toBeTruthy();
+    fireEvent.click(within(confirmDialog()!).getByRole("button", { name: "Keep editing" }));
+
+    expect((screen.getByLabelText("Title") as HTMLInputElement).value).toBe("Edited title");
+    expect(saveButton()).not.toBeNull();
+    expect(notice()).not.toBeNull();
+  });
+
+  it("shows the latest version once the discard is confirmed", async () => {
+    const { rerenderWith, onUpdate, onClose } = renderEditor();
+    await settled();
+    editTitle();
+    await changeTo(rerenderWith, { title: "Renamed elsewhere", status: "done" });
+
+    fireEvent.click(reload());
+    fireEvent.click(within(confirmDialog()!).getByRole("button", { name: "Discard" }));
+
+    expect((screen.getByLabelText("Title") as HTMLInputElement).value).toBe("Renamed elsewhere");
+    expect((screen.getByLabelText("Status") as HTMLSelectElement).value).toBe("done");
+    expect(notice()).toBeNull();
+    expect(saveButton()).toBeNull();
+    // A reload is not a save and not a close.
+    expect(onUpdate).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("reloads the newest version when another change arrived meanwhile", async () => {
+    const { rerenderWith } = renderEditor();
+    await settled();
+    editTitle();
+    await changeTo(rerenderWith, { title: "First rename" });
+    await changeTo(rerenderWith, { title: "Second rename", updatedAt: "2026-09-16T23:30:00Z" });
+
+    fireEvent.click(reload());
+    fireEvent.click(within(confirmDialog()!).getByRole("button", { name: "Discard" }));
+    expect((screen.getByLabelText("Title") as HTMLInputElement).value).toBe("Second rename");
+  });
+
+  it("saves the edited fields only, so the change elsewhere survives", async () => {
+    const { rerenderWith, onUpdate } = renderEditor();
+    await settled();
+    editTitle();
+    await changeTo(rerenderWith, { status: "done", priority: "urgent" });
+
+    await act(async () => fireEvent.click(saveButton()!));
+    // Status and priority are left out, so the server keeps what it has;
+    // sending the whole ticket would have written "todo" and "high" back.
+    expect(onUpdate).toHaveBeenCalledWith("t1", { title: "Edited title" });
+    expect(notice()).toBeNull();
+  });
+
+  it("sends the user's value for a field they and the server both changed", async () => {
+    const { rerenderWith, onUpdate } = renderEditor();
+    await settled();
+    editTitle("Mine");
+    await changeTo(rerenderWith, { title: "Theirs" });
+    fireEvent.click(saveButton()!);
+    expect(onUpdate).toHaveBeenCalledWith("t1", { title: "Mine" });
+  });
+
+  it("shows the server's latest values for untouched fields once the save comes back", async () => {
+    const { rerenderWith, onUpdate } = renderEditor();
+    await settled();
+    editTitle("Mine");
+    await changeTo(rerenderWith, { status: "done" });
+    fireEvent.click(saveButton()!);
+    expect(onUpdate).toHaveBeenCalledWith("t1", { title: "Mine" });
+
+    // The page refetches after a save; with nothing unsaved left, the editor
+    // simply shows what came back.
+    await changeTo(rerenderWith, {
+      title: "Mine",
+      status: "done",
+      updatedAt: "2026-09-16T23:45:00Z",
+    });
+    expect((screen.getByLabelText("Title") as HTMLInputElement).value).toBe("Mine");
+    expect((screen.getByLabelText("Status") as HTMLSelectElement).value).toBe("done");
+    expect(notice()).toBeNull();
+  });
+
+  it("keeps showing the ticket when the refetch fails", async () => {
+    const { rerenderWith } = renderEditor();
+    await settled();
+    editTitle();
+    mockApi.tickets.get.mockRejectedValue(new Error("offline"));
+    await act(async () => rerenderWith({ ticket: makeTicket({ updatedAt: "2026-09-16T23:00:00Z" }) }));
+    expect((screen.getByLabelText("Title") as HTMLInputElement).value).toBe("Edited title");
+    expect(notice()).toBeNull();
   });
 });
 

@@ -1,11 +1,19 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
-import { X, Trash2, CheckCircle2, Circle, Pencil, Eye, Copy, Check } from "lucide-react";
+import { X, Trash2, CheckCircle2, Circle, Pencil, Eye, Copy, Check, RefreshCw, AlertTriangle } from "lucide-react";
 import Markdown from "react-markdown";
 import { api, type Ticket, type Project, type Subtask, type TicketWrite } from "../api/client";
 import LabelPicker from "./LabelPicker";
 import RepoPicker from "./RepoPicker";
 import DependencyPicker from "./DependencyPicker";
+import { saveErrorMessage } from "../lib/saveError";
 import { STATUSES, STATUS_LABELS, STATUS_STYLES, isStatus } from "../lib/status";
+import {
+  changedFields,
+  editedWrite,
+  ticketFields,
+  toDateInputValue,
+  type TicketFields,
+} from "../lib/ticketFields";
 
 const PRIORITIES = ["urgent", "high", "medium", "low"];
 
@@ -16,18 +24,6 @@ const SELECT =
 
 const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
-
-// The API returns dueDate as an RFC 3339 timestamp at midnight UTC (e.g.
-// "2026-10-01T00:00:00Z"), which an <input type="date"> rejects outright — it
-// wants a bare "yyyy-MM-dd". Slicing off everything from "T" onward reads the
-// calendar date exactly as the server stored it, with no Date object and so
-// no local-timezone conversion: parsing that timestamp with `new Date(...)`
-// and formatting it back would shift the displayed day for anyone west of
-// UTC. A plain "YYYY-MM-DD" (as CreateTicketModal sends and the API echoes
-// back) passes through unchanged since it has no "T" to slice at.
-function toDateInputValue(dueDate?: string): string {
-  return dueDate ? dueDate.slice(0, 10) : "";
-}
 
 // The ticket editor: a modal that fills the viewport minus a margin, so the
 // scrim stays visible around it. It closes from the header's close button,
@@ -60,7 +56,9 @@ export default function TicketEditor({
   // just be unmounted.
   onDirtyChange?: (dirty: boolean) => void;
   onClose: () => void;
-  onUpdate: (id: string, data: TicketWrite) => void;
+  // Answering with a promise lets the editor wait for the save and keep the
+  // edits when it fails; every page does, since each one refetches after it.
+  onUpdate: (id: string, data: TicketWrite) => void | Promise<void>;
   onDelete: (id: string) => void;
 }) {
   const [title, setTitle] = useState(ticket.title);
@@ -81,6 +79,55 @@ export default function TicketEditor({
   // the editor still opens instantly.
   const [detail, setDetail] = useState<Ticket>(ticket);
   const dirtyRef = useRef(false);
+  // The server version the controls were last filled from. Save sends what
+  // has moved away from it, so a field the user never touched is left for
+  // whoever else changed it.
+  const baseRef = useRef<TicketFields>(ticketFields(ticket));
+  // A newer version of this ticket that arrived while there were unsaved
+  // edits, kept for the notice's reload rather than applied.
+  const [changed, setChanged] = useState<Ticket | null>(null);
+  const changedRef = useRef<Ticket | null>(null);
+  // A save in flight, and what the last one failed with. Nothing is given up
+  // until the save has come back: a failed one leaves the editor as it was,
+  // edits and all, with a line saying why.
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const noteChanged = (latest: Ticket | null) => {
+    changedRef.current = latest;
+    setChanged(latest);
+  };
+
+  /** The fields as the controls hold them right now. */
+  const currentFields = (): TicketFields => ({
+    title,
+    description,
+    status,
+    priority,
+    dueDate,
+    repos,
+    labels,
+    dependsOn: dependsOn.map((d) => d.id),
+  });
+
+  // Fills every control from a ticket and forgets the edits, which is what a
+  // quiet refresh and the notice's reload both do.
+  const syncFrom = useCallback((full: Ticket) => {
+    setTitle(full.title);
+    setDescription(full.description);
+    setStatus(full.status);
+    setPriority(full.priority);
+    setDueDate(toDateInputValue(full.dueDate));
+    setRepos(full.repos || []);
+    setLabels((full.labels || []).map((l) => l.name));
+    setDependsOn(full.dependsOn || []);
+    setSubtasks(full.subtasks || []);
+    baseRef.current = ticketFields(full);
+    dirtyRef.current = false;
+    setDirty(false);
+    changedRef.current = null;
+    setChanged(null);
+    setSaveError(null);
+  }, []);
 
   const dialogRef = useRef<HTMLDivElement>(null);
   const confirmRef = useRef<HTMLDivElement>(null);
@@ -102,6 +149,15 @@ export default function TicketEditor({
   const priorityId = `${ids}-priority`;
   const dueDateId = `${ids}-due`;
 
+  // The full ticket, fetched on open and again whenever the ticket the editor
+  // was handed changes — which is how an edit made elsewhere, arriving as a
+  // live refresh with a newer `updatedAt`, reaches the editor.
+  //
+  // With nothing unsaved the editor simply refreshes, quietly: the user is
+  // looking at whatever is true now. With unsaved edits nothing is replaced,
+  // because a control filled in from the server under the user's hands is an
+  // edit lost; the notice says the ticket changed and offers the new version
+  // instead.
   useEffect(() => {
     let cancelled = false;
     api.tickets
@@ -109,20 +165,20 @@ export default function TicketEditor({
       .then((full) => {
         if (cancelled) return;
         setDetail(full);
-        // Never overwrite edits the user made while the fetch was in flight.
-        if (dirtyRef.current) return;
-        setRepos(full.repos || []);
-        setLabels((full.labels || []).map((l) => l.name));
-        setDependsOn(full.dependsOn || []);
-        setSubtasks(full.subtasks || []);
+        if (!dirtyRef.current) {
+          syncFrom(full);
+          return;
+        }
+        const latest = ticketFields(full);
+        noteChanged(changedFields(baseRef.current, latest).length > 0 ? full : null);
       })
       .catch(() => {
-        // A failed detail fetch just leaves the passed-in ticket on screen.
+        // A failed fetch just leaves what is on screen where it is.
       });
     return () => {
       cancelled = true;
     };
-  }, [ticket.id]);
+  }, [ticket.id, ticket.updatedAt, syncFrom]);
 
   // Move focus into the dialog on open and give it back on close.
   useEffect(() => {
@@ -154,6 +210,14 @@ export default function TicketEditor({
   );
 
   const requestClose = useCallback(() => confirmDiscardThen(onClose), [confirmDiscardThen, onClose]);
+
+  // The notice's reload: the latest version replaces the edits, so it asks
+  // first, down the same path every other discard takes.
+  const reloadChanged = () =>
+    confirmDiscardThen(() => {
+      const latest = changedRef.current;
+      if (latest) syncFrom(latest);
+    });
 
   // Tell whoever owns the URL about unsaved edits, so a Back that drops the
   // `ticket` parameter keeps the editor mounted long enough to ask about them
@@ -243,22 +307,32 @@ export default function TicketEditor({
     setDirty(true);
   };
 
-  const handleSave = () => {
-    onUpdate(ticket.id, {
-      title,
-      description,
-      status,
-      priority,
-      // Always sent, never omitted: an empty string is the API's explicit
-      // "clear the due date" (an omitted field means "leave it unchanged",
-      // which this save intentionally does not rely on for dueDate).
-      dueDate,
-      repos,
-      labels,
-      dependsOn: dependsOn.map((d) => d.id),
-    });
+  // Save sends the fields the user edited and no others, so a change made
+  // elsewhere to a field they never touched survives; where both changed the
+  // same field the user's value wins, since the notice already told them. A
+  // due date the user cleared goes as "", the API's explicit clear, while one
+  // they never touched is left out and so left alone.
+  //
+  // The edits are only let go once the save has come back. A save that fails —
+  // the ticket deleted while the editor was open, the server refusing the
+  // input, the network gone — leaves the editor dirty and open with every
+  // field as the user left it, so pressing Save again sends the same fields.
+  const handleSave = async () => {
+    const current = currentFields();
+    setSaveError(null);
+    setSaving(true);
+    try {
+      await onUpdate(ticket.id, editedWrite(baseRef.current, current));
+    } catch (error) {
+      setSaveError(saveErrorMessage(error));
+      return;
+    } finally {
+      setSaving(false);
+    }
+    baseRef.current = current;
     dirtyRef.current = false;
     setDirty(false);
+    noteChanged(null);
   };
 
   const handleAddSubtask = async (e: React.FormEvent) => {
@@ -320,7 +394,8 @@ export default function TicketEditor({
             <button
               type="button"
               onClick={handleSave}
-              className="shrink-0 whitespace-nowrap rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-blue-500"
+              disabled={saving}
+              className="shrink-0 whitespace-nowrap rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-blue-500 disabled:opacity-60"
             >
               Save Changes
             </button>
@@ -347,6 +422,37 @@ export default function TicketEditor({
             <X className="h-5 w-5" />
           </button>
         </header>
+
+        {saveError && (
+          <div
+            inert={confirmOpen}
+            role="alert"
+            data-testid="ticket-save-error"
+            className="flex shrink-0 items-center gap-2 border-b border-red-500/40 bg-red-500/10 px-4 py-2 text-xs text-red-200 sm:px-6"
+          >
+            <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+            <span>{saveError}</span>
+          </div>
+        )}
+
+        {changed && (
+          <div
+            inert={confirmOpen}
+            role="status"
+            data-testid="ticket-changed-notice"
+            className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-amber-500/30 bg-amber-500/10 px-4 py-2 text-xs text-amber-200 sm:px-6"
+          >
+            <span>This ticket changed elsewhere. Your unsaved edits are kept.</span>
+            <button
+              type="button"
+              onClick={reloadChanged}
+              className="inline-flex items-center gap-1.5 rounded-md border border-amber-500/40 px-2 py-1 font-medium text-amber-100 transition-colors hover:bg-amber-500/20"
+            >
+              <RefreshCw className="h-3 w-3" />
+              Reload
+            </button>
+          </div>
+        )}
 
         <div
           inert={confirmOpen}
