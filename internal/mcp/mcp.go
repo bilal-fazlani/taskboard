@@ -183,7 +183,11 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 			ID string `json:"id"`
 		}
 		json.Unmarshal(args, &a)
-		p, err := s.store.GetProject(a.ID)
+		projectID, err := s.resolveProjectRefOrError(a.ID)
+		if err != nil {
+			return nil, err
+		}
+		p, err := s.store.GetProject(projectID)
 		if p == nil && err == nil {
 			return nil, fmt.Errorf("project not found")
 		}
@@ -200,14 +204,22 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 			models.UpdateProjectRequest
 		}
 		json.Unmarshal(args, &a)
-		return s.store.UpdateProject(a.ID, a.UpdateProjectRequest)
+		projectID, err := s.resolveProjectRefOrError(a.ID)
+		if err != nil {
+			return nil, err
+		}
+		return s.store.UpdateProject(projectID, a.UpdateProjectRequest)
 
 	case "delete_project":
 		var a struct {
 			ID string `json:"id"`
 		}
 		json.Unmarshal(args, &a)
-		return map[string]bool{"deleted": true}, s.store.DeleteProject(a.ID)
+		projectID, err := s.resolveProjectRefOrError(a.ID)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]bool{"deleted": true}, s.store.DeleteProject(projectID)
 
 	case "list_tickets":
 		var a models.TicketFilter
@@ -274,7 +286,11 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 			ID string `json:"id"`
 		}
 		json.Unmarshal(args, &a)
-		t, err := s.store.GetTicket(a.ID)
+		ticketID, err := s.resolveTicketRefOrError(a.ID)
+		if err != nil {
+			return nil, err
+		}
+		t, err := s.store.GetTicket(ticketID)
 		if t == nil && err == nil {
 			return nil, fmt.Errorf("ticket not found")
 		}
@@ -295,7 +311,11 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 			models.UpdateTicketRequest
 		}
 		json.Unmarshal(args, &a)
-		t, err := s.store.UpdateTicket(a.ID, a.UpdateTicketRequest)
+		ticketID, err := s.resolveTicketRefOrError(a.ID)
+		if err != nil {
+			return nil, err
+		}
+		t, err := s.store.UpdateTicket(ticketID, a.UpdateTicketRequest)
 		if err != nil {
 			return nil, err
 		}
@@ -307,14 +327,22 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 			models.MoveTicketRequest
 		}
 		json.Unmarshal(args, &a)
-		return s.store.MoveTicket(a.ID, a.MoveTicketRequest)
+		ticketID, err := s.resolveTicketRefOrError(a.ID)
+		if err != nil {
+			return nil, err
+		}
+		return s.store.MoveTicket(ticketID, a.MoveTicketRequest)
 
 	case "delete_ticket":
 		var a struct {
 			ID string `json:"id"`
 		}
 		json.Unmarshal(args, &a)
-		return map[string]bool{"deleted": true}, s.store.DeleteTicket(a.ID)
+		ticketID, err := s.resolveTicketRefOrError(a.ID)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]bool{"deleted": true}, s.store.DeleteTicket(ticketID)
 
 	case "get_board":
 		var a struct {
@@ -332,7 +360,11 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 		if a.TicketID == "" || a.Title == "" {
 			return nil, fmt.Errorf("ticketId and title are required")
 		}
-		return s.store.AddSubtask(a.TicketID, models.CreateSubtaskRequest{Title: a.Title})
+		ticketID, err := s.resolveTicketRefOrError(a.TicketID)
+		if err != nil {
+			return nil, err
+		}
+		return s.store.AddSubtask(ticketID, models.CreateSubtaskRequest{Title: a.Title})
 
 	case "batch_create_subtasks":
 		var a struct {
@@ -345,9 +377,13 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 		if a.TicketID == "" || len(a.Subtasks) == 0 {
 			return nil, fmt.Errorf("ticketId and at least one subtask are required")
 		}
+		ticketID, err := s.resolveTicketRefOrError(a.TicketID)
+		if err != nil {
+			return nil, err
+		}
 		var created []models.Subtask
 		for _, sub := range a.Subtasks {
-			st, err := s.store.AddSubtask(a.TicketID, models.CreateSubtaskRequest{Title: sub.Title})
+			st, err := s.store.AddSubtask(ticketID, models.CreateSubtaskRequest{Title: sub.Title})
 			if err != nil {
 				return nil, fmt.Errorf("creating subtask %q: %w", sub.Title, err)
 			}
@@ -372,6 +408,30 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 	default:
 		return nil, fmt.Errorf("unknown tool: %s", name)
 	}
+}
+
+// resolveTicketRefOrError resolves a ticket id-or-display-key argument the
+// way get_ticket, update_ticket, move_ticket, delete_ticket, create_subtask
+// and batch_create_subtasks accept it: a ULID is a literal ticket id,
+// anything else is a case-insensitive PREFIX-NUMBER display key like BILL-2.
+// An empty argument is rejected up front with a clear message instead of
+// reaching the store as an empty id.
+func (s *MCPServer) resolveTicketRefOrError(ref string) (string, error) {
+	if strings.TrimSpace(ref) == "" {
+		return "", fmt.Errorf("id is required")
+	}
+	return s.store.ResolveTicketID(ref)
+}
+
+// resolveProjectRefOrError resolves a project id-or-prefix argument the way
+// get_project, update_project and delete_project accept it, turning an empty
+// argument into a clear error up front instead of reaching the store as an
+// empty id.
+func (s *MCPServer) resolveProjectRefOrError(ref string) (string, error) {
+	if strings.TrimSpace(ref) == "" {
+		return "", fmt.Errorf("id is required")
+	}
+	return s.store.ResolveProjectRef(ref)
 }
 
 // resolveLabelRefOrError resolves a label id-or-exact-name argument the way
@@ -411,7 +471,7 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 			Description: "Get detailed project information by ID",
 			InputSchema: jsonSchema{
 				Type:       "object",
-				Properties: map[string]schemaProp{"id": {Type: "string", Description: "Project ID"}},
+				Properties: map[string]schemaProp{"id": {Type: "string", Description: "Project ID or prefix (case-insensitive)"}},
 				Required:   []string{"id"},
 			},
 		},
@@ -439,7 +499,7 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 			InputSchema: jsonSchema{
 				Type: "object",
 				Properties: map[string]schemaProp{
-					"id":          {Type: "string", Description: "Project ID"},
+					"id":          {Type: "string", Description: "Project ID or prefix (case-insensitive)"},
 					"name":        {Type: "string", Description: "Project name"},
 					"prefix":      {Type: "string", Description: "Short prefix"},
 					"description": {Type: "string", Description: "Project description — goals, scope, context"},
@@ -455,7 +515,7 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 			Description: "Delete a project and all its tickets",
 			InputSchema: jsonSchema{
 				Type:       "object",
-				Properties: map[string]schemaProp{"id": {Type: "string", Description: "Project ID"}},
+				Properties: map[string]schemaProp{"id": {Type: "string", Description: "Project ID or prefix (case-insensitive)"}},
 				Required:   []string{"id"},
 			},
 		},
@@ -515,7 +575,7 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 			InputSchema: jsonSchema{
 				Type: "object",
 				Properties: map[string]schemaProp{
-					"projectId": {Type: "string", Description: "Filter by project ID"},
+					"projectId": {Type: "string", Description: "Filter by project ID or prefix (case-insensitive); an unknown one returns no tickets rather than an error"},
 					"status":    {Type: "string", Description: "Filter by status", Enum: models.Statuses},
 					"priority":  {Type: "string", Description: "Filter by priority", Enum: []string{"urgent", "high", "medium", "low"}},
 					"repo":      {Type: "string", Description: "Filter to tickets attached to this repo, matched exactly"},
@@ -528,7 +588,7 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 			Description: "Get detailed ticket information including subtasks, labels, the tickets it depends on, and the tickets it blocks",
 			InputSchema: jsonSchema{
 				Type:       "object",
-				Properties: map[string]schemaProp{"id": {Type: "string", Description: "Ticket ID"}},
+				Properties: map[string]schemaProp{"id": {Type: "string", Description: "Ticket ID or display key (e.g. BILL-2), case-insensitive"}},
 				Required:   []string{"id"},
 			},
 		},
@@ -541,7 +601,7 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 			InputSchema: jsonSchema{
 				Type: "object",
 				Properties: map[string]schemaProp{
-					"projectId":   {Type: "string", Description: "Project ID"},
+					"projectId":   {Type: "string", Description: "Project ID or prefix (case-insensitive)"},
 					"title":       {Type: "string", Description: "Ticket title"},
 					"description": {Type: "string", Description: "Rich text description"},
 					"status":      {Type: "string", Description: "Initial status", Enum: models.Statuses},
@@ -572,7 +632,7 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 			InputSchema: jsonSchema{
 				Type: "object",
 				Properties: map[string]schemaProp{
-					"id":          {Type: "string", Description: "Ticket ID"},
+					"id":          {Type: "string", Description: "Ticket ID or display key (e.g. BILL-2), case-insensitive"},
 					"title":       {Type: "string", Description: "Ticket title"},
 					"description": {Type: "string", Description: "Description"},
 					"status":      {Type: "string", Description: "Status", Enum: models.Statuses},
@@ -603,7 +663,7 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 			InputSchema: jsonSchema{
 				Type: "object",
 				Properties: map[string]schemaProp{
-					"id":     {Type: "string", Description: "Ticket ID"},
+					"id":     {Type: "string", Description: "Ticket ID or display key (e.g. BILL-2), case-insensitive"},
 					"status": {Type: "string", Description: "Target status", Enum: models.Statuses},
 				},
 				Required: []string{"id", "status"},
@@ -614,7 +674,7 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 			Description: "Delete a ticket",
 			InputSchema: jsonSchema{
 				Type:       "object",
-				Properties: map[string]schemaProp{"id": {Type: "string", Description: "Ticket ID"}},
+				Properties: map[string]schemaProp{"id": {Type: "string", Description: "Ticket ID or display key (e.g. BILL-2), case-insensitive"}},
 				Required:   []string{"id"},
 			},
 		},
@@ -625,7 +685,7 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 			InputSchema: jsonSchema{
 				Type: "object",
 				Properties: map[string]schemaProp{
-					"projectId": {Type: "string", Description: "Filter by project ID (optional)"},
+					"projectId": {Type: "string", Description: "Filter by project ID or prefix (optional, case-insensitive); an unknown one returns no tickets rather than an error"},
 				},
 			},
 		},
@@ -637,7 +697,7 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 			InputSchema: jsonSchema{
 				Type: "object",
 				Properties: map[string]schemaProp{
-					"ticketId": {Type: "string", Description: "Parent ticket ID"},
+					"ticketId": {Type: "string", Description: "Parent ticket ID or display key (e.g. BILL-2), case-insensitive"},
 					"title":    {Type: "string", Description: "Subtask description"},
 				},
 				Required: []string{"ticketId", "title"},
@@ -650,7 +710,7 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 			InputSchema: jsonSchema{
 				Type: "object",
 				Properties: map[string]schemaProp{
-					"ticketId": {Type: "string", Description: "Parent ticket ID"},
+					"ticketId": {Type: "string", Description: "Parent ticket ID or display key (e.g. BILL-2), case-insensitive"},
 					"subtasks": {Type: "array", Description: "Array of subtask objects, each with a 'title' field", Items: &jsonSchema{
 						Type: "object",
 						Properties: map[string]schemaProp{
