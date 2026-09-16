@@ -395,7 +395,7 @@ describe("computeGraphTopology", () => {
     ]);
   });
 
-  it("sorts in-progress tickets to the top of Ready", () => {
+  it("sorts active tickets to the top of Ready", () => {
     const topology = computeGraphTopology(
       tickets([
         ["A-1", "todo"],
@@ -405,17 +405,49 @@ describe("computeGraphTopology", () => {
       ]),
     );
     expect(topology.columns).toEqual([["A-2", "A-4", "A-1", "A-3"]]);
-    expect(topology.nodes.filter((n) => n.inProgress).map((n) => n.id)).toEqual(["A-2", "A-4"]);
+    expect(topology.nodes.filter((n) => n.active).map((n) => n.id)).toEqual(["A-2", "A-4"]);
   });
 
-  it("keeps in-progress tickets on top even where crossings would put a todo above them", () => {
-    // Column 1 settles as A-3, A-4. On its own the barycentre pass would then
-    // lift A-1 (feeding A-3, row 0) above A-2 (feeding A-4, row 1); the
-    // in-progress rule holds A-2 at the top instead.
+  it("mingles agent_review with in_progress at the top of Ready, in ticket order", () => {
+    // A ticket bouncing between the implementer and the reviewer must not
+    // change rows as it flips, so both statuses are one group and ticket
+    // order decides within it.
     const topology = computeGraphTopology(
       tickets([
         ["A-1", "todo"],
-        ["A-2", "in_progress"],
+        ["A-2", "agent_review"],
+        ["A-3", "in_progress"],
+        ["A-4", "todo"],
+        ["A-5", "agent_review"],
+      ]),
+    );
+    expect(topology.columns).toEqual([["A-2", "A-3", "A-5", "A-1", "A-4"]]);
+    expect(topology.nodes.filter((n) => n.active).map((n) => n.id)).toEqual(["A-2", "A-3", "A-5"]);
+  });
+
+  it("leaves the rows unchanged when a ticket flips between in_progress and agent_review", () => {
+    const rows = (status: string) => {
+      const topology = computeGraphTopology(
+        tickets([
+          ["A-1", "todo"],
+          ["A-2", "in_progress"],
+          ["A-3", status],
+          ["A-4", "todo"],
+        ]),
+      );
+      return topology.columns;
+    };
+    expect(rows("agent_review")).toEqual(rows("in_progress"));
+  });
+
+  it("keeps active tickets on top even where crossings would put a todo above them", () => {
+    // Column 1 settles as A-3, A-4. On its own the barycentre pass would then
+    // lift A-1 (feeding A-3, row 0) above A-2 (feeding A-4, row 1); the
+    // active-first rule holds A-2 at the top instead.
+    const topology = computeGraphTopology(
+      tickets([
+        ["A-1", "todo"],
+        ["A-2", "agent_review"],
         ["A-3", "todo", ["A-1"]],
         ["A-4", "todo", ["A-2", "A-5"]],
         ["A-5", "todo"],
@@ -501,9 +533,9 @@ describe("computeGraphTopology", () => {
       expect(Number.isFinite(node.x) && Number.isFinite(node.y)).toBe(true);
     }
     const ready = layout.nodes.filter((n) => n.column === 0).sort((a, b) => a.row - b.row);
-    expect(ready.some((n) => n.inProgress)).toBe(true);
-    // No in-progress ticket sits below one that isn't.
-    expect(ready.every((n, i) => i === 0 || !n.inProgress || ready[i - 1].inProgress)).toBe(true);
+    expect(ready.some((n) => n.active)).toBe(true);
+    // No active ticket sits below one that isn't.
+    expect(ready.every((n, i) => i === 0 || !n.active || ready[i - 1].active)).toBe(true);
   });
 
   it("holds its invariants across random small graphs with cycles, done tickets and external blockers", () => {

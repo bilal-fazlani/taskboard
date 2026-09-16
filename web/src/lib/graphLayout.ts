@@ -31,18 +31,18 @@
 //   whose cycle waits on anything else never lands in Ready.
 // - A node's column is the longest path of non-back edges leading into it
 //   (raised to 1 by an external blocker). Column 0 is Ready.
-// - Rows start in ticket order, with in-progress tickets at the top of
-//   column 0, then a few bounded barycentre sweeps reorder each column
-//   towards its neighbours to reduce crossings. In column 0 the sweeps only
-//   reorder within the in-progress group and within the rest, so the
-//   in-progress-first rule always holds.
+// - Rows start in ticket order, with the tickets an agent holds (in_progress
+//   or agent_review) at the top of column 0, then a few bounded barycentre
+//   sweeps reorder each column towards its neighbours to reduce crossings. In
+//   column 0 the sweeps only reorder within the active group and within the
+//   rest, so the active-first rule always holds.
 //
 // Everything is ordered by ticket (project prefix, then number, then id)
 // before any decision is made, so the output does not depend on the order of
 // the input array or of any dependsOn list.
 
 import type { Ticket, TicketRef } from "../api/client";
-import { isDone, isInProgress } from "./status";
+import { isActive, isDone } from "./status";
 
 // Upstream and downstream chains through a node, for hover highlighting.
 export { chainFinder, chainRole, edgeChainRole, edgeKey, graphChains } from "./graphChains";
@@ -63,7 +63,8 @@ export interface GraphNode<T extends GraphTicket = GraphTicket> {
   column: number;
   /** Position within the column, 0 at the top. */
   row: number;
-  inProgress: boolean;
+  /** Held by an agent: in_progress or agent_review. Sorted to the top of Ready. */
+  active: boolean;
   /** Distinct dependencies that are done. */
   satisfiedDependencyCount: number;
   /** Distinct unfinished dependencies that are not in the input set, so have no edge. */
@@ -222,10 +223,12 @@ export function computeGraphTopology<T extends GraphTicket>(tickets: readonly T[
   const rows: number[][] = Array.from({ length: columnTotal }, () => []);
   for (let v = 0; v < count; v++) rows[column[v]].push(v);
 
-  const inProgress = open.map((t) => isInProgress(t.status));
-  // In column 0, in-progress tickets are group 0 and everything else group 1,
-  // and a group always sorts above the next. Other columns are one group.
-  const group = (v: number, c: number) => (c === 0 && !inProgress[v] ? 1 : 0);
+  const active = open.map((t) => isActive(t.status));
+  // In column 0, tickets an agent holds are group 0 and everything else group
+  // 1, and a group always sorts above the next. Other columns are one group.
+  // Both active statuses share the group, so a ticket bouncing between the
+  // implementer and the reviewer keeps its row as it flips.
+  const group = (v: number, c: number) => (c === 0 && !active[v] ? 1 : 0);
   const position = new Array<number>(count).fill(0);
   const barycentre = new Array<number>(count).fill(0);
   const reorder = (c: number, neighbours: number[][]) => {
@@ -240,7 +243,7 @@ export function computeGraphTopology<T extends GraphTicket>(tickets: readonly T[
     nodes.forEach((v, i) => (position[v] = i));
   };
 
-  // Seed rows in ticket order, lifting in-progress tickets in column 0.
+  // Seed rows in ticket order, lifting active tickets in column 0.
   const none: number[][] = open.map(() => []);
   for (let c = 0; c < columnTotal; c++) reorder(c, none);
   for (let sweep = 0; sweep < BARYCENTRE_SWEEPS; sweep++) {
@@ -254,7 +257,7 @@ export function computeGraphTopology<T extends GraphTicket>(tickets: readonly T[
       ticket: open[v],
       column: column[v],
       row: position[v],
-      inProgress: inProgress[v],
+      active: active[v],
       satisfiedDependencyCount: satisfied[v],
       externalBlockerCount: external[v],
     })),
