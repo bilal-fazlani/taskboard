@@ -307,7 +307,7 @@ export default function Board() {
         count={loading ? undefined : { shown: shownCount, total: allTickets.length }}
       />
 
-      <div className="flex-1 overflow-x-auto p-6">
+      <div data-testid="board-scroll" className="flex-1 overflow-x-auto p-6">
         {loading ? (
           <div className="flex items-center justify-center h-full text-slate-600">
             Loading board…

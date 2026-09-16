@@ -134,7 +134,7 @@ export default function Tickets() {
         count={loading ? undefined : { shown: filtered.length, total: tickets.length }}
       />
 
-      <div className="flex-1 overflow-auto">
+      <div data-testid="table-scroll" className="flex-1 overflow-auto">
         {loading ? (
           <div className="flex items-center justify-center h-64 text-slate-600">
             Loading tickets…
