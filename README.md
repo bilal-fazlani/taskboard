@@ -29,14 +29,32 @@ Single binary. SQLite-backed. No Docker, no external database, no runtime depend
 ### Homebrew
 
 ```bash
-brew tap tcarac/taskboard
+brew install bilal-fazlani/tap/taskboard
+```
+
+Or tap first, then install by name:
+
+```bash
+brew tap bilal-fazlani/tap
+brew trust bilal-fazlani/tap
 brew install taskboard
+```
+
+`brew trust` is needed on Homebrew 5.1.15 and later, which refuse to load a
+formula from a tap you haven't trusted. Older Homebrew doesn't have the
+command, so leave that line out there. The one-line install above needs no
+extra step: installing by the full name trusts the formula.
+
+Upgrade to the latest release with:
+
+```bash
+brew upgrade taskboard
 ```
 
 ### From source
 
 ```bash
-git clone https://github.com/tcarac/taskboard.git
+git clone https://github.com/bilal-fazlani/taskboard.git
 cd taskboard
 make build
 ```

@@ -5,8 +5,9 @@ on:
     tags:
       - "v*"
 
+# Read-only by default. Only the release job writes, to create the GitHub release.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
@@ -71,6 +72,8 @@ jobs:
   release:
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
     steps:
       - uses: actions/checkout@v4
@@ -98,8 +101,33 @@ jobs:
   update-homebrew:
     needs: release
     runs-on: ubuntu-latest
+    # The tap is written with HOMEBREW_TAP_TOKEN, so github.token only needs read.
+    permissions:
+      contents: read
+    # One tap update at a time, so two quick tags can't race their PUTs. The group
+    # doesn't keep tag order, so the push step also refuses to replace a newer
+    # formula with an older one.
+    concurrency:
+      group: homebrew-tap
+      cancel-in-progress: false
+
+    # The tap and the formula's place in it. The formula's homepage and download
+    # URLs come from this repository, so a fork publishes its own binaries.
+    env:
+      TAP_REPO: bilal-fazlani/homebrew-tap
+      FORMULA_PATH: Formula/taskboard.rb
+      REPO_URL: https://github.com/${{ github.repository }}
 
     steps:
+      - name: Check Homebrew tap token
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          if [ -z "$HOMEBREW_TAP_TOKEN" ]; then
+            echo "::error title=HOMEBREW_TAP_TOKEN is missing::The HOMEBREW_TAP_TOKEN secret is not set, so the formula cannot be pushed to ${TAP_REPO}. Add a token with Contents read and write on ${TAP_REPO} as an Actions secret named HOMEBREW_TAP_TOKEN, then re-run this job."
+            exit 1
+          fi
+
       - name: Get tag version
         id: tag
         run: |
@@ -109,17 +137,26 @@ jobs:
 
       - name: Download release tarballs and compute SHAs
         id: sha
+        # -f fails the step on a missing or erroring asset, instead of hashing
+        # GitHub's error page and publishing that sha.
         env:
-          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.version }}
         run: |
-          base_url="https://github.com/${{ github.repository }}/releases/download/${{ steps.tag.outputs.version }}"
+          base_url="${REPO_URL}/releases/download/${TAG}"
           for arch in darwin-arm64 darwin-amd64 linux-arm64 linux-amd64; do
-            curl -sL --retry 3 "$base_url/taskboard-${arch}.tar.gz" -o "taskboard-${arch}.tar.gz"
+            curl -fsSL --retry 3 --retry-all-errors "$base_url/taskboard-${arch}.tar.gz" -o "taskboard-${arch}.tar.gz"
             sha=$(sha256sum "taskboard-${arch}.tar.gz" | awk '{print $1}')
             key=$(echo "$arch" | tr '-' '_')
             echo "sha256_${key}=$sha" >> "$GITHUB_OUTPUT"
           done
 
+      # The heredoc is unquoted, so the shell fills in ${...}. YAML has already
+      # removed the block's indent, so the formula is written as it will be read.
+      #
+      # Keep the version line even though brew audit calls it redundant with the
+      # URLs. Homebrew before 6.0.14 reads the version from these URLs as "64"
+      # (from "arm64"), so a formula without it installs as version 64 and never
+      # upgrades.
       - name: Generate Homebrew formula
         env:
           VERSION: ${{ steps.tag.outputs.version_number }}
@@ -130,62 +167,80 @@ jobs:
         run: |
           cat > formula.rb << RUBY
           class Taskboard < Formula
-            desc 'Local project management with Kanban UI and MCP server for AI assistants'
-            homepage 'https://github.com/tcarac/taskboard'
-            version '${VERSION}'
-            license 'MIT'
+            desc "Dependency graph, Kanban board, CLI and MCP server for local projects"
+            homepage "${REPO_URL}"
+            version "${VERSION}"
+            license "MIT"
 
             on_macos do
-              if Hardware::CPU.arm?
-                url "https://github.com/tcarac/taskboard/releases/download/v#{version}/taskboard-darwin-arm64.tar.gz"
-                sha256 '${SHA_DARWIN_ARM64}'
-              elsif Hardware::CPU.intel?
-                url "https://github.com/tcarac/taskboard/releases/download/v#{version}/taskboard-darwin-amd64.tar.gz"
-                sha256 '${SHA_DARWIN_AMD64}'
+              on_arm do
+                url "${REPO_URL}/releases/download/v${VERSION}/taskboard-darwin-arm64.tar.gz"
+                sha256 "${SHA_DARWIN_ARM64}"
+              end
+              on_intel do
+                url "${REPO_URL}/releases/download/v${VERSION}/taskboard-darwin-amd64.tar.gz"
+                sha256 "${SHA_DARWIN_AMD64}"
               end
             end
 
             on_linux do
-              if Hardware::CPU.arm?
-                url "https://github.com/tcarac/taskboard/releases/download/v#{version}/taskboard-linux-arm64.tar.gz"
-                sha256 '${SHA_LINUX_ARM64}'
-              elsif Hardware::CPU.intel?
-                url "https://github.com/tcarac/taskboard/releases/download/v#{version}/taskboard-linux-amd64.tar.gz"
-                sha256 '${SHA_LINUX_AMD64}'
+              on_arm do
+                url "${REPO_URL}/releases/download/v${VERSION}/taskboard-linux-arm64.tar.gz"
+                sha256 "${SHA_LINUX_ARM64}"
+              end
+              on_intel do
+                url "${REPO_URL}/releases/download/v${VERSION}/taskboard-linux-amd64.tar.gz"
+                sha256 "${SHA_LINUX_AMD64}"
               end
             end
 
             def install
-              if OS.mac?
-                if Hardware::CPU.arm?
-                  bin.install 'taskboard-darwin-arm64' => 'taskboard'
-                else
-                  bin.install 'taskboard-darwin-amd64' => 'taskboard'
-                end
-              elsif OS.linux?
-                if Hardware::CPU.arm?
-                  bin.install 'taskboard-linux-arm64' => 'taskboard'
-                else
-                  bin.install 'taskboard-linux-amd64' => 'taskboard'
-                end
-              end
+              # Each tarball holds one binary, named like the tarball it came in.
+              bin.install File.basename(stable.url, ".tar.gz") => "taskboard"
             end
 
             test do
-              assert_match 'taskboard', shell_output("#{bin}/taskboard --help")
+              assert_match "taskboard", shell_output("#{bin}/taskboard --help")
             end
           end
           RUBY
-          sed -i 's/^          //' formula.rb
 
+      # Creates the formula when the tap doesn't have it yet (the contents API
+      # answers 404), and otherwise updates it, which needs the current file's sha.
+      # An existing formula with a newer version is left alone; an equal version
+      # is rewritten, so re-running a tag refreshes its shas. Commits go to the
+      # tap's default branch, looked up from the API.
       - name: Push formula to Homebrew tap
         env:
           GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          VERSION: ${{ steps.tag.outputs.version_number }}
         run: |
           content=$(base64 -w 0 formula.rb)
-          sha=$(gh api repos/tcarac/homebrew-taskboard/contents/Formula/taskboard.rb --jq '.sha')
-          gh api repos/tcarac/homebrew-taskboard/contents/Formula/taskboard.rb \
+          branch=$(gh api "repos/${TAP_REPO}" --jq '.default_branch')
+          contents_api="repos/${TAP_REPO}/contents/${FORMULA_PATH}"
+
+          sha_args=()
+          if gh api "${contents_api}?ref=${branch}" > current.json 2> get-error.txt; then
+            sha=$(jq -r '.sha' current.json)
+            current_version=$(jq -r '.content' current.json | base64 -d | sed -n 's/^  version "\(.*\)"$/\1/p' | head -n 1)
+            newest=$(printf '%s\n' "$current_version" "$VERSION" | sort -V | tail -n 1)
+            if [ -n "$current_version" ] && [ "$current_version" != "$VERSION" ] && [ "$newest" = "$current_version" ]; then
+              echo "::notice title=Homebrew formula left as it is::${TAP_REPO} already has taskboard ${current_version}, which is newer than ${VERSION}, so ${FORMULA_PATH} was not updated."
+              exit 0
+            fi
+            echo "Updating ${FORMULA_PATH} from ${current_version:-an unknown version} to ${VERSION} (sha ${sha}) on ${TAP_REPO}@${branch}"
+            sha_args=(-f sha="$sha")
+          elif grep -q 'HTTP 404' get-error.txt; then
+            echo "Creating ${FORMULA_PATH} on ${TAP_REPO}@${branch}"
+          else
+            cat get-error.txt >&2
+            echo "::error::Could not read ${FORMULA_PATH} from ${TAP_REPO}@${branch}"
+            exit 1
+          fi
+
+          gh api "${contents_api}" \
             -X PUT \
-            -f message="chore: update formula for ${{ steps.tag.outputs.version }}" \
+            -f message="taskboard ${VERSION}" \
             -f content="$content" \
-            -f sha="$sha"
+            -f branch="$branch" \
+            "${sha_args[@]}"
