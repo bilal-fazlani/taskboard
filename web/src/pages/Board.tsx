@@ -363,6 +363,7 @@ export default function Board() {
       {createForStatus && (
         <CreateTicketModal
           projects={projects ?? []}
+          filters={filters}
           defaultStatus={createForStatus}
           onClose={() => setCreateForStatus(null)}
           onCreate={handleCreate}

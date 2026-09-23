@@ -256,6 +256,7 @@ export default function Tickets() {
       {showCreate && (
         <CreateTicketModal
           projects={projects}
+          filters={filters}
           onClose={() => setShowCreate(false)}
           onCreate={handleCreate}
         />

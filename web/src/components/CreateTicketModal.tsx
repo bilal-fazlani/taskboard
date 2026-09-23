@@ -3,21 +3,30 @@ import { X } from "lucide-react";
 import type { TicketWrite, Project } from "../api/client";
 import LabelPicker from "./LabelPicker";
 import { DEFAULT_STATUS } from "../lib/status";
+import type { Filters } from "../lib/filters";
+import { newTicketDefaults } from "../lib/newTicketDefaults";
 
 const PRIORITIES = ["urgent", "high", "medium", "low"];
 
 export default function CreateTicketModal({
   projects,
+  filters,
   defaultStatus,
   onClose,
   onCreate,
 }: {
   projects: Project[];
+  /** The view's filters, which the form starts from: the project the view shows. */
+  filters: Filters;
   defaultStatus?: string;
   onClose: () => void;
   onCreate: (data: TicketWrite) => void;
 }) {
-  const [projectId, setProjectId] = useState(projects[0]?.id || "");
+  // Null until the user picks a project. Until then the form follows the
+  // view's, so projects that load after the form opens still preselect it.
+  const [pickedProjectId, setPickedProjectId] = useState<string | null>(null);
+  const defaults = newTicketDefaults(filters, projects);
+  const projectId = pickedProjectId ?? defaults.projectId;
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [priority, setPriority] = useState("medium");
@@ -63,7 +72,7 @@ export default function CreateTicketModal({
             </label>
             <select
               value={projectId}
-              onChange={(e) => setProjectId(e.target.value)}
+              onChange={(e) => setPickedProjectId(e.target.value)}
               required
               className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
             >
