@@ -39,10 +39,33 @@ type Ticket struct {
 	DependsOn     []TicketRef `json:"dependsOn,omitempty"`
 	Blocks        []TicketRef `json:"blocks,omitempty"`
 
+	// ReviewRounds is how many times the ticket has entered agent_review,
+	// counted from its status history. A ticket created in agent_review
+	// counts that as its first round. Tickets older than the history have
+	// only the rounds since it began.
+	ReviewRounds int `json:"reviewRounds"`
+
+	// History is the ticket's status changes, newest first. Only the MCP
+	// get_ticket tool fills it in; everywhere else it is left out, and the
+	// HTTP API serves it from its own endpoint.
+	History []StatusChange `json:"history,omitempty"`
+
 	// URL is where the ticket opens in the web UI. The CLI and the MCP server
 	// fill it in so an agent can print a link; the HTTP API leaves it empty,
 	// since a browser already knows where the board is. See internal/weburl.
 	URL string `json:"url,omitempty"`
+}
+
+// StatusChange is one entry in a ticket's status history. The first entry,
+// written when the ticket is created, has an empty FromStatus. Note is what
+// the caller said about the change, if anything.
+type StatusChange struct {
+	ID         string    `json:"id"`
+	TicketID   string    `json:"ticketId"`
+	FromStatus string    `json:"fromStatus"`
+	ToStatus   string    `json:"toStatus"`
+	Note       string    `json:"note"`
+	CreatedAt  time.Time `json:"createdAt"`
 }
 
 // TicketRef is a lightweight pointer to another ticket, carrying enough
@@ -171,11 +194,17 @@ type UpdateTicketRequest struct {
 	Position  *float64 `json:"position,omitempty"`
 	Labels    []string `json:"labels,omitempty"`
 	DependsOn []string `json:"dependsOn,omitempty"`
+	// Note goes into the status history with the change, when the request
+	// changes the status. It is otherwise ignored.
+	Note string `json:"note,omitempty"`
 }
 
 type MoveTicketRequest struct {
 	Status   string   `json:"status"`
 	Position *float64 `json:"position,omitempty"`
+	// Note goes into the status history with the change, when the move
+	// changes the status. A move within a column writes no history.
+	Note string `json:"note,omitempty"`
 }
 
 type CreateSubtaskRequest struct {

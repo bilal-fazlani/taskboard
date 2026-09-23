@@ -33,6 +33,7 @@ type dbtx interface {
 
 func (s *Store) ClearData() error {
 	tables := []string{
+		"ticket_status_changes",
 		"ticket_dependencies",
 		"ticket_labels",
 		"subtasks",
@@ -264,8 +265,8 @@ func (s *Store) ListTickets(filter models.TicketFilter) ([]models.Ticket, error)
 	return tickets, nil
 }
 
-// attachListDetails fills Labels, Subtasks, and DependsOn for a page of tickets
-// using one query per relation rather than one per ticket. Blocks is not filled;
+// attachListDetails fills Repos, Labels, Subtasks, DependsOn and ReviewRounds
+// for a page of tickets using one query per relation rather than one per ticket. Blocks is not filled;
 // no list view renders it.
 func (s *Store) attachListDetails(tickets []models.Ticket) error {
 	if len(tickets) == 0 {
@@ -281,8 +282,13 @@ func (s *Store) attachListDetails(tickets []models.Ticket) error {
 		tickets[i].Labels = nil
 		tickets[i].Subtasks = nil
 		tickets[i].DependsOn = nil
+		tickets[i].ReviewRounds = 0
 	}
 	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
+
+	if err := s.attachReviewRounds(tickets, index, placeholders, ids); err != nil {
+		return err
+	}
 
 	repoRows, err := s.db.Query(
 		`SELECT ticket_id, repo FROM ticket_repos
@@ -424,6 +430,9 @@ func (s *Store) GetTicket(id string) (*models.Ticket, error) {
 	if t.Blocks, err = s.getTicketBlocks(t.ID); err != nil {
 		return nil, err
 	}
+	if t.ReviewRounds, err = s.getTicketReviewRounds(t.ID); err != nil {
+		return nil, err
+	}
 
 	return &t, nil
 }
@@ -510,6 +519,12 @@ func (s *Store) CreateTicket(req models.CreateTicketRequest) (*models.Ticket, er
 		return nil, err
 	}
 
+	// The ticket's history starts at its birth: a first row with no from
+	// status.
+	if err := recordStatusChange(tx, t.ID, "", t.Status, "", t.CreatedAt); err != nil {
+		return nil, err
+	}
+
 	if err := insertTicketRepos(tx, t.ID, t.Repos); err != nil {
 		return nil, err
 	}
@@ -539,7 +554,11 @@ func (s *Store) CreateTicket(req models.CreateTicketRequest) (*models.Ticket, er
 	return s.GetTicket(t.ID)
 }
 
-func (s *Store) UpdateTicket(id string, req models.UpdateTicketRequest) (*models.Ticket, error) {
+// UpdateTicket applies the fields req sets and leaves the rest alone. A change
+// of status writes a row of status history, with req.Note, in the same
+// transaction; opts can add rules for that change (see
+// RequireNoteLeavingReview).
+func (s *Store) UpdateTicket(id string, req models.UpdateTicketRequest, opts ...WriteOption) (*models.Ticket, error) {
 	t, err := s.GetTicket(id)
 	if err != nil || t == nil {
 		return nil, err
@@ -552,6 +571,19 @@ func (s *Store) UpdateTicket(id string, req models.UpdateTicketRequest) (*models
 		return nil, fmt.Errorf("beginning transaction: %w", err)
 	}
 	defer tx.Rollback()
+
+	// The status the ticket has now, read inside the transaction: the rule
+	// check and the history row compare against it, and an update that does
+	// not set the status writes it back unchanged rather than the one read
+	// before the transaction began.
+	fromStatus, found, err := currentStatus(tx, id)
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		return nil, nil
+	}
+	t.Status = fromStatus
 
 	var labelIDs []string
 	if req.Labels != nil {
@@ -574,6 +606,9 @@ func (s *Store) UpdateTicket(id string, req models.UpdateTicketRequest) (*models
 	}
 	if req.Status != nil {
 		t.Status = *req.Status
+	}
+	if err := collectWriteOptions(opts).checkStatusChange(fromStatus, t.Status, req.Note); err != nil {
+		return nil, err
 	}
 	if req.Priority != nil {
 		t.Priority = *req.Priority
@@ -599,6 +634,12 @@ func (s *Store) UpdateTicket(id string, req models.UpdateTicketRequest) (*models
 		t.Title, t.Description, t.Status, t.Priority, t.DueDate, t.Position, t.UpdatedAt, t.ID,
 	); err != nil {
 		return nil, err
+	}
+
+	if t.Status != fromStatus {
+		if err := recordStatusChange(tx, id, fromStatus, t.Status, req.Note, t.UpdatedAt); err != nil {
+			return nil, err
+		}
 	}
 
 	// Written only when asked for, so an update that leaves the epic alone
@@ -656,21 +697,51 @@ func (s *Store) UpdateTicket(id string, req models.UpdateTicketRequest) (*models
 	return s.GetTicket(id)
 }
 
-func (s *Store) MoveTicket(id string, req models.MoveTicketRequest) (*models.Ticket, error) {
+// MoveTicket sets a ticket's status and its position in that column. It
+// returns (nil, nil) for an unknown id. A move that changes the status writes
+// a row of status history, with req.Note, in the same transaction; a move
+// within a column writes none. opts can add rules for the change (see
+// RequireNoteLeavingReview).
+func (s *Store) MoveTicket(id string, req models.MoveTicketRequest, opts ...WriteOption) (*models.Ticket, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, fmt.Errorf("beginning transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	fromStatus, found, err := currentStatus(tx, id)
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		return nil, nil
+	}
+	if err := collectWriteOptions(opts).checkStatusChange(fromStatus, req.Status, req.Note); err != nil {
+		return nil, err
+	}
+
 	now := time.Now()
 	position := float64(0)
 	if req.Position != nil {
 		position = *req.Position
-	} else {
-		var maxPos float64
-		s.db.QueryRow("SELECT COALESCE(MAX(position), 0) + 1000 FROM tickets WHERE status = ?", req.Status).Scan(&maxPos)
-		position = maxPos
+	} else if err := tx.QueryRow(
+		"SELECT COALESCE(MAX(position), 0) + 1000 FROM tickets WHERE status = ?", req.Status,
+	).Scan(&position); err != nil {
+		return nil, fmt.Errorf("finding the end of the column: %w", err)
 	}
 
-	_, err := s.db.Exec("UPDATE tickets SET status=?, position=?, updated_at=? WHERE id=?",
-		req.Status, position, now, id)
-	if err != nil {
+	if _, err := tx.Exec("UPDATE tickets SET status=?, position=?, updated_at=? WHERE id=?",
+		req.Status, position, now, id); err != nil {
 		return nil, err
+	}
+	if req.Status != fromStatus {
+		if err := recordStatusChange(tx, id, fromStatus, req.Status, req.Note, now); err != nil {
+			return nil, err
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("committing move: %w", err)
 	}
 	return s.GetTicket(id)
 }
