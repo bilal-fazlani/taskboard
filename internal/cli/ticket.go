@@ -15,7 +15,7 @@ func ticketCommands() *cobra.Command {
 		Short: "Manage tickets",
 	}
 
-	var projectID, status, priority, listRepo, listLabel string
+	var projectID, status, priority, listRepo, listLabel, listEpic string
 	listCmd := &cobra.Command{
 		Use:   "list",
 		Short: "List tickets",
@@ -30,6 +30,7 @@ func ticketCommands() *cobra.Command {
 				Priority:  priority,
 				Repo:      listRepo,
 				Label:     listLabel,
+				Epic:      listEpic,
 			})
 			if err != nil {
 				return err
@@ -52,6 +53,9 @@ func ticketCommands() *cobra.Command {
 					}
 					line += " [" + strings.Join(names, ", ") + "]"
 				}
+				if t.Epic != nil {
+					line += " epic:" + t.Epic.Name
+				}
 				if len(t.DependsOn) > 0 {
 					keys := make([]string, len(t.DependsOn))
 					for i, d := range t.DependsOn {
@@ -69,8 +73,9 @@ func ticketCommands() *cobra.Command {
 	listCmd.Flags().StringVar(&priority, "priority", "", "filter by priority (urgent|high|medium|low)")
 	listCmd.Flags().StringVar(&listRepo, "repo", "", "filter by repo")
 	listCmd.Flags().StringVar(&listLabel, "label", "", "filter by label name")
+	listCmd.Flags().StringVar(&listEpic, "epic", "", `filter by epic name (case-insensitive) or id, or "none" for tickets without an epic`)
 
-	var createProject, createPriority, createDue string
+	var createProject, createPriority, createDue, createEpic string
 	var createRepos, createLabels, createDependsOn []string
 	createCmd := &cobra.Command{
 		Use:   "create",
@@ -90,6 +95,9 @@ func ticketCommands() *cobra.Command {
 			if createDue != "" {
 				req.DueDate = &createDue
 			}
+			if createEpic != "" {
+				req.Epic = &createEpic
+			}
 			req.Labels = createLabels
 			req.DependsOn = createDependsOn
 			t, err := store.CreateTicket(req)
@@ -97,6 +105,9 @@ func ticketCommands() *cobra.Command {
 				return err
 			}
 			fmt.Printf("Created ticket %s: %s (%s)\n  %s\n", t.DisplayKey(), t.Title, t.ID, weburl.Ticket(weburl.Base(), weburl.Ref(*t)))
+			if t.Epic != nil {
+				fmt.Printf("  Epic: %s\n", t.Epic.Name)
+			}
 			return nil
 		},
 	}
@@ -106,6 +117,7 @@ func ticketCommands() *cobra.Command {
 	createCmd.MarkFlagRequired("title")
 	createCmd.Flags().StringVar(&createPriority, "priority", "medium", "priority (urgent|high|medium|low)")
 	createCmd.Flags().StringVar(&createDue, "due", "", "due date (YYYY-MM-DD)")
+	createCmd.Flags().StringVar(&createEpic, "epic", "", "epic name (case-insensitive) or id, within --project")
 	createCmd.Flags().StringSliceVar(&createRepos, "repo", nil, "repository identifier; comma-separated or repeated")
 	createCmd.Flags().StringSliceVar(&createLabels, "label", nil, "label name; comma-separated or repeated")
 	createCmd.Flags().StringSliceVar(&createDependsOn, "depends-on", nil, "ticket ID or key this depends on; comma-separated or repeated")
@@ -160,8 +172,8 @@ func ticketCommands() *cobra.Command {
 	}
 
 	var (
-		updTitle, updDescription, updStatus, updPriority, updDue string
-		updRepos, updLabels, updLabelAlias, updDependsOn         []string
+		updTitle, updDescription, updStatus, updPriority, updDue, updEpic string
+		updRepos, updLabels, updLabelAlias, updDependsOn                  []string
 	)
 	updateCmd := &cobra.Command{
 		Use:   "update [id-or-key]",
@@ -171,7 +183,10 @@ func ticketCommands() *cobra.Command {
 			"or --depends-on replaces the existing set, so passing one with an empty " +
 			"value clears it. --label is accepted as an alias for --labels, matching " +
 			"the spelling used by 'ticket create' and 'ticket list'. --due follows the " +
-			"same rule: omit it to leave the due date alone, or pass --due=\"\" to clear it.",
+			"same rule: omit it to leave the due date alone, or pass --due=\"\" to clear it. " +
+			"--epic follows the same rule as --due: omit it to leave the epic alone, or " +
+			"pass --epic=\"\" or --epic=none to clear it; anything else names an epic " +
+			"(by name, case-insensitive, or id) in the ticket's own project.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			store, err := openStore()
@@ -198,6 +213,9 @@ func ticketCommands() *cobra.Command {
 			}
 			if cmd.Flags().Changed("due") {
 				req.DueDate = &updDue
+			}
+			if cmd.Flags().Changed("epic") {
+				req.Epic = &updEpic
 			}
 			// Like --labels, a non-nil slice replaces the set, so --repo=""
 			// clears it.
@@ -230,6 +248,9 @@ func ticketCommands() *cobra.Command {
 				return fmt.Errorf("ticket not found")
 			}
 			fmt.Printf("Updated %s: %s\n  %s\n", t.DisplayKey(), t.Title, weburl.Ticket(weburl.Base(), weburl.Ref(*t)))
+			if t.Epic != nil {
+				fmt.Printf("  Epic: %s\n", t.Epic.Name)
+			}
 			return nil
 		},
 	}
@@ -238,6 +259,7 @@ func ticketCommands() *cobra.Command {
 	updateCmd.Flags().StringVar(&updStatus, "status", "", fmt.Sprintf("status (%s)", strings.Join(models.Statuses, "|")))
 	updateCmd.Flags().StringVar(&updPriority, "priority", "", "priority (urgent|high|medium|low)")
 	updateCmd.Flags().StringVar(&updDue, "due", "", "due date (YYYY-MM-DD); empty value clears it")
+	updateCmd.Flags().StringVar(&updEpic, "epic", "", `epic name (case-insensitive) or id; "" or "none" clears it`)
 	updateCmd.Flags().StringSliceVar(&updRepos, "repo", nil, "replace repos; comma-separated or repeated, empty value clears")
 	updateCmd.Flags().StringSliceVar(&updLabels, "labels", nil, "replace labels; comma-separated or repeated, empty value clears")
 	updateCmd.Flags().StringSliceVar(&updLabelAlias, "label", nil, "alias for --labels")
