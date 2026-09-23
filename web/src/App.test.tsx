@@ -44,26 +44,27 @@ function activeLink(html: string): string | undefined {
 }
 
 describe("views navigation", () => {
-  it("groups exactly Dependencies, Kanban, Table and Epics under Views", () => {
+  it("groups exactly Dependencies, Kanban and Table under Views, with Projects, Epics and Labels outside", () => {
     expect(VIEWS_GROUP_LABEL).toBe("Views");
     expect(viewItems.map((i) => `${i.label} ${i.to}`)).toEqual([
       "Dependencies /",
       "Kanban /kanban",
       "Table /table",
-      "Epics /epics",
     ]);
     expect(otherItems.map((i) => `${i.label} ${i.to}`)).toEqual([
       "Projects /projects",
+      "Epics /epics",
       "Labels /labels",
     ]);
   });
 
-  it("renders the Views group in the sidebar with Projects and Labels outside it", () => {
+  it("renders the Views group in the sidebar with Projects, Epics and Labels outside it", () => {
     const html = render("/");
     expect(html).toContain('<p id="nav-views"');
     expect(html).toMatch(/id="nav-views"[^>]*>Views<\/p>/);
-    expect(viewsGroupLinks(html)).toEqual(["Dependencies /", "Kanban /kanban", "Table /table", "Epics /epics"]);
+    expect(viewsGroupLinks(html)).toEqual(["Dependencies /", "Kanban /kanban", "Table /table"]);
     expect(html).toMatch(/href="\/projects"[^>]*>.*?Projects<\/a>/);
+    expect(html).toMatch(/href="\/epics"[^>]*>.*?Epics<\/a>/);
     expect(html).toMatch(/href="\/labels"[^>]*>.*?Labels<\/a>/);
   });
 
@@ -99,8 +100,7 @@ function selectedOption(html: string, name: string): string | undefined {
 }
 
 describe("filter panel", () => {
-  // Epics has only the project selector (see Epics.dom.test.tsx).
-  const views = viewItems.filter((i) => i.to !== "/epics").map((i) => [i.label, i.to]);
+  const views = viewItems.map((i) => [i.label, i.to]);
 
   it.each(views)("renders on %s with every filter and no other project selector", (_name, path) => {
     const html = render(path);
@@ -135,17 +135,18 @@ describe("filter panel", () => {
     expect(html).toContain("Clear filters");
   });
 
-  it("carries the filters, and only the filters, to the other views", () => {
+  it("carries the filters, and only the filters, to the other views, not to Projects, Epics or Labels", () => {
     const html = render("/kanban?ticket=ACP-7&label=web&project=ACP");
     expect(viewsGroupLinks(html)).toEqual([
       "Dependencies /?project=ACP&amp;label=web",
       "Kanban /kanban?project=ACP&amp;label=web",
       "Table /table?project=ACP&amp;label=web",
-      "Epics /epics?project=ACP&amp;label=web",
     ]);
     expect(activeLink(html)).toBe("Kanban");
-    // Projects and Labels have no filters to carry.
+    // Projects, Epics and Labels sit outside the group and have no filters to
+    // carry: each link is bare, with no query string at all.
     expect(html).toMatch(/href="\/projects"/);
+    expect(html).toMatch(/href="\/epics"/);
     expect(html).toMatch(/href="\/labels"/);
   });
 });

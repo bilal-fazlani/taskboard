@@ -159,6 +159,36 @@ describe("Epics project selector", () => {
   });
 });
 
+describe("Epics sidebar link", () => {
+  it("is bare, with no filters carried, and still lands on the remembered project", async () => {
+    globalThis.localStorage.setItem(LAST_PROJECT_KEY, "LDR");
+    render(
+      <MemoryRouter initialEntries={["/kanban?project=ACP&label=web"]}>
+        <Routes>
+          <Route element={<Layout />}>
+            <Route path="/kanban" element={null} />
+            <Route path="/epics" element={<Epics />} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    );
+    await settle();
+    const link = screen.getByRole("link", { name: "Epics" });
+    // Unlike Dependencies, Kanban and Table, which carry the current filters
+    // (see App.test.tsx), the Epics link outside the Views group is plain:
+    // no project or other filter from the page it's clicked from.
+    expect(link.getAttribute("href")).toBe("/epics");
+    await act(async () => {
+      fireEvent.click(link);
+    });
+    await settle();
+    // Epics still opens on the remembered project on its own, the same way
+    // it does for any URL without one (see "picks the project last shown"
+    // below), even though the link that got it there carried no project.
+    expect(mockApi.epics.list).toHaveBeenCalledWith("LDR");
+  });
+});
+
 describe("Epics rows", () => {
   it("shows the name, the active marker, the description, the bar and the count", async () => {
     await mount();

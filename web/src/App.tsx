@@ -7,8 +7,9 @@ import Tickets from "./pages/Tickets";
 import Labels from "./pages/Labels";
 import Epics from "./pages/Epics";
 
-// The views live at /, /kanban, /table and /epics. Their old paths (/board, /tickets,
-// /graph) are gone on purpose, with no redirects.
+// Routes: the views at /, /kanban and /table; Epics, Projects and Labels at
+// /epics, /projects and /labels. The old paths (/board, /tickets, /graph)
+// are gone on purpose, with no redirects.
 export function AppRoutes() {
   return (
     <Routes>
