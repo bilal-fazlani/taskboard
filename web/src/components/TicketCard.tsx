@@ -3,7 +3,7 @@ import type { EpicRef, Ticket } from "../api/client";
 import { attentionClasses } from "../lib/attention";
 import type { GraphNode } from "../lib/graphLayout";
 import { hiddenBlockersText, satisfiedDependenciesText } from "../lib/graphText";
-import { STATUS_COLORS, STATUS_LABELS, isStatus } from "../lib/status";
+import { AGENT_REVIEW_STATUS, STATUS_COLORS, STATUS_LABELS, STATUS_STYLES, isStatus } from "../lib/status";
 import DependencyBand from "./DependencyBand";
 import PriorityBadge from "./PriorityBadge";
 
@@ -80,13 +80,32 @@ function GraphDependencies({ graph }: { graph: GraphCardInfo }) {
   );
 }
 
+// How many times the ticket has gone to the review agent, on the graph only.
+// It wears the Agent Review badge's colours and stays once the ticket is
+// done, since the rounds are part of how the ticket got there.
+function ReviewRounds({ rounds }: { rounds: number }) {
+  return (
+    <div>
+      <span
+        data-testid="card-review-rounds"
+        title={`Entered Agent Review ${rounds} ${rounds === 1 ? "time" : "times"}`}
+        className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10.5px] font-medium ${STATUS_STYLES[AGENT_REVIEW_STATUS]}`}
+      >
+        review ×{rounds}
+      </span>
+    </div>
+  );
+}
+
 /**
  * A ticket card, shared by the board and the graph. It is purely
  * presentational: the board wraps it for dragging, the graph positions it.
  * Passing `graph` turns it into the graph's card, which adds a status dot
  * before the key and swaps the dependency band for done and hidden-blocker
- * counts. Without it the card renders exactly as the board always has. A
- * ticket in an epic shows the epic before its key, after the graph's dot.
+ * counts, and adds a "review ×N" pill under the title once the ticket has
+ * been to agent review. Without it the card renders exactly as the board
+ * always has. A ticket in an epic shows the epic before its key, after the
+ * graph's dot.
  */
 export default function TicketCard({
   ticket,
@@ -101,6 +120,7 @@ export default function TicketCard({
 }) {
   // Empty strings everywhere but an in-progress card on the graph.
   const attention = attentionClasses(ticket.status, graph !== undefined);
+  const reviewRounds = ticket.reviewRounds ?? 0;
   return (
     <div
       onClick={onClick}
@@ -133,6 +153,7 @@ export default function TicketCard({
         <PriorityBadge priority={ticket.priority} />
       </div>
       <p className="text-sm text-slate-200 leading-snug">{ticket.title}</p>
+      {graph && reviewRounds > 0 && <ReviewRounds rounds={reviewRounds} />}
       {graph ? <GraphDependencies graph={graph} /> : <DependencyBand dependsOn={ticket.dependsOn} />}
       {ticket.labels && ticket.labels.length > 0 && (
         <div className="flex flex-wrap items-center gap-1.5">

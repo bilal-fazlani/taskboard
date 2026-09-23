@@ -139,3 +139,42 @@ describe("TicketCard's header", () => {
     expect(key.className).not.toMatch(/\btruncate\b/);
   });
 });
+
+// The graph card counts the ticket's trips to the review agent in a violet
+// pill under the title; the board card never shows it.
+describe("TicketCard's review rounds", () => {
+  it("shows a violet review ×N pill on its own row below the title on the graph", () => {
+    const { container } = render(<TicketCard ticket={makeTicket({ reviewRounds: 3 })} graph={GRAPH} />);
+    const pill = screen.getByTestId("card-review-rounds");
+    expect(pill.textContent).toBe("review ×3");
+    expect(pill.className).toMatch(/\bbg-violet-500\/20\b/);
+    expect(pill.className).toMatch(/\btext-violet-400\b/);
+    expect(pill.className).toMatch(/\brounded-full\b/);
+    // Its own row, straight after the title.
+    const row = pill.parentElement!;
+    expect(row.parentElement).toBe(container.firstElementChild);
+    expect(row.previousElementSibling!.textContent).toBe("Ship login page");
+  });
+
+  it("shows it for one round too", () => {
+    render(<TicketCard ticket={makeTicket({ reviewRounds: 1 })} graph={GRAPH} />);
+    expect(screen.getByTestId("card-review-rounds").textContent).toBe("review ×1");
+  });
+
+  it("stays after the ticket is done", () => {
+    render(<TicketCard ticket={makeTicket({ status: "done", reviewRounds: 2 })} graph={GRAPH} />);
+    expect(screen.getByTestId("card-review-rounds").textContent).toBe("review ×2");
+  });
+
+  it("is left out with no rounds, or none reported", () => {
+    render(<TicketCard ticket={makeTicket({ reviewRounds: 0 })} graph={GRAPH} />);
+    render(<TicketCard ticket={makeTicket()} graph={GRAPH} />);
+    expect(screen.queryByTestId("card-review-rounds")).toBeNull();
+  });
+
+  it("never shows on the board card", () => {
+    render(<TicketCard ticket={makeTicket({ reviewRounds: 4 })} />);
+    expect(screen.queryByTestId("card-review-rounds")).toBeNull();
+    expect(screen.queryByText(/review ×/)).toBeNull();
+  });
+});

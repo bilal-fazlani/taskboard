@@ -80,6 +80,18 @@ export interface Ticket {
   blocks?: TicketRef[];
   /** Left out when the ticket has no epic. */
   epic?: EpicRef;
+  /** How many times the ticket has entered agent_review. The server always sends it. */
+  reviewRounds?: number;
+}
+
+/** One change of a ticket's status. The first, written at creation, has an empty fromStatus. */
+export interface StatusChange {
+  id: string;
+  ticketId: string;
+  fromStatus: string;
+  toStatus: string;
+  note: string;
+  createdAt: string;
 }
 
 /**
@@ -100,6 +112,8 @@ export interface TicketWrite {
   dependsOn?: string[];
   /** An epic's name or id in the ticket's project; "" clears it, and leaving it out leaves it alone. */
   epic?: string;
+  /** Saved in the ticket's history with a status change; ignored without one. */
+  note?: string;
 }
 
 export interface BoardColumn {
@@ -169,6 +183,7 @@ export const api = {
       }),
     delete: (id: string) =>
       request<void>(`/api/tickets/${id}`, { method: "DELETE" }),
+    history: (id: string) => request<StatusChange[]>(`/api/tickets/${id}/history`),
     move: (id: string, status: string, position?: number) =>
       request<Ticket>(`/api/tickets/${id}/move`, {
         method: "POST",

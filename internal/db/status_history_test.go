@@ -409,3 +409,62 @@ func TestRequireNoteLeavingReviewSeesTheCurrentStatus(t *testing.T) {
 	_, err := s.UpdateTicket(tk.ID, models.UpdateTicketRequest{Status: statusPtr(models.StatusDone)}, RequireNoteLeavingReview())
 	assertNoteRequired(t, err)
 }
+
+func TestReviewRoundsCountEntriesIntoAgentReview(t *testing.T) {
+	s := newTestStore(t)
+	p := seedProject(t, s, "Agent Control Plane", "ACP")
+	never := seedTicket(t, s, p.ID, "Never reviewed")
+	twice := seedTicket(t, s, p.ID, "Reviewed twice")
+	born, err := s.CreateTicket(models.CreateTicketRequest{ProjectID: p.ID, Title: "Born in review", Status: models.StatusAgentReview})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, to := range []string{"in_progress", "agent_review", "in_progress", "agent_review", "done"} {
+		if _, err := s.MoveTicket(twice.ID, models.MoveTicketRequest{Status: to}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A reorder inside agent_review is not another round.
+	pos := 3.0
+	if _, err := s.MoveTicket(born.ID, models.MoveTicketRequest{Status: models.StatusAgentReview, Position: &pos}); err != nil {
+		t.Fatal(err)
+	}
+
+	want := map[string]int{never.ID: 0, twice.ID: 2, born.ID: 1}
+
+	for id, n := range want {
+		got, err := s.GetTicket(id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.ReviewRounds != n {
+			t.Fatalf("GetTicket(%s).ReviewRounds = %d, want %d", got.Title, got.ReviewRounds, n)
+		}
+	}
+
+	listed, err := s.ListTickets(models.TicketFilter{ProjectID: p.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listed) != 3 {
+		t.Fatalf("listed %d tickets, want 3", len(listed))
+	}
+	for _, tk := range listed {
+		if tk.ReviewRounds != want[tk.ID] {
+			t.Fatalf("ListTickets: %s has ReviewRounds %d, want %d", tk.Title, tk.ReviewRounds, want[tk.ID])
+		}
+	}
+
+	board, err := s.GetBoard(p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, col := range board.Columns {
+		for _, tk := range col.Tickets {
+			if tk.ReviewRounds != want[tk.ID] {
+				t.Fatalf("GetBoard: %s has ReviewRounds %d, want %d", tk.Title, tk.ReviewRounds, want[tk.ID])
+			}
+		}
+	}
+}
