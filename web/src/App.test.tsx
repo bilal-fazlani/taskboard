@@ -102,12 +102,15 @@ describe("filter panel", () => {
   it.each(views)("renders on %s with every filter and no other project selector", (_name, path) => {
     const html = render(path);
     expect(html).toContain('role="search"');
-    for (const name of ["Project", "Status", "Priority", "Label", "Repo"]) {
+    for (const name of ["Status", "Priority", "Label", "Repo"]) {
       expect(selectedOption(html, name), name).toBe("");
     }
+    // Every view always has a project: there is no "All projects", only a
+    // placeholder that can't be picked until the bar has picked one.
+    expect(html).toMatch(/<select aria-label="Project"[^>]*><option value="" disabled="" selected="">Project<\/option><\/select>/);
     expect(html).toContain('<input type="search" aria-label="Search"');
     expect(html.match(/<select/g)).toHaveLength(5);
-    expect(html).not.toContain("All Projects");
+    expect(html).not.toMatch(/All projects/i);
     // Nothing to clear.
     expect(html).not.toContain("Clear filters");
   });

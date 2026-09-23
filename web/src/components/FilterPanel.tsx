@@ -3,6 +3,7 @@ import { Search, X } from "lucide-react";
 import { api, type Label, type Project } from "../api/client";
 import type { FilterState } from "../hooks/useFilters";
 import { useLiveRefresh } from "../hooks/useLiveRefresh";
+import { defaultProject, namedProject, readLastProject, rememberProject } from "../lib/defaultProject";
 import { selectOptions, urlValue, type FilterKey, type SelectOption } from "../lib/filters";
 import { PRIORITIES } from "../lib/priority";
 import { staleFilters } from "../lib/staleFilters";
@@ -17,13 +18,17 @@ const controlClass = (set: boolean) =>
 function FilterSelect({
   name,
   allLabel,
+  placeholder,
   value,
   options,
   ignoreCase,
   onChange,
 }: {
   name: string;
-  allLabel: string;
+  /** The label of the empty value that sets no filter. Without one there is no such option. */
+  allLabel?: string;
+  /** Without an allLabel, what shows while the value is empty, as a disabled option. */
+  placeholder?: string;
   value: string;
   options: SelectOption[];
   /** Whether the filter matches ignoring case, so a URL value in another case selects its option. */
@@ -38,7 +43,15 @@ function FilterSelect({
       onChange={(e) => onChange(e.target.value)}
       className={controlClass(value !== "")}
     >
-      <option value="">{allLabel}</option>
+      {allLabel !== undefined ? (
+        <option value="">{allLabel}</option>
+      ) : (
+        shown.value === "" && (
+          <option value="" disabled>
+            {placeholder}
+          </option>
+        )
+      )}
       {shown.options.map((o) => (
         <option key={o.value} value={o.value}>
           {o.label}
@@ -51,7 +64,8 @@ function FilterSelect({
 /**
  * The filter bar shared by Dependencies, Kanban and Table. Its state is the
  * URL's (see useFilters); each page decides what a filter does to its tickets
- * and passes the counts to show.
+ * and passes the counts to show. Every view always shows one project, so the
+ * bar offers no "All projects" and picks one for a URL without it.
  */
 export default function FilterPanel({
   state,
@@ -111,11 +125,32 @@ export default function FilterPanel({
   // are known.
   const projectNames = useMemo(() => projects?.map((p) => p.prefix) ?? null, [projects]);
   const labelNames = useMemo(() => labels?.map((l) => l.name) ?? null, [labels]);
+  // A view always shows one project, so while there are projects a stale one
+  // is replaced below rather than dropped; only with none left does it go.
   const stale = useMemo(
-    () => staleFilters(filters, { projects: projectNames, labels: labelNames }),
+    () =>
+      staleFilters(filters, { projects: projectNames, labels: labelNames }).filter(
+        (key) => key !== "project" || projectNames?.length === 0,
+      ),
     [filters, projectNames, labelNames],
   );
   useEffect(() => dropFilters(stale), [stale, dropFilters]);
+
+  // The project the URL names, as the list spells it, or null when it names
+  // none that exists. Every view always has one: a URL without one, or with
+  // one that was deleted, gets the last project shown or the first there is
+  // (see defaultProject.ts), replacing the history entry like any filter
+  // change. Nothing is picked until the projects have loaded, or when there
+  // are none.
+  const shownProject = projectNames && namedProject(projectNames, filters.project);
+  const needsProject = projectNames !== null && projectNames.length > 0 && shownProject === null;
+  useEffect(() => {
+    if (needsProject && projectNames) setFilter("project", defaultProject(projectNames, readLastProject()));
+  }, [needsProject, projectNames, setFilter]);
+  // The project shown is the one the next view without one starts on.
+  useEffect(() => {
+    if (shownProject) rememberProject(shownProject);
+  }, [shownProject]);
 
   const set = (key: FilterKey) => (value: string) => setFilter(key, value);
   const clear = () => {
@@ -131,7 +166,7 @@ export default function FilterPanel({
     >
       <FilterSelect
         name="Project"
-        allLabel="All projects"
+        placeholder={projects?.length === 0 ? "No projects" : "Project"}
         value={filters.project}
         options={(projects ?? []).map((p) => ({ value: p.prefix, label: `${p.icon} ${p.name}`.trim() }))}
         ignoreCase

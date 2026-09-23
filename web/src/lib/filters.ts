@@ -25,6 +25,13 @@ export type FilterKey = keyof Filters;
 /** The query parameter names, which are also the Filters fields, in display order. */
 export const FILTER_KEYS: readonly FilterKey[] = ["project", "status", "priority", "label", "repo", "q"];
 
+/**
+ * The filters that narrow down a project's tickets: every one but the project,
+ * which every view always has set (see defaultProject.ts). These are the ones
+ * that make a view "filtered", and the ones Clear filters removes.
+ */
+export const NARROWING_KEYS: readonly FilterKey[] = FILTER_KEYS.filter((key) => key !== "project");
+
 export const EMPTY_FILTERS: Filters = { project: "", status: "", priority: "", label: "", repo: "", q: "" };
 
 /** The fields of a ticket that filtering reads. */
@@ -46,8 +53,9 @@ export function parseFilters(params: URLSearchParams): Filters {
   return filters;
 }
 
-export function hasFilters(filters: Filters): boolean {
-  return FILTER_KEYS.some((key) => filters[key] !== "");
+/** Whether any of the given filters (every filter by default) is set. */
+export function hasFilters(filters: Filters, keys: readonly FilterKey[] = FILTER_KEYS): boolean {
+  return keys.some((key) => filters[key] !== "");
 }
 
 /** What a filter control's value stores in the URL: nothing for blank text. */
@@ -116,6 +124,12 @@ export function matchesFilters(ticket: FilterableTicket, filters: Filters): bool
     if (!haystacks.some((h) => h.toLowerCase().includes(q))) return false;
   }
   return true;
+}
+
+/** The tickets in the given project, ignoring case as the filter does; all of them when none is given. */
+export function inProject<T extends Pick<FilterableTicket, "projectPrefix">>(tickets: readonly T[], project: string): T[] {
+  if (!project) return [...tickets];
+  return tickets.filter((t) => same(t.projectPrefix, project));
 }
 
 export interface SelectOption {

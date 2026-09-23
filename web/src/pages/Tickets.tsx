@@ -16,7 +16,8 @@ import FilterPanel from "../components/FilterPanel";
 import { useFilters } from "../hooks/useFilters";
 import { useLiveRefresh } from "../hooks/useLiveRefresh";
 import { useTicketParam } from "../hooks/useTicketParam";
-import { matchesFilters, repoOptions } from "../lib/filters";
+import { awaitingProject } from "../lib/defaultProject";
+import { inProject, matchesFilters, repoOptions } from "../lib/filters";
 import { STATUS_LABELS, STATUS_STYLES, isStatus, isDone } from "../lib/status";
 
 const PRIORITY_CONFIG: Record<string, { style: string; icon: typeof ArrowUp }> = {
@@ -97,6 +98,13 @@ export default function Tickets() {
 
   // Filters apply client-side, so changing one never refetches.
   const filtered = useMemo(() => tickets.filter((t) => matchesFilters(t, filters)), [tickets, filters]);
+  // The table always shows one project, so its count is out of that project's tickets.
+  const projectCount = useMemo(() => inProject(tickets, filters.project).length, [tickets, filters.project]);
+  // The filter bar picks a project for a URL without one; until it has, the
+  // table waits rather than listing every project's tickets. The projects load
+  // with the tickets, so once loading is over they are known (or failed, and
+  // there are none to wait for).
+  const waiting = loading || awaitingProject(filters.project, projects);
   const repos = useMemo(() => repoOptions(tickets, filters.repo), [tickets, filters.repo]);
 
   const handleCreate = async (data: TicketWrite) => {
@@ -131,11 +139,11 @@ export default function Tickets() {
       <FilterPanel
         state={filterState}
         repos={repos}
-        count={loading ? undefined : { shown: filtered.length, total: tickets.length }}
+        count={waiting ? undefined : { shown: filtered.length, total: projectCount }}
       />
 
       <div data-testid="table-scroll" className="flex-1 overflow-auto">
-        {loading ? (
+        {waiting ? (
           <div className="flex items-center justify-center h-64 text-slate-600">
             Loading tickets…
           </div>
@@ -143,7 +151,7 @@ export default function Tickets() {
           <div className="flex flex-col items-center justify-center h-64 text-slate-600 space-y-3">
             <TicketIcon className="w-10 h-10 text-slate-700" />
             <p className="text-sm">
-              {filterState.active && tickets.length > 0 ? "No tickets match the filters" : "No tickets found"}
+              {filterState.active && projectCount > 0 ? "No tickets match the filters" : "No tickets found"}
             </p>
           </div>
         ) : (

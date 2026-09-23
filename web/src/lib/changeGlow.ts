@@ -8,8 +8,9 @@
 // - A ticket whose `updatedAt` differs from the previous fetch changed.
 // - A ticket the previous fetch did not have is new, which includes a ticket
 //   that came back from done.
-// - A ticket that is gone says nothing. The page stamps only the cards it
-//   draws, so a ticket moved to done is simply absent from the next fetch:
+// - A ticket that is gone says nothing. The page stamps only open tickets
+//   (every project's, so switching project brings nothing "in"), so a ticket
+//   moved to done is simply absent from the next fetch:
 //   it leaves the graph without a flash, and nothing else flashes because of
 //   it either.
 // - The very first fetch changes nothing. There is no previous fetch to

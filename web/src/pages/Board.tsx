@@ -22,7 +22,8 @@ import FilterPanel from "../components/FilterPanel";
 import { useFilters } from "../hooks/useFilters";
 import { useLiveRefresh } from "../hooks/useLiveRefresh";
 import { useTicketParam } from "../hooks/useTicketParam";
-import { matchesFilters, repoOptions } from "../lib/filters";
+import { awaitingProject } from "../lib/defaultProject";
+import { inProject, matchesFilters, repoOptions } from "../lib/filters";
 import { STATUSES, STATUS_LABELS, STATUS_COLORS, isStatus, type Status } from "../lib/status";
 
 function DraggableTicket({
@@ -101,7 +102,8 @@ function Column({
 }
 
 export default function Board() {
-  const [projects, setProjects] = useState<Project[]>([]);
+  // Null until the first load.
+  const [projects, setProjects] = useState<Project[] | null>(null);
   const [columns, setColumns] = useState<BoardColumn[]>([]);
   const [activeTicket, setActiveTicket] = useState<Ticket | null>(null);
   const [createForStatus, setCreateForStatus] = useState<string | null>(null);
@@ -137,15 +139,18 @@ export default function Board() {
 
   // A failed reload keeps the projects already loaded, and only the newest
   // reply is taken, the way loadBoard above takes only the newest board.
+  // Only a failed first load settles on none.
   const projectSeqRef = useRef(0);
   const loadProjects = useCallback(() => {
     const seq = ++projectSeqRef.current;
     api.projects
       .list()
       .then((loaded) => {
-        if (seq === projectSeqRef.current) setProjects(loaded);
+        if (seq === projectSeqRef.current) setProjects(loaded ?? []);
       })
-      .catch(() => {});
+      .catch(() => {
+        if (seq === projectSeqRef.current) setProjects((prev) => prev ?? []);
+      });
   }, []);
 
   useEffect(() => loadProjects(), [loadProjects]);
@@ -199,6 +204,11 @@ export default function Board() {
   const getColumnTickets = (status: string) =>
     (columns.find((c) => c.status === status)?.tickets || []).filter(isShown);
   const shownCount = allTickets.filter((t) => matchesFilters(t, filters)).length;
+  // The board always shows one project, so its count is out of that project's tickets.
+  const projectCount = useMemo(() => inProject(allTickets, filters.project).length, [allTickets, filters.project]);
+  // The filter bar picks a project for a URL without one; until it has, the
+  // board waits rather than showing every project's tickets.
+  const waiting = loading || awaitingProject(filters.project, projects);
   const repos = useMemo(() => repoOptions(allTickets, filters.repo), [allTickets, filters.repo]);
 
   const findTicketById = (id: UniqueIdentifier): Ticket | undefined => {
@@ -304,11 +314,11 @@ export default function Board() {
       <FilterPanel
         state={filterState}
         repos={repos}
-        count={loading ? undefined : { shown: shownCount, total: allTickets.length }}
+        count={waiting ? undefined : { shown: shownCount, total: projectCount }}
       />
 
       <div data-testid="board-scroll" className="flex-1 overflow-x-auto p-6">
-        {loading ? (
+        {waiting ? (
           <div className="flex items-center justify-center h-full text-slate-600">
             Loading board…
           </div>
@@ -348,7 +358,7 @@ export default function Board() {
 
       {createForStatus && (
         <CreateTicketModal
-          projects={projects}
+          projects={projects ?? []}
           defaultStatus={createForStatus}
           onClose={() => setCreateForStatus(null)}
           onCreate={handleCreate}
@@ -358,7 +368,7 @@ export default function Board() {
       {selectedTicket && (
         <TicketEditor
           ticket={selectedTicket}
-          projects={projects}
+          projects={projects ?? []}
           ticketUrl={ticketUrl}
           closeRequested={closeRequested}
           onCloseCancelled={cancelClose}

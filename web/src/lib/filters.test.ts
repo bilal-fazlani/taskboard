@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   EMPTY_FILTERS,
   FILTER_KEYS,
+  NARROWING_KEYS,
   filterSearch,
   hasFilters,
+  inProject,
   matchesFilters,
   parseFilters,
   repoOptions,
@@ -203,5 +205,34 @@ describe("selectOptions", () => {
       options: [...options, { value: "gone", label: "gone" }],
       value: "gone",
     });
+  });
+});
+
+describe("filters other than the project", () => {
+  it("are every filter but the project", () => {
+    expect(NARROWING_KEYS).toEqual(["status", "priority", "label", "repo", "q"]);
+  });
+
+  it("make a view filtered, where the project alone does not", () => {
+    expect(hasFilters(f({ project: "ACP" }), NARROWING_KEYS)).toBe(false);
+    expect(hasFilters(f({ project: "ACP" }))).toBe(true);
+    expect(hasFilters(f({ project: "ACP", q: "x" }), NARROWING_KEYS)).toBe(true);
+  });
+});
+
+describe("inProject", () => {
+  const tickets = [
+    { id: "1", projectPrefix: "ACP" },
+    { id: "2", projectPrefix: "LDR" },
+    { id: "3", projectPrefix: "ACP" },
+  ];
+
+  it("keeps the project's tickets, ignoring case", () => {
+    expect(inProject(tickets, "acp").map((t) => t.id)).toEqual(["1", "3"]);
+    expect(inProject(tickets, "GONE")).toEqual([]);
+  });
+
+  it("keeps every ticket when no project is given", () => {
+    expect(inProject(tickets, "").map((t) => t.id)).toEqual(["1", "2", "3"]);
   });
 });

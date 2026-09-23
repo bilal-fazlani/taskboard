@@ -8,9 +8,10 @@ const NONE: ReadonlySet<string> = new Set();
  * refresh changed or brought in, each for `GLOW_MS` from the fetch that
  * carried it.
  *
- * `tickets` is the cards currently on the graph — null until the first fetch
- * lands — and must keep its identity between refetches that changed nothing,
- * which is what the page's memoised topology gives. Which ids count as
+ * `tickets` is the open tickets the page could draw — every project's, so
+ * switching project brings none in — null until the first fetch lands. It
+ * must keep its identity between renders that fetched nothing, which is what
+ * the page's memoised list gives. Which ids count as
  * changed is decided in src/lib/changeGlow.ts; all this adds is the clock.
  *
  * Every card times out on its own, so a second edit elsewhere does not cut an

@@ -10,7 +10,8 @@ import { useFilters } from "../hooks/useFilters";
 import { useLiveRefresh } from "../hooks/useLiveRefresh";
 import { useTicketParam } from "../hooks/useTicketParam";
 import { CHANGE_GLOW_CLASS } from "../lib/changeGlow";
-import { matchesFilters, repoOptions } from "../lib/filters";
+import { awaitingProject } from "../lib/defaultProject";
+import { inProject, matchesFilters, repoOptions } from "../lib/filters";
 import {
   chainFinder,
   chainRole,
@@ -34,6 +35,7 @@ import {
 import { MIN_COLUMN_GAP, laneCount, lanesHeight, planGutters, routeEdges } from "../lib/graphEdges";
 import { mergeSizes } from "../lib/graphSizes";
 import { columnHeading } from "../lib/graphText";
+import { isDone } from "../lib/status";
 import {
   FIT_PADDING,
   IDENTITY,
@@ -144,9 +146,11 @@ function Arrowhead({ id, className }: { id: string; className: string }) {
 }
 
 export default function Graph() {
-  const [projects, setProjects] = useState<Project[]>([]);
-  // Every project's tickets, null until the first fetch. Filters, the
-  // project among them, only dim cards, so they never refetch.
+  // Null until the first load.
+  const [projects, setProjects] = useState<Project[] | null>(null);
+  // Every project's tickets, null until the first fetch. The graph is laid
+  // out from the selected project's alone; the other filters only dim cards.
+  // Neither refetches: the editor can open any project's ticket.
   const [fetched, setFetched] = useState<Ticket[] | null>(null);
   // Bumped after an edit to refetch.
   const [version, setVersion] = useState(0);
@@ -168,14 +172,17 @@ export default function Graph() {
   // Reloaded with the tickets, so the editor names a project that was renamed
   // elsewhere. A failed reload keeps the projects already loaded, and a reply
   // to a fetch a newer one has overtaken is dropped rather than put on screen.
+  // Only a failed first load settles on none.
   useEffect(() => {
     let cancelled = false;
     api.projects
       .list()
       .then((loaded) => {
-        if (!cancelled) setProjects(loaded);
+        if (!cancelled) setProjects(loaded ?? []);
       })
-      .catch(() => {});
+      .catch(() => {
+        if (!cancelled) setProjects((prev) => prev ?? []);
+      });
     return () => {
       cancelled = true;
     };
@@ -199,7 +206,9 @@ export default function Graph() {
   }, [version]);
 
   const refresh = useCallback(() => setVersion((v) => v + 1), []);
-  const loading = fetched === null;
+  // The filter bar picks a project for a URL without one; until it has, the
+  // graph waits rather than laying out every project's tickets.
+  const loading = fetched === null || awaitingProject(filters.project, projects);
   // The open ticket comes from the URL, so ?ticket=KEY opens it on load.
   const {
     selected: selectedTicket,
@@ -216,8 +225,12 @@ export default function Graph() {
   // only hands it the refreshed ticket.
   useLiveRefresh(refresh);
 
-  // Once per fetched ticket set; measuring only repositions.
-  const topology = useMemo(() => computeGraphTopology(fetched ?? []), [fetched]);
+  // Only the selected project's tickets are laid out. A dependency on another
+  // project's unfinished ticket is not an edge: the card counts it as a
+  // hidden blocker and sits right of Ready, as for any blocker not drawn.
+  const shownTickets = useMemo(() => inProject(fetched ?? [], filters.project), [fetched, filters.project]);
+  // Once per fetched ticket set or project; measuring only repositions.
+  const topology = useMemo(() => computeGraphTopology(shownTickets), [shownTickets]);
   // Back edges' vertical runs need room in the gaps and beside the outer
   // columns, which depends only on the topology. positionGraph takes one gap
   // for every column, so every gap gets the widest one any gap needs.
@@ -243,11 +256,14 @@ export default function Graph() {
   );
   const edges = useMemo(() => routeEdges(layout), [layout]);
   // Cards a live refresh just changed or brought in glow for two seconds.
-  // Only the cards on the graph are watched, so a ticket that left for done
-  // is simply gone from the next fetch and never flashes on its way out.
-  const onGraph = useMemo(() => topology.nodes.map((node) => node.ticket), [topology]);
-  const glowing = useChangeGlow(loading ? null : onGraph);
-  // The ids of the cards the filters match, or null when no filter is set.
+  // Only open tickets are watched, so a ticket that left for done is simply
+  // gone from the next fetch and never flashes on its way out. Every
+  // project's are watched, not only the cards on the graph, so switching
+  // project brings no card in and nothing flashes.
+  const openTickets = useMemo(() => fetched?.filter((t) => !isDone(t.status)) ?? null, [fetched]);
+  const glowing = useChangeGlow(openTickets);
+  // The ids of the cards the filters match, or null when no filter but the
+  // project is set: every card on the graph is in the project.
   const matching = useMemo(
     () =>
       filterState.active
@@ -263,7 +279,7 @@ export default function Graph() {
     for (const node of topology.nodes) if (matching.has(node.id)) counts[node.column]++;
     return counts;
   }, [matching, topology]);
-  const repos = useMemo(() => repoOptions(fetched ?? [], filters.repo), [fetched, filters.repo]);
+  const repos = useMemo(() => repoOptions(shownTickets, filters.repo), [shownTickets, filters.repo]);
   // Adjacency once per topology; the chains once per pick, not per render.
   const findChains = useMemo(() => chainFinder(topology), [topology]);
   const lit = highlightedCard(picked);
@@ -350,7 +366,8 @@ export default function Graph() {
   const canvasWidth = layout.width + gutters.right;
   const canvasHeight = Math.max(layout.height, origin.y + CARD_SIZE.height);
 
-  // The view fits itself only on first load. Filters, tickets appearing or
+  // The view fits itself only on first load and when the project changes,
+  // which lays out a different graph. Other filters, tickets appearing or
   // leaving, the column count changing, cards resizing and the window
   // resizing never move it; the Fit button does. A pending fit waits for the
   // tickets to arrive and form a graph, for every card to be measured, so it
@@ -359,6 +376,11 @@ export default function Graph() {
   // state adjusted while rendering: React renders again before committing, so
   // the unfitted graph is never painted, and the canvas stays invisible while
   // a fit is pending.
+  const [laidOutProject, setLaidOutProject] = useState(filters.project.toLowerCase());
+  if (filters.project.toLowerCase() !== laidOutProject) {
+    setLaidOutProject(filters.project.toLowerCase());
+    setFitPending(true);
+  }
   const measured = useMemo(() => topology.nodes.every((node) => sizes.has(node.id)), [topology, sizes]);
   const hasGraph = !loading && topology.nodes.length > 0;
   if (fitPending && hasGraph && measured && viewportSize) {
@@ -720,7 +742,7 @@ export default function Graph() {
       {selectedTicket && (
         <TicketEditor
           ticket={selectedTicket}
-          projects={projects}
+          projects={projects ?? []}
           ticketUrl={ticketUrl}
           closeRequested={closeRequested}
           onCloseCancelled={cancelClose}
