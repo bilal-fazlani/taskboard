@@ -1,10 +1,20 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { X, Trash2, CheckCircle2, Circle, Pencil, Eye, Copy, Check, RefreshCw, AlertTriangle } from "lucide-react";
 import Markdown from "react-markdown";
-import { api, type EpicRef, type Ticket, type Project, type Subtask, type TicketWrite } from "../api/client";
+import {
+  api,
+  type EpicRef,
+  type StatusChange,
+  type Ticket,
+  type Project,
+  type Subtask,
+  type TicketWrite,
+} from "../api/client";
+import ActivityList from "./ActivityList";
 import LabelPicker from "./LabelPicker";
 import RepoPicker from "./RepoPicker";
 import DependencyPicker, { TicketRefLabel } from "./DependencyPicker";
+import { activityEntries } from "../lib/activity";
 import { saveErrorMessage } from "../lib/saveError";
 import { STATUSES, STATUS_LABELS, STATUS_STYLES, isStatus } from "../lib/status";
 import {
@@ -68,6 +78,10 @@ export default function TicketEditor({
   const [title, setTitle] = useState(ticket.title);
   const [description, setDescription] = useState(ticket.description);
   const [status, setStatus] = useState(ticket.status);
+  // The status as last saved or synced, which the Note field compares the
+  // Status select against, and the note to save with a change of status.
+  const [savedStatus, setSavedStatus] = useState(ticket.status);
+  const [note, setNote] = useState("");
   const [priority, setPriority] = useState(ticket.priority);
   const [dueDate, setDueDate] = useState(toDateInputValue(ticket.dueDate));
   const [epic, setEpic] = useState(ticket.epic?.id ?? "");
@@ -121,6 +135,8 @@ export default function TicketEditor({
     setTitle(full.title);
     setDescription(full.description);
     setStatus(full.status);
+    setSavedStatus(full.status);
+    setNote("");
     setPriority(full.priority);
     setDueDate(toDateInputValue(full.dueDate));
     setEpic(full.epic?.id ?? "");
@@ -153,6 +169,8 @@ export default function TicketEditor({
   const ids = useId();
   const keyId = `${ids}-key`;
   const statusId = `${ids}-status`;
+  const noteId = `${ids}-note`;
+  const noteHelpId = `${ids}-note-help`;
   const priorityId = `${ids}-priority`;
   const dueDateId = `${ids}-due`;
   const epicId = `${ids}-epic`;
@@ -174,6 +192,24 @@ export default function TicketEditor({
       cancelled = true;
     };
   }, [ticket.projectId, ticket.updatedAt]);
+
+  // The ticket's status history for the Activity section, fetched on open and
+  // again whenever the ticket changes: a live refresh, or this editor's own
+  // save, hands the editor a ticket with a newer `updatedAt`. Until it arrives,
+  // and if it never does, the section simply shows nothing yet.
+  const [history, setHistory] = useState<StatusChange[] | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    Promise.resolve()
+      .then(() => api.tickets.history(ticket.id))
+      .then((changes) => {
+        if (!cancelled && Array.isArray(changes)) setHistory(changes);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [ticket.id, ticket.updatedAt]);
 
   // The full ticket, fetched on open and again whenever the ticket the editor
   // was handed changes — which is how an edit made elsewhere, arriving as a
@@ -349,12 +385,17 @@ export default function TicketEditor({
   // the ticket deleted while the editor was open, the server refusing the
   // input, the network gone — leaves the editor dirty and open with every
   // field as the user left it, so pressing Save again sends the same fields.
+  //
+  // A note goes with the save only when the save changes the status; it never
+  // holds the save up.
   const handleSave = async () => {
     const current = currentFields();
+    const write = editedWrite(baseRef.current, current);
+    if (write.status !== undefined && note.trim()) write.note = note.trim();
     setSaveError(null);
     setSaving(true);
     try {
-      await onUpdate(ticket.id, editedWrite(baseRef.current, current));
+      await onUpdate(ticket.id, write);
     } catch (error) {
       setSaveError(saveErrorMessage(error));
       return;
@@ -362,6 +403,8 @@ export default function TicketEditor({
       setSaving(false);
     }
     baseRef.current = current;
+    setSavedStatus(current.status);
+    setNote("");
     dirtyRef.current = false;
     setDirty(false);
     noteChanged(null);
@@ -626,7 +669,12 @@ export default function TicketEditor({
                 </button>
               </form>
             </div>
-            {/* Agent request history goes here, last in this column. */}
+
+            {/* Last in this column. Agent requests and comments join this list as more kinds of entry. */}
+            <div>
+              <h3 className={SECTION_HEADING}>Activity</h3>
+              {history && <ActivityList entries={activityEntries(history)} />}
+            </div>
           </section>
 
           <aside
@@ -643,6 +691,8 @@ export default function TicketEditor({
                   value={status}
                   onChange={(e) => {
                     setStatus(e.target.value);
+                    // Back to the saved status there is no change to note.
+                    if (e.target.value === savedStatus) setNote("");
                     markDirty();
                   }}
                   className={SELECT}
@@ -717,6 +767,29 @@ export default function TicketEditor({
                 </div>
               </div>
             </div>
+
+            {status !== savedStatus && (
+              <div>
+                <label htmlFor={noteId} className={FIELD_LABEL}>
+                  Note (optional)
+                </label>
+                <textarea
+                  id={noteId}
+                  value={note}
+                  onChange={(e) => {
+                    setNote(e.target.value);
+                    markDirty();
+                  }}
+                  rows={3}
+                  placeholder="Why the status changed"
+                  aria-describedby={noteHelpId}
+                  className="w-full resize-y rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white placeholder-slate-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+                <p id={noteHelpId} className="mt-1 text-[11px] text-slate-600">
+                  Saved with the change and shown in Activity.
+                </p>
+              </div>
+            )}
 
             <div>
               <h3 className={SECTION_HEADING}>Repos</h3>

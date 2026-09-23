@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import type { Project, Subtask, Ticket } from "../api/client";
+import type { Project, StatusChange, Subtask, Ticket } from "../api/client";
 
 // The editor and its pickers only talk to the API through this module, so
 // mocking it keeps every test away from a real server.
@@ -9,6 +9,7 @@ const mockApi = vi.hoisted(() => ({
   tickets: {
     get: vi.fn(),
     list: vi.fn(),
+    history: vi.fn(),
     addSubtask: vi.fn(),
   },
   subtasks: {
@@ -115,6 +116,7 @@ beforeEach(() => {
   mockApi.epics.list.mockResolvedValue(epicList());
   mockApi.tickets.get.mockImplementation((id: string) => Promise.resolve(makeTicket({ id })));
   mockApi.tickets.list.mockResolvedValue([]);
+  mockApi.tickets.history.mockResolvedValue([]);
   mockApi.labels.list.mockResolvedValue([]);
 });
 
@@ -1133,5 +1135,148 @@ describe("the epic picker", () => {
     await act(async () => rerenderWith({ ticket: next }));
     expect(epicSelect().value).toBe("e-Realtime");
     expect(saveButton()).toBeNull();
+  });
+});
+
+describe("the status note", () => {
+  const noteField = () => screen.queryByLabelText("Note (optional)") as HTMLTextAreaElement | null;
+  const setStatus = (value: string) => fireEvent.change(screen.getByLabelText("Status"), { target: { value } });
+
+  it("appears below the fields grid only once the status differs from the saved one", () => {
+    renderEditor();
+    expect(noteField()).toBeNull();
+
+    setStatus("in_progress");
+    const note = noteField()!;
+    expect(note.tagName).toBe("TEXTAREA");
+    expect(note.getAttribute("placeholder")).toBe("Why the status changed");
+    expect(screen.getByText("Saved with the change and shown in Activity.")).toBeTruthy();
+    // In the fields column, straight after the Status/Priority grid.
+    const fields = screen.getByRole("complementary", { name: "Ticket fields" });
+    const block = note.parentElement!;
+    expect(block.parentElement).toBe(fields);
+    expect(block.previousElementSibling!.contains(screen.getByLabelText("Status"))).toBe(true);
+  });
+
+  it("disappears and clears when the status goes back to the saved one", () => {
+    renderEditor();
+    setStatus("done");
+    fireEvent.change(noteField()!, { target: { value: "Landed" } });
+    setStatus("todo");
+    expect(noteField()).toBeNull();
+    setStatus("done");
+    expect(noteField()!.value).toBe("");
+  });
+
+  it("goes with the save of a status change", async () => {
+    const { onUpdate } = renderEditor();
+    setStatus("done");
+    fireEvent.change(noteField()!, { target: { value: "  Approved and landed  " } });
+    await act(async () => fireEvent.click(saveButton()!));
+    expect(onUpdate).toHaveBeenCalledWith("t1", { status: "done", note: "Approved and landed" });
+    // Saved: the status is the saved one now, so there is nothing to note.
+    expect(noteField()).toBeNull();
+  });
+
+  it("never blocks Save: a status change saves without one", async () => {
+    const { onUpdate } = renderEditor();
+    setStatus("agent_review");
+    setStatus("in_progress");
+    expect(noteField()!.value).toBe("");
+    await act(async () => fireEvent.click(saveButton()!));
+    expect(onUpdate).toHaveBeenCalledWith("t1", { status: "in_progress" });
+  });
+
+  it("is not sent once the status is back to the saved one", async () => {
+    const { onUpdate } = renderEditor();
+    setStatus("done");
+    fireEvent.change(noteField()!, { target: { value: "Changed my mind" } });
+    setStatus("todo");
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "New title" } });
+    await act(async () => fireEvent.click(saveButton()!));
+    expect(onUpdate).toHaveBeenCalledWith("t1", { title: "New title" });
+  });
+});
+
+describe("the Activity section", () => {
+  const change = (overrides: Partial<StatusChange>): StatusChange => ({
+    id: "c1",
+    ticketId: "t1",
+    fromStatus: "",
+    toStatus: "todo",
+    note: "",
+    createdAt: "2026-09-16T10:00:00Z",
+    ...overrides,
+  });
+  const today = (h: number, m: number) => {
+    const d = new Date();
+    d.setHours(h, m, 0, 0);
+    return d.toISOString();
+  };
+
+  it("sits last in the content column, after Subtasks, with the same heading style", async () => {
+    renderEditor();
+    const content = screen.getByRole("region", { name: "Ticket content" });
+    const heading = within(content).getByRole("heading", { name: "Activity" });
+    const subtasks = within(content).getByRole("heading", { name: "Subtasks" });
+    expect(heading.className).toBe(subtasks.className);
+    expect(content.lastElementChild!.contains(heading)).toBe(true);
+    await waitFor(() => expect(mockApi.tickets.history).toHaveBeenCalledWith("t1"));
+  });
+
+  it("lists status changes newest first, with badges, the time and the note", async () => {
+    mockApi.tickets.history.mockResolvedValue([
+      change({ id: "c3", fromStatus: "agent_review", toStatus: "in_progress", note: "Bounced: missing tests", createdAt: today(20, 12) }),
+      change({ id: "c2", fromStatus: "in_progress", toStatus: "agent_review", createdAt: today(9, 5) }),
+      change({ id: "c1", fromStatus: "", toStatus: "todo", createdAt: "2025-03-02T12:00:00Z" }),
+    ]);
+    renderEditor();
+    const entries = await screen.findAllByTestId("activity-entry");
+    expect(entries).toHaveLength(3);
+
+    const [bounce, review, birth] = entries;
+    expect(bounce.textContent).toContain("Agent Review");
+    expect(bounce.textContent).toContain("In Progress");
+    expect(bounce.textContent!.indexOf("Agent Review")).toBeLessThan(bounce.textContent!.indexOf("In Progress"));
+    expect(within(bounce).getByText("today 20:12")).toBeTruthy();
+    const note = within(bounce).getByTestId("activity-note");
+    expect(note.textContent).toBe("Bounced: missing tests");
+    expect(note.className).toMatch(/\bborder-l/);
+    expect(note.className).toMatch(/\bml-/);
+
+    expect(within(review).getByText("today 09:05")).toBeTruthy();
+    expect(within(review).queryByTestId("activity-note")).toBeNull();
+    const reviewBadge = within(review).getByText("Agent Review");
+    expect(reviewBadge.className).toMatch(/\bbg-violet-500\/20\b/);
+    expect(reviewBadge.className).toMatch(/\btext-violet-400\b/);
+
+    expect(birth.textContent).toMatch(/^Created in\s*Todo/);
+    expect(within(birth).getByText("2 Mar 2025")).toBeTruthy();
+  });
+
+  it("refreshes when a live refresh hands it a changed ticket", async () => {
+    const { rerenderWith } = renderEditor();
+    await waitFor(() => expect(mockApi.tickets.history).toHaveBeenCalledTimes(1));
+    expect(screen.queryAllByTestId("activity-entry")).toHaveLength(0);
+
+    mockApi.tickets.history.mockResolvedValue([
+      change({ id: "c2", fromStatus: "todo", toStatus: "done", note: "Shipped", createdAt: today(8, 0) }),
+      change({ id: "c1" }),
+    ]);
+    const next = makeTicket({ status: "done", updatedAt: "2026-09-23T20:00:00Z" });
+    mockApi.tickets.get.mockResolvedValue(next);
+    await act(async () => rerenderWith({ ticket: next }));
+
+    await waitFor(() => expect(screen.getAllByTestId("activity-entry")).toHaveLength(2));
+    expect(mockApi.tickets.history).toHaveBeenCalledTimes(2);
+    expect(screen.getByText("Shipped")).toBeTruthy();
+  });
+
+  it("keeps the editor working when the history cannot be loaded", async () => {
+    mockApi.tickets.history.mockRejectedValue(new Error("offline"));
+    renderEditor();
+    await waitFor(() => expect(mockApi.tickets.history).toHaveBeenCalled());
+    expect(screen.getByRole("heading", { name: "Activity" })).toBeTruthy();
+    expect(screen.queryAllByTestId("activity-entry")).toHaveLength(0);
   });
 });
