@@ -3,18 +3,13 @@ import { Search, X } from "lucide-react";
 import { api, type Epic, type Label, type Project } from "../api/client";
 import type { FilterState } from "../hooks/useFilters";
 import { useLiveRefresh } from "../hooks/useLiveRefresh";
+import { CONTROL_BUTTON, fieldClass } from "./controlStyles";
 import ProjectSelect from "./ProjectSelect";
 import { activeProjects, namedProject, type ActivityTicket } from "../lib/defaultProject";
 import { NO_EPIC, selectOptions, urlValue, type FilterKey, type SelectOption } from "../lib/filters";
 import { PRIORITIES } from "../lib/priority";
 import { staleFilters } from "../lib/staleFilters";
 import { STATUSES, STATUS_LABELS } from "../lib/status";
-
-const CONTROL =
-  "bg-slate-800 text-xs rounded-md border px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500";
-// A set filter stands out from the unset ones.
-const controlClass = (set: boolean) =>
-  `${CONTROL} ${set ? "border-blue-500/60 text-slate-100" : "border-slate-700 text-slate-300"}`;
 
 function FilterSelect({
   name,
@@ -42,7 +37,7 @@ function FilterSelect({
       aria-label={name}
       value={shown.value}
       onChange={(e) => onChange(e.target.value)}
-      className={`${controlClass(value !== "")}${maxWidth ? ` ${maxWidth} truncate` : ""}`}
+      className={`${fieldClass(value !== "")}${maxWidth ? ` ${maxWidth} truncate` : ""}`}
     >
       <option value="">{allLabel}</option>
       {shown.options.map((o) => (
@@ -250,14 +245,14 @@ export default function FilterPanel({
             setSearch(e.target.value);
             setFilter("q", e.target.value);
           }}
-          className={`${controlClass(filters.q !== "")} w-60 pl-7 placeholder:text-slate-500`}
+          className={`${fieldClass(filters.q !== "")} w-60 pl-7 placeholder:text-slate-500`}
         />
       </div>
       {active && (
         <button
           type="button"
           onClick={clear}
-          className="inline-flex items-center gap-1 px-2 py-1.5 text-xs text-slate-400 hover:text-slate-200 rounded-md hover:bg-slate-800 transition-colors"
+          className={CONTROL_BUTTON}
         >
           <X className="w-3.5 h-3.5" />
           Clear filters

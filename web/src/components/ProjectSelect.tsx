@@ -12,9 +12,7 @@ import {
   type ActivityTicket,
 } from "../lib/defaultProject";
 import { selectOptions } from "../lib/filters";
-
-const CONTROL =
-  "bg-slate-800 text-xs rounded-md border px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500";
+import { fieldClass } from "./controlStyles";
 
 /**
  * The project dropdown, used by the filter bar (FilterPanel) and on its own by
@@ -77,7 +75,7 @@ export default function ProjectSelect({
       aria-label="Project"
       value={shown.value}
       onChange={(e) => setFilter("project", e.target.value)}
-      className={`${CONTROL} ${filters.project !== "" ? "border-blue-500/60 text-slate-100" : "border-slate-700 text-slate-300"}`}
+      className={fieldClass(filters.project !== "")}
     >
       {shown.value === "" && (
         <option value="" disabled>
