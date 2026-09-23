@@ -22,7 +22,6 @@ import {
   positionGraph,
   type ChainRole,
   type EdgeChainRole,
-  type PositionedColumn,
   type Size,
 } from "../lib/graphLayout";
 import {
@@ -35,7 +34,7 @@ import {
 } from "../lib/graphHighlight";
 import { MIN_COLUMN_GAP, laneCount, lanesHeight, planGutters, routeEdges } from "../lib/graphEdges";
 import { mergeSizes } from "../lib/graphSizes";
-import { columnHeading } from "../lib/graphText";
+import { columnHeading, gridHeading } from "../lib/graphText";
 import { isDone } from "../lib/status";
 import {
   FIT_PADDING,
@@ -62,10 +61,19 @@ import {
 // of the empty Ready column and of a card in the moment before it's measured.
 const CARD_SIZE: Size = { width: 256, height: 96 };
 const ROW_GAP = 16;
-// Where the first card starts when there are no back edges: room for the
-// column headers above. Each back edge adds a lane between the headers and
-// the cards.
+// Where the highest card, or long edge's run, starts when there are no back
+// edges: room for the column headers above. Each back edge adds a lane
+// between the headers and the cards.
 const CARDS_TOP = 52;
+// Space between the lowest card of the graph and the first row of the grid of
+// unlinked Ready tickets. The grid's header sits in its lower part, its top
+// GRID_HEADER_ABOVE above the grid's cards.
+const GRID_GAP = 88;
+const GRID_HEADER_ABOVE = 28;
+// The note in a Ready column whose tickets are all in the grid. It is short
+// enough to clear the grid's header when nothing else is on the graph, and
+// the grid starts GRID_GAP below the origin.
+const GRID_NOTE_HEIGHT = 40;
 
 const ARROW = "graph-arrow";
 const BACK_ARROW = "graph-arrow-back";
@@ -124,18 +132,28 @@ const FIT_INSETS: Insets = { top: FIT_PADDING, right: FIT_PADDING, bottom: 16 + 
 const TOOL_BUTTON =
   "flex items-center justify-center w-7 h-7 rounded text-slate-400 transition-colors hover:text-slate-200 hover:bg-slate-800 disabled:text-slate-700 disabled:hover:bg-transparent";
 
-// With filters set in dim mode, a column's count is its matching cards out of
-// all of them. In hide mode every card shown matches, so it's a plain count.
-function ColumnHeader({ column, matching }: { column: PositionedColumn; matching?: number }) {
+// A column's header, and the grid's in the same style. With filters set in
+// dim mode, the count is the matching cards out of all of them. In hide mode
+// every card shown matches, so it's a plain count.
+function Heading({
+  title,
+  count,
+  matching,
+  left,
+  top,
+  width,
+}: {
+  title: string;
+  count: number;
+  matching?: number;
+  left: number;
+  top: number;
+  width: number;
+}) {
   return (
-    <div
-      className="absolute top-0 flex items-baseline gap-2"
-      style={{ left: column.x, width: column.width }}
-    >
-      <h3 className="text-xs font-medium text-slate-400">{columnHeading(column.index)}</h3>
-      <span className="text-[11px] text-slate-600">
-        {matching === undefined ? column.count : `${matching} of ${column.count}`}
-      </span>
+    <div className="absolute flex items-baseline gap-2" style={{ left, top, width }}>
+      <h3 className="text-xs font-medium text-slate-400">{title}</h3>
+      <span className="text-[11px] text-slate-600">{matching === undefined ? count : `${matching} of ${count}`}</span>
     </div>
   );
 }
@@ -269,6 +287,7 @@ export default function Graph() {
         columnGap: gutters.columnGap,
         rowGap: ROW_GAP,
         origin: gutters.origin,
+        gridGap: GRID_GAP,
       }),
     [topology, sizes, gutters],
   );
@@ -290,12 +309,18 @@ export default function Graph() {
     [filterState.active, hiding, topology, filters],
   );
   const dimmed = (id: string) => matching !== null && !matching.has(id);
-  // Matching cards per column, for the column headers.
-  const matchingPerColumn = useMemo(() => {
+  // Matching cards per column, for the column headers, and in the grid, whose
+  // cards Ready's count includes too.
+  const matchingCounts = useMemo(() => {
     if (!matching) return null;
-    const counts = topology.columnCounts.map(() => 0);
-    for (const node of topology.nodes) if (matching.has(node.id)) counts[node.column]++;
-    return counts;
+    const columns = topology.columnCounts.map(() => 0);
+    let grid = 0;
+    for (const node of topology.nodes) {
+      if (!matching.has(node.id)) continue;
+      columns[node.column]++;
+      if (node.inGrid) grid++;
+    }
+    return { columns, grid };
   }, [matching, topology]);
   const repos = useMemo(() => repoOptions(projectTickets, filters.repo), [projectTickets, filters.repo]);
   // Adjacency once per topology; the chains once per pick, not per render.
@@ -639,12 +664,26 @@ export default function Graph() {
             }}
           >
             {layout.columns.map((column) => (
-              <ColumnHeader
+              <Heading
                 key={column.index}
-                column={column}
-                matching={matchingPerColumn?.[column.index]}
+                title={columnHeading(column.index)}
+                count={column.count}
+                matching={matchingCounts?.columns[column.index]}
+                left={column.x}
+                top={0}
+                width={column.width}
               />
             ))}
+            {layout.grid && (
+              <Heading
+                title={gridHeading()}
+                count={layout.grid.count}
+                matching={matchingCounts?.grid}
+                left={layout.grid.x}
+                top={layout.grid.y - GRID_HEADER_ABOVE}
+                width={layout.grid.width}
+              />
+            )}
             {layout.columns.slice(1).map((column) => (
               <div
                 key={column.index}
@@ -658,6 +697,16 @@ export default function Graph() {
                 style={{ left: ready.x, top: origin.y, width: ready.width, height: CARD_SIZE.height }}
               >
                 Nothing ready to start
+              </div>
+            )}
+            {/* Ready's header counts the grid's tickets, so an empty column
+                says where they went. */}
+            {ready && ready.count > 0 && topology.columns[0].length === 0 && (
+              <div
+                className="absolute flex items-center justify-center text-xs text-slate-700 border border-dashed border-slate-800 rounded-lg"
+                style={{ left: ready.x, top: origin.y, width: ready.width, height: GRID_NOTE_HEIGHT }}
+              >
+                All Ready tickets are unlinked — see below
               </div>
             )}
 

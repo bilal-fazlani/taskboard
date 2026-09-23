@@ -4,13 +4,13 @@
 // stages:
 //
 //   computeGraphTopology(tickets)       -> columns, row order, edges, counts
-//   positionGraph(topology, options)    -> pixel boxes and edge endpoints
+//   positionGraph(topology, options)    -> pixel boxes, edge ends and bends
 //
 // chainFinder(topology), from graphChains.ts and re-exported here, answers
 // what is upstream and downstream of a node for hover highlighting.
 //
 // The page measures its rendered cards and feeds their sizes into the second
-// stage, so stacking follows real card heights; layoutGraph() runs both with
+// stage, so placement follows real card heights; layoutGraph() runs both with
 // default sizes for callers that have no measurements yet.
 //
 // The model:
@@ -34,11 +34,48 @@
 //   whose cycle waits on anything else never lands in Ready.
 // - A node's column is the longest path of non-back edges leading into it
 //   (raised to 1 by an external blocker). Column 0 is Ready.
-// - Rows start in ticket order, with the tickets an agent holds (in_progress
-//   or agent_review) at the top of column 0, then a few bounded barycentre
-//   sweeps reorder each column towards its neighbours to reduce crossings. In
-//   column 0 the sweeps only reorder within the active group and within the
-//   rest, so the active-first rule always holds.
+// - A Ready ticket with no edge at all, that no agent holds, leaves the
+//   column for the grid below the graph (topology.grid, in ticket order). One
+//   an agent holds (in_progress or agent_review) stays at the top of Ready
+//   with the other held tickets, linked or not. A ticket in a later column
+//   with no edge, which only hidden blockers put there, sits at the bottom of
+//   its column. Which tickets are linked is decided on the input alone, so a
+//   ticket moves between the grid and the graph as it gains or loses edges.
+// - A forward edge that spans more than one column gets a waypoint (a dummy
+//   node) in every column it crosses. Waypoints are ordered and placed like
+//   cards of no height, so the edge is drawn through a gap of its own rather
+//   than behind the cards in between. topology.layers holds each column's
+//   cards and waypoints together; topology.columns only the cards.
+//
+// Row order, the rest of the first stage, works on each connected component
+// of cards and waypoints on its own, so a change in one component never
+// reorders another. A column lists the components holding a Ready ticket an
+// agent holds first, then the rest, each in ticket order of their lowest
+// ticket. Within a component, rows start in ticket order (waypoints by
+// their blocker), then sweeps alternate down the columns, ordering each by
+// its blockers' rows, and back up, ordering by the rows of what it blocks,
+// each followed by adjacent swaps (transposes) that remove a crossing. An
+// entry with no neighbour on the side being swept keeps its row and the rest
+// are sorted around it, so a row index and a barycentre are never compared.
+// Sweeping stops once a sweep fails to reduce the crossings, or after
+// MAX_SWEEPS, and the ordering with the fewest crossings is kept, after one
+// last round of swaps. The held-first and bottom rules above split a column
+// into groups that no sort or swap crosses.
+//
+// The second stage places each column's entries vertically in that order:
+// each wants its centre at the median of its neighbours' centres, and a
+// least-squares fit under the ordering (isotonic regression, by pool
+// adjacent violators) gives the closest placement that keeps rowGap between
+// neighbours. Rounds alternate between fitting to blockers, left to right,
+// and to what each blocks, right to left; an entry with no neighbours on one
+// side uses the other, and one with none at all sits tight below the entry
+// above it (at the top of a column, tight above the entry below it); a column
+// with no edges at all stays packed from the top. The whole graph is then
+// shifted so its highest entry starts at the origin, and the grid starts
+// gridGap below its lowest card, three cards across, aligned to the first
+// three columns. Edge ends spread down a card side, ordered by the height of
+// what is at the other end, with back edges at the top, where they turn up
+// to their lanes.
 //
 // Everything is ordered by ticket (project prefix, then number, then id)
 // before any decision is made, so the output does not depend on the order of
@@ -64,8 +101,10 @@ export interface GraphNode<T extends GraphTicket = GraphTicket> {
   ticket: T;
   /** Unfinished-dependency steps from Ready; 0 is the Ready column. */
   column: number;
-  /** Position within the column, 0 at the top. */
+  /** Position among the column's cards, 0 at the top; for a card in the grid, its place in the grid. */
   row: number;
+  /** A Ready ticket with no edges that no agent holds, drawn in the grid below the graph. */
+  inGrid: boolean;
   /** Held by an agent: in_progress or agent_review. Sorted to the top of Ready. */
   active: boolean;
   /** Distinct dependencies that are done. */
@@ -92,17 +131,37 @@ export interface GraphEdge {
   back: boolean;
 }
 
+/** A card in a column's stack. */
+export interface CardEntry {
+  kind: "card";
+  id: string;
+}
+
+/** Where a forward edge spanning several columns crosses one in between. */
+export interface WaypointEntry {
+  kind: "waypoint";
+  /** Index into topology.edges. */
+  edge: number;
+}
+
+export type LayerEntry = CardEntry | WaypointEntry;
+
 export interface GraphTopology<T extends GraphTicket = GraphTicket> {
-  /** Ordered by column, then row. */
+  /** Ordered by column, then row, then the grid's cards in grid order. */
   nodes: GraphNode<T>[];
   /** Ordered by blocker, then blocked ticket, in ticket order. */
   edges: GraphEdge[];
   /**
-   * Node ids per column, top to bottom. Only column 0 can be empty, when every
-   * would-be Ready ticket is held back by an external blocker.
+   * Card ids per column, top to bottom, without the grid. Only column 0 can
+   * be empty: when its tickets are all in the grid, or every would-be Ready
+   * ticket is held back by an external blocker.
    */
   columns: string[][];
-  /** Node count per column; columnCounts[i] === columns[i].length. */
+  /** Per column, top to bottom, its cards and the waypoints of the long edges crossing it. */
+  layers: LayerEntry[][];
+  /** Ids of the Ready tickets placed in the grid below the graph, in ticket order. */
+  grid: string[];
+  /** Node count per column. Ready's includes the grid, since those tickets are ready too. */
   columnCounts: number[];
 }
 
@@ -122,15 +181,24 @@ export interface PositionOptions {
   defaultSize?: Size;
   /** Horizontal space between columns. */
   columnGap?: number;
-  /** Vertical space between cards in a column. */
+  /** Vertical space between cards in a column, and between a card and a long edge passing it. */
   rowGap?: number;
-  /** Top-left corner of column 0's first card, e.g. to leave room for headers. */
+  /** Top-left corner of the graph: where Ready starts and the highest card or long edge sits. */
   origin?: Point;
+  /**
+   * Vertical space from the lowest card of the graph, or from the origin when
+   * the columns are empty, to the grid's first row. The page puts the grid's
+   * header in it.
+   */
+  gridGap?: number;
 }
 
 export const DEFAULT_NODE_SIZE: Size = { width: 280, height: 96 };
 export const DEFAULT_COLUMN_GAP = 80;
 export const DEFAULT_ROW_GAP = 16;
+export const DEFAULT_GRID_GAP = 64;
+/** Cards per row of the grid, each under one of the first columns. */
+export const GRID_COLUMNS = 3;
 
 export interface PositionedNode<T extends GraphTicket = GraphTicket> extends GraphNode<T> {
   x: number;
@@ -140,10 +208,20 @@ export interface PositionedNode<T extends GraphTicket = GraphTicket> extends Gra
 }
 
 export interface PositionedEdge extends GraphEdge {
-  /** Middle of the blocker's right edge. */
+  /**
+   * On the blocker's right edge. With several edge ends on that side they
+   * spread down its middle half, ordered by the height of what is at the
+   * other end; a single end, and a self-dependency, leave from the middle.
+   */
   start: Point;
-  /** Middle of the blocked card's left edge. */
+  /** On the blocked card's left edge, spread the same way. */
   end: Point;
+  /**
+   * Where a forward edge crosses each column between its ends, left to right:
+   * an entry point on the column's left side and an exit point on its right,
+   * at the same height. Empty for an edge to the next column and for back edges.
+   */
+  via: Point[];
 }
 
 export interface PositionedColumn {
@@ -151,24 +229,42 @@ export interface PositionedColumn {
   x: number;
   /** Widest card in the column, or the default width if it is empty. */
   width: number;
+  /** topology.columnCounts[index], so Ready's includes the grid. */
   count: number;
-  /** Height of the stacked cards and the gaps between them. */
+}
+
+/** Where the grid of unlinked Ready tickets sits, below the graph. */
+export interface PositionedGrid {
+  /** Left edge of the first card, which is Ready's left edge. */
+  x: number;
+  /** Top of the first row of cards. */
+  y: number;
+  width: number;
   height: number;
+  count: number;
 }
 
 export interface GraphLayout<T extends GraphTicket = GraphTicket> {
   nodes: PositionedNode<T>[];
   edges: PositionedEdge[];
   columns: PositionedColumn[];
-  /** Extent from (0, 0), origin included, to the right edge of the last column. */
+  /** Null when no ticket is in the grid. */
+  grid: PositionedGrid | null;
+  /** Extent from (0, 0), origin included, to the right edge of the last column or of the grid. */
   width: number;
-  /** Extent from (0, 0), origin included, to the bottom of the tallest column. */
+  /** Extent from (0, 0), origin included, to the lowest card, the grid's included. */
   height: number;
 }
 
-// Down-and-up barycentre sweeps. A small fixed number keeps the cost bounded
-// and the result deterministic; it isn't iterated to convergence.
-const BARYCENTRE_SWEEPS = 2;
+// Row ordering sweeps per component, each down the columns and back up. The
+// loop also stops as soon as a sweep doesn't reduce the crossings.
+const MAX_SWEEPS = 8;
+// Rounds of adjacent swaps after a sweep. Every swap removes crossings, so
+// the rounds end on their own; the bound keeps a large graph within a frame.
+const MAX_TRANSPOSE_ROUNDS = 8;
+// Vertical placement rounds, alternating blockers and blocked tickets. Each
+// round carries positions through every column, so a few settle the graph.
+const PLACEMENT_ROUNDS = 8;
 
 function compareTickets(a: GraphTicket, b: GraphTicket): number {
   if (a.projectPrefix !== b.projectPrefix) return a.projectPrefix < b.projectPrefix ? -1 : 1;
@@ -222,64 +318,262 @@ export function computeGraphTopology<T extends GraphTicket>(tickets: readonly T[
       if (!back.flags[u][i]) column[v] = Math.max(column[v], column[u] + 1);
     });
   }
+  const columnTotal = column.reduce((max, c) => Math.max(max, c + 1), 0);
 
-  const predecessors: number[][] = open.map(() => []);
+  // Each edge once, in blocker then blocked ticket order; waypoints name
+  // their edge by its index here.
+  const edges: GraphEdge[] = [];
+  const edgeFrom: number[] = [];
+  const edgeTo: number[] = [];
+  const linked = new Uint8Array(count);
   successors.forEach((vs, u) =>
     vs.forEach((v, i) => {
-      if (!back.flags[u][i]) predecessors[v].push(u);
+      edges.push({ from: open[u].id, to: open[v].id, back: back.flags[u][i] });
+      edgeFrom.push(u);
+      edgeTo.push(v);
+      linked[u] = linked[v] = 1;
     }),
   );
-  const forwardSuccessors = successors.map((vs, u) => vs.filter((_, i) => !back.flags[u][i]));
-
-  const columnTotal = column.reduce((max, c) => Math.max(max, c + 1), 0);
-  const rows: number[][] = Array.from({ length: columnTotal }, () => []);
-  for (let v = 0; v < count; v++) rows[column[v]].push(v);
 
   const active = open.map((t) => isActive(t.status));
+  const inGrid = open.map((_, v) => column[v] === 0 && !linked[v] && !active[v]);
+
+  // The layered graph the ordering works on. Entries below `count` are the
+  // nodes, grid ones left unused; the rest are waypoints. `up` and `down`
+  // join each entry to its neighbours one column left and right, along the
+  // forward edges only.
+  const entryColumn = [...column];
+  const waypointEdge: number[] = [];
+  const up: number[][] = open.map(() => []);
+  const down: number[][] = open.map(() => []);
+  edges.forEach((edge, e) => {
+    if (edge.back) return;
+    let previous = edgeFrom[e];
+    for (let c = column[edgeFrom[e]] + 1; c < column[edgeTo[e]]; c++) {
+      const w = entryColumn.length;
+      entryColumn.push(c);
+      waypointEdge.push(e);
+      up.push([previous]);
+      down.push([]);
+      down[previous].push(w);
+      previous = w;
+    }
+    down[previous].push(edgeTo[e]);
+    up[edgeTo[e]].push(previous);
+  });
+  const entries = entryColumn.length;
+
+  // Connected components, by union-find that keeps the lowest entry as the
+  // root. Every component holds a node, and nodes come first, so a root is
+  // always the component's lowest ticket.
+  const parent = Int32Array.from({ length: entries }, (_, x) => x);
+  const find = (x: number) => {
+    while (parent[x] !== x) {
+      parent[x] = parent[parent[x]];
+      x = parent[x];
+    }
+    return x;
+  };
+  down.forEach((ys, x) =>
+    ys.forEach((y) => {
+      const a = find(x);
+      const b = find(y);
+      if (a < b) parent[b] = a;
+      else if (b < a) parent[a] = b;
+    }),
+  );
+
   // In column 0, tickets an agent holds are group 0 and everything else group
-  // 1, and a group always sorts above the next. Other columns are one group.
-  // Both active statuses share the group, so a ticket bouncing between the
+  // 1; in later columns a node with no edge is group 1 and everything else,
+  // waypoints included, group 0. A group always sorts above the next. Both
+  // active statuses share a group, so a ticket bouncing between the
   // implementer and the reviewer keeps its row as it flips.
-  const group = (v: number, c: number) => (c === 0 && !active[v] ? 1 : 0);
-  const position = new Array<number>(count).fill(0);
-  const barycentre = new Array<number>(count).fill(0);
-  const reorder = (c: number, neighbours: number[][]) => {
-    const nodes = rows[c];
-    nodes.forEach((v, i) => {
-      const ns = neighbours[v];
-      // A node with no neighbours on that side keeps its place.
-      barycentre[v] = ns.length === 0 ? i : ns.reduce((sum, n) => sum + position[n], 0) / ns.length;
-    });
-    // Array.prototype.sort is stable, so ties keep the current order.
-    nodes.sort((a, b) => group(a, c) - group(b, c) || barycentre[a] - barycentre[b]);
-    nodes.forEach((v, i) => (position[v] = i));
+  const group = new Uint8Array(entries);
+  for (let v = 0; v < count; v++) group[v] = column[v] === 0 ? (active[v] ? 0 : 1) : linked[v] ? 0 : 1;
+  // Seed rows in ticket order, a waypoint by its edge's blocker and then its
+  // blocked ticket. No two entries of one column tie.
+  const seed = (x: number) => (x < count ? x : edgeFrom[waypointEdge[x - count]]);
+  const seedTie = (x: number) => (x < count ? -1 : edgeTo[waypointEdge[x - count]]);
+  const bySeed = (a: number, b: number) => group[a] - group[b] || seed(a) - seed(b) || seedTie(a) - seedTie(b);
+
+  // Each component's entries, ascending, by its root.
+  const members = new Map<number, number[]>();
+  const held = new Uint8Array(count);
+  for (let x = 0; x < entries; x++) {
+    if (x < count && inGrid[x]) continue;
+    const root = find(x);
+    const list = members.get(root);
+    if (list) list.push(x);
+    else members.set(root, [x]);
+    if (x < count && column[x] === 0 && active[x]) held[root] = 1;
+  }
+  // Components holding a Ready ticket an agent holds come first, since that
+  // ticket sits at the top of Ready and its component's other cards belong
+  // near it; then ticket order of their lowest ticket, which is their root.
+  const components = [...members.keys()].sort((a, b) => held[b] - held[a] || a - b);
+
+  const pos = new Int32Array(entries);
+  const rows: number[][] = Array.from({ length: columnTotal }, () => []);
+  for (const root of components) {
+    const list = members.get(root)!;
+    let first = columnTotal;
+    let last = 0;
+    for (const x of list) {
+      first = Math.min(first, entryColumn[x]);
+      last = Math.max(last, entryColumn[x]);
+    }
+    const layers: number[][] = Array.from({ length: last - first + 1 }, () => []);
+    for (const x of list) layers[entryColumn[x] - first].push(x);
+    for (const layer of layers) layer.sort(bySeed);
+    orderComponent(layers, up, down, group, pos).forEach((layer, i) => rows[first + i].push(...layer));
+  }
+  // Components went in in order; a stable sort by group keeps that within a
+  // group, and each component's own order within that.
+  for (const row of rows) row.sort((a, b) => group[a] - group[b]);
+
+  const grid = open.map((_, v) => v).filter((v) => inGrid[v]);
+  const nodeOf = (v: number, row: number, gridded: boolean): GraphNode<T> => ({
+    id: open[v].id,
+    ticket: open[v],
+    column: column[v],
+    row,
+    inGrid: gridded,
+    active: active[v],
+    satisfiedDependencyCount: satisfied[v],
+    externalBlockerCount: external[v],
+    dependencyTotal: total[v],
+  });
+  const cards = rows.map((row) => row.filter((x) => x < count));
+  const nodes = [
+    ...cards.flatMap((vs) => vs.map((v, row) => nodeOf(v, row, false))),
+    ...grid.map((v, row) => nodeOf(v, row, true)),
+  ];
+  const columns = cards.map((vs) => vs.map((v) => open[v].id));
+  const layers = rows.map((row) =>
+    row.map(
+      (x): LayerEntry => (x < count ? { kind: "card", id: open[x].id } : { kind: "waypoint", edge: waypointEdge[x - count] }),
+    ),
+  );
+  const columnCounts = columns.map((ids) => ids.length);
+  if (columnTotal > 0) columnCounts[0] += grid.length;
+  return { nodes, edges, columns, layers, grid: grid.map((v) => open[v].id), columnCounts };
+}
+
+// Orders one component's layers (its columns, left to right, each seeded in
+// order) to reduce crossings, as the header describes, and returns them.
+// `pos` is left holding each entry's row within its layer.
+function orderComponent(
+  layers: number[][],
+  up: readonly number[][],
+  down: readonly number[][],
+  group: Uint8Array,
+  pos: Int32Array,
+): number[][] {
+  const index = (layer: number[]) => layer.forEach((x, i) => (pos[x] = i));
+  layers.forEach(index);
+  const crossings = () => {
+    let sum = 0;
+    for (let i = 0; i + 1 < layers.length; i++) sum += crossingsBetween(layers[i], layers[i + 1].length, down, pos);
+    return sum;
   };
 
-  // Seed rows in ticket order, lifting active tickets in column 0.
-  const none: number[][] = open.map(() => []);
-  for (let c = 0; c < columnTotal; c++) reorder(c, none);
-  for (let sweep = 0; sweep < BARYCENTRE_SWEEPS; sweep++) {
-    for (let c = 1; c < columnTotal; c++) reorder(c, predecessors);
-    for (let c = columnTotal - 2; c >= 0; c--) reorder(c, forwardSuccessors);
+  let best = crossings();
+  let kept = layers.map((layer) => [...layer]);
+  for (let sweep = 0; sweep < MAX_SWEEPS && best > 0; sweep++) {
+    for (let i = 1; i < layers.length; i++) reorder(layers[i], up, group, pos);
+    for (let i = layers.length - 2; i >= 0; i--) reorder(layers[i], down, group, pos);
+    transpose(layers, up, down, group, pos);
+    const now = crossings();
+    if (now >= best) break;
+    best = now;
+    kept = layers.map((layer) => [...layer]);
   }
+  kept.forEach(index);
+  // The seed is kept when no sweep beats it, and it hasn't been through the
+  // swaps yet; one more pass leaves every ordering where no swap helps.
+  transpose(kept, up, down, group, pos);
+  return kept;
+}
 
-  const nodes: GraphNode<T>[] = rows.flatMap((vs) =>
-    vs.map((v) => ({
-      id: open[v].id,
-      ticket: open[v],
-      column: column[v],
-      row: position[v],
-      active: active[v],
-      satisfiedDependencyCount: satisfied[v],
-      externalBlockerCount: external[v],
-      dependencyTotal: total[v],
-    })),
-  );
-  const edges: GraphEdge[] = successors.flatMap((vs, u) =>
-    vs.map((v, i) => ({ from: open[u].id, to: open[v].id, back: back.flags[u][i] })),
-  );
-  const columns = rows.map((vs) => vs.map((v) => open[v].id));
-  return { nodes, edges, columns, columnCounts: columns.map((c) => c.length) };
+// Sorts each group of a layer by the barycentre of its neighbours' rows on
+// one side. An entry with no neighbours there keeps its row, and the others
+// fill the rest of the group's rows in barycentre order, so the barycentre
+// is only ever compared with another barycentre. Ties keep the current order.
+function reorder(layer: number[], neighbours: readonly number[][], group: Uint8Array, pos: Int32Array) {
+  const current = [...layer];
+  for (let start = 0, end = 0; start < current.length; start = end) {
+    while (end < current.length && group[current[end]] === group[current[start]]) end++;
+    const movable: { x: number; at: number; row: number }[] = [];
+    for (let row = start; row < end; row++) {
+      const ns = neighbours[current[row]];
+      if (ns.length === 0) continue;
+      let sum = 0;
+      for (const n of ns) sum += pos[n];
+      movable.push({ x: current[row], at: sum / ns.length, row });
+    }
+    movable.sort((a, b) => a.at - b.at || a.row - b.row);
+    let next = 0;
+    for (let row = start; row < end; row++) {
+      layer[row] = neighbours[current[row]].length === 0 ? current[row] : movable[next++].x;
+    }
+  }
+  layer.forEach((x, i) => (pos[x] = i));
+}
+
+// Swaps neighbouring entries of a group wherever that removes crossings with
+// the columns on both sides, round after round until none does.
+function transpose(
+  layers: number[][],
+  up: readonly number[][],
+  down: readonly number[][],
+  group: Uint8Array,
+  pos: Int32Array,
+) {
+  // Crossings between a's and b's edges while a sits directly above b.
+  const cost = (a: number, b: number) => {
+    let n = 0;
+    for (const p of up[a]) for (const q of up[b]) if (pos[p] > pos[q]) n++;
+    for (const p of down[a]) for (const q of down[b]) if (pos[p] > pos[q]) n++;
+    return n;
+  };
+  for (let round = 0; round < MAX_TRANSPOSE_ROUNDS; round++) {
+    let swapped = false;
+    for (const layer of layers) {
+      for (let i = 0; i + 1 < layer.length; i++) {
+        const a = layer[i];
+        const b = layer[i + 1];
+        if (group[a] !== group[b] || cost(b, a) >= cost(a, b)) continue;
+        layer[i] = b;
+        layer[i + 1] = a;
+        pos[b] = i;
+        pos[a] = i + 1;
+        swapped = true;
+      }
+    }
+    if (!swapped) break;
+  }
+}
+
+// Crossings between the edges from `layer` to the next one, which has `size`
+// entries: the pairs whose ends are in opposite orders. Taking the edges in
+// row order of their upper ends, each crosses every earlier edge whose lower
+// end is further down, which a Fenwick tree over the lower rows counts.
+function crossingsBetween(layer: readonly number[], size: number, down: readonly number[][], pos: Int32Array): number {
+  const tree = new Int32Array(size + 1);
+  let seen = 0;
+  let sum = 0;
+  for (const x of layer) {
+    // An entry's own edges, top to bottom, don't cross each other.
+    const ends = down[x].map((y) => pos[y]).sort((a, b) => a - b);
+    for (const row of ends) {
+      let atOrAbove = 0;
+      for (let i = row + 1; i > 0; i -= i & -i) atOrAbove += tree[i];
+      sum += seen - atOrAbove;
+      for (let i = row + 1; i <= size; i += i & -i) tree[i]++;
+      seen++;
+    }
+  }
+  return sum;
 }
 
 // Depth-first search that flags every edge into a node still on the stack.
@@ -420,45 +714,264 @@ export function positionGraph<T extends GraphTicket>(
   const columnGap = options.columnGap ?? DEFAULT_COLUMN_GAP;
   const rowGap = options.rowGap ?? DEFAULT_ROW_GAP;
   const origin = options.origin ?? { x: 0, y: 0 };
+  const gridGap = options.gridGap ?? DEFAULT_GRID_GAP;
   const sizeOf = (id: string) => options.sizes?.get(id) ?? defaultSize;
 
-  const byId = new Map(topology.nodes.map((n) => [n.id, n]));
-  const placed = new Map<string, PositionedNode<T>>();
   const columns: PositionedColumn[] = [];
   let x = origin.x;
   topology.columns.forEach((ids, index) => {
     // A loop rather than Math.max(...), which throws on very large arrays.
     let width = ids.length === 0 ? defaultSize.width : 0;
     for (const id of ids) width = Math.max(width, sizeOf(id).width);
-    let y = origin.y;
-    ids.forEach((id, row) => {
-      const size = sizeOf(id);
-      if (row > 0) y += rowGap;
-      placed.set(id, { ...byId.get(id)!, x, y, width: size.width, height: size.height });
-      y += size.height;
-    });
-    columns.push({ index, x, width, count: ids.length, height: y - origin.y });
+    columns.push({ index, x, width, count: topology.columnCounts[index] });
     x += width + columnGap;
   });
 
-  const nodes = topology.nodes.map((n) => placed.get(n.id)!);
-  const edges = topology.edges.map((e): PositionedEdge => {
-    const from = placed.get(e.from)!;
-    const to = placed.get(e.to)!;
-    return {
-      ...e,
-      start: { x: from.x + from.width, y: from.y + from.height / 2 },
-      end: { x: to.x, y: to.y + to.height / 2 },
-    };
+  // Number the layers' entries column by column and join them along the
+  // forward edges, as the first stage did: a waypoint has no height.
+  const cardEntry = new Map<string, number>();
+  const waypoints: number[][] = topology.edges.map(() => []);
+  const entryColumn: number[] = [];
+  const heights: number[] = [];
+  const stacks = topology.layers.map((layer, c) =>
+    layer.map((entry) => {
+      const e = heights.length;
+      entryColumn.push(c);
+      if (entry.kind === "card") {
+        cardEntry.set(entry.id, e);
+        heights.push(sizeOf(entry.id).height);
+      } else {
+        // Columns ascend, so each edge's waypoints come out left to right.
+        waypoints[entry.edge].push(e);
+        heights.push(0);
+      }
+      return e;
+    }),
+  );
+  const up: number[][] = heights.map(() => []);
+  const down: number[][] = heights.map(() => []);
+  topology.edges.forEach((edge, e) => {
+    if (edge.back) return;
+    const chain = [cardEntry.get(edge.from)!, ...waypoints[e], cardEntry.get(edge.to)!];
+    for (let i = 1; i < chain.length; i++) {
+      down[chain[i - 1]].push(chain[i]);
+      up[chain[i]].push(chain[i - 1]);
+    }
   });
+
+  // Tops, starting packed from 0 in every column.
+  const y = new Array<number>(heights.length).fill(0);
+  const offsets = stacks.map((stack) => {
+    let offset = 0;
+    return stack.map((e) => {
+      const at = offset;
+      offset += heights[e] + rowGap;
+      y[e] = at;
+      return at;
+    });
+  });
+  const centre = (e: number) => y[e] + heights[e] / 2;
+  const linked = stacks.map((stack) => stack.some((e) => up[e].length > 0 || down[e].length > 0));
+  for (let round = 0; round < PLACEMENT_ROUNDS; round++) {
+    const toBlockers = round % 2 === 0;
+    for (let i = 0; i < stacks.length; i++) {
+      const c = toBlockers ? i : stacks.length - 1 - i;
+      if (!linked[c]) continue;
+      placeStack(stacks[c], offsets[c], y, (e) => {
+        let ns = toBlockers ? up[e] : down[e];
+        if (ns.length === 0) ns = toBlockers ? down[e] : up[e];
+        return ns.length === 0 ? null : median(ns.map(centre)) - heights[e] / 2;
+      });
+    }
+  }
+
+  // Shift the placed columns so the highest entry starts at the origin. A
+  // column with no edges at all keeps its packed stack, from the origin.
+  let top = Infinity;
+  stacks.forEach((stack, c) => {
+    if (linked[c]) for (const e of stack) top = Math.min(top, y[e]);
+  });
+  const shift = origin.y - (top === Infinity ? 0 : top);
+  let bottom = -Infinity;
+  stacks.forEach((stack, c) =>
+    stack.forEach((e) => {
+      y[e] += linked[c] ? shift : origin.y;
+      bottom = Math.max(bottom, y[e] + heights[e]);
+    }),
+  );
+
+  const byId = new Map(topology.nodes.map((n) => [n.id, n]));
+  const placed = new Map<string, PositionedNode<T>>();
+  topology.columns.forEach((ids, c) =>
+    ids.forEach((id) => {
+      const size = sizeOf(id);
+      const cardTop = y[cardEntry.get(id)!];
+      placed.set(id, { ...byId.get(id)!, x: columns[c].x, y: cardTop, width: size.width, height: size.height });
+    }),
+  );
+
+  // The grid: three across under the first three columns, or where they
+  // would be, each row as tall as its tallest card.
+  let grid: PositionedGrid | null = null;
+  if (topology.grid.length > 0) {
+    const slots: number[] = [];
+    for (let i = 0; i < GRID_COLUMNS; i++) {
+      const previous = i === 0 ? origin.x : slots[i - 1] + (columns[i - 1]?.width ?? defaultSize.width) + columnGap;
+      slots.push(columns[i]?.x ?? previous);
+    }
+    const gridTop = (bottom === -Infinity ? origin.y : bottom) + gridGap;
+    let rowTop = gridTop;
+    let right = origin.x;
+    for (let start = 0; start < topology.grid.length; start += GRID_COLUMNS) {
+      const row = topology.grid.slice(start, start + GRID_COLUMNS);
+      let rowHeight = 0;
+      row.forEach((id, i) => {
+        const size = sizeOf(id);
+        placed.set(id, { ...byId.get(id)!, x: slots[i], y: rowTop, width: size.width, height: size.height });
+        rowHeight = Math.max(rowHeight, size.height);
+        right = Math.max(right, slots[i] + size.width);
+      });
+      rowTop += rowHeight + rowGap;
+    }
+    const height = rowTop - rowGap - gridTop;
+    grid = { x: slots[0], y: gridTop, width: right - slots[0], height, count: topology.grid.length };
+    bottom = gridTop + height;
+  }
+
+  const nodes = topology.nodes.map((n) => placed.get(n.id)!);
+  const cardCentre = (id: string) => centre(cardEntry.get(id)!);
+  const edges = positionEdges(topology.edges, placed, columns, waypoints, entryColumn, y, cardCentre);
   const last = columns[columns.length - 1];
+  const columnsRight = last ? last.x + last.width : origin.x;
   return {
     nodes,
     edges,
     columns,
-    width: last ? last.x + last.width : origin.x,
-    height: origin.y + columns.reduce((max, c) => Math.max(max, c.height), 0),
+    grid,
+    width: Math.max(columnsRight, grid ? grid.x + grid.width : origin.x),
+    height: Math.max(origin.y, bottom),
   };
+}
+
+function median(values: number[]): number {
+  if (values.length === 1) return values[0];
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = sorted.length >> 1;
+  return sorted.length % 2 === 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
+// Places one column's stack, top to bottom, as close as the order allows to
+// the tops `target` asks for, in least squares. With z = top - offset, where
+// offset is the entry's top with the stack packed from 0, keeping rowGap
+// between neighbours is exactly z never decreasing down the stack. So the
+// fit is an isotonic regression of the targets' z, which pool adjacent
+// violators solves in one pass: a run of entries that would overlap moves as
+// one block to the mean of its targets. An entry with no target (null) sits
+// tight below the entry above it, or above the first entry with one. The
+// block means are rounded, which keeps them in order, so every top is a
+// whole pixel when the sizes are.
+function placeStack(
+  stack: readonly number[],
+  offsets: readonly number[],
+  y: number[],
+  target: (e: number) => number | null,
+) {
+  const wanted: number[] = [];
+  const blocks: { sum: number; n: number }[] = [];
+  stack.forEach((e, i) => {
+    const t = target(e);
+    if (t === null) return;
+    wanted.push(i);
+    let block = { sum: t - offsets[i], n: 1 };
+    while (blocks.length > 0 && blocks[blocks.length - 1].sum / blocks[blocks.length - 1].n > block.sum / block.n) {
+      const above = blocks.pop()!;
+      block = { sum: above.sum + block.sum, n: above.n + block.n };
+    }
+    blocks.push(block);
+  });
+  if (wanted.length === 0) return;
+  const z = new Array<number>(stack.length);
+  let k = 0;
+  for (const block of blocks) {
+    const mean = Math.round(block.sum / block.n);
+    for (let j = 0; j < block.n; j++) z[wanted[k++]] = mean;
+  }
+  let current = z[wanted[0]];
+  stack.forEach((e, i) => {
+    if (z[i] !== undefined) current = z[i];
+    y[e] = current + offsets[i];
+  });
+}
+
+// Edge ends and bends. Each side of a card lists the edges that end there:
+// back edges first, in the order their lanes are numbered (shortest span
+// first, then edge order), since they turn up to the lanes above the cards,
+// then forward edges by the height of the next point along the edge, the card
+// or waypoint at the other end of their first or last stretch. Self-loops
+// keep the middle of the right side and are left out.
+function positionEdges<T extends GraphTicket>(
+  edges: readonly GraphEdge[],
+  placed: ReadonlyMap<string, PositionedNode<T>>,
+  columns: readonly PositionedColumn[],
+  waypoints: readonly number[][],
+  entryColumn: readonly number[],
+  y: readonly number[],
+  cardCentre: (id: string) => number,
+): PositionedEdge[] {
+  type End = { edge: number; back: boolean; key: number };
+  const outs = new Map<string, End[]>();
+  const ins = new Map<string, End[]>();
+  const add = (side: Map<string, End[]>, id: string, end: End) => {
+    const list = side.get(id);
+    if (list) list.push(end);
+    else side.set(id, [end]);
+  };
+  edges.forEach((edge, e) => {
+    if (edge.from === edge.to) return;
+    if (edge.back) {
+      const span = placed.get(edge.from)!.column - placed.get(edge.to)!.column;
+      add(outs, edge.from, { edge: e, back: true, key: span });
+      add(ins, edge.to, { edge: e, back: true, key: span });
+      return;
+    }
+    const via = waypoints[e];
+    add(outs, edge.from, { edge: e, back: false, key: via.length > 0 ? y[via[0]] : cardCentre(edge.to) });
+    add(ins, edge.to, { edge: e, back: false, key: via.length > 0 ? y[via[via.length - 1]] : cardCentre(edge.from) });
+  });
+
+  // The height of each edge's end on each side.
+  const spread = (side: Map<string, End[]>) => {
+    const at = new Map<number, number>();
+    for (const [id, list] of side) {
+      const card = placed.get(id)!;
+      list.sort((a, b) => Number(b.back) - Number(a.back) || a.key - b.key || a.edge - b.edge);
+      list.forEach((end, i) => {
+        const share = list.length === 1 ? 0.5 : 0.25 + (0.5 * i) / (list.length - 1);
+        at.set(end.edge, card.y + card.height * share);
+      });
+    }
+    return at;
+  };
+  const startY = spread(outs);
+  const endY = spread(ins);
+
+  return edges.map((edge, e): PositionedEdge => {
+    const from = placed.get(edge.from)!;
+    const to = placed.get(edge.to)!;
+    const via = waypoints[e].flatMap((w) => {
+      const column = columns[entryColumn[w]];
+      return [
+        { x: column.x, y: y[w] },
+        { x: column.x + column.width, y: y[w] },
+      ];
+    });
+    return {
+      ...edge,
+      start: { x: from.x + from.width, y: startY.get(e) ?? from.y + from.height / 2 },
+      end: { x: to.x, y: endY.get(e) ?? to.y + to.height / 2 },
+      via,
+    };
+  });
 }
 
 /** A rectangle on the canvas: a size at a top-left corner. */

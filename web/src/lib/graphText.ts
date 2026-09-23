@@ -8,6 +8,11 @@ export function columnHeading(index: number): string {
   return `Blocked · ${index} ${index === 1 ? "step" : "steps"}`;
 }
 
+/** The header of the grid below the graph, which holds the Ready tickets with no links. */
+export function gridHeading(): string {
+  return "Ready · no links";
+}
+
 /**
  * "1 of 2 dependencies done", "3 of 3 dependencies done", "1 of 1 dependency
  * done", or null when none are done. The noun agrees with the total, not the

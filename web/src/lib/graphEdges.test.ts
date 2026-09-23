@@ -176,6 +176,18 @@ describe("forwardEdgePath", () => {
       "M 0.3 10.5 C 50.65 10.5, 50.65 20, 101 20",
     );
   });
+
+  it("crosses each gap with a cubic and each column between with a straight run", () => {
+    const via = [
+      { x: 200, y: 60 },
+      { x: 400, y: 60 },
+      { x: 500, y: 90 },
+      { x: 700, y: 90 },
+    ];
+    expect(forwardEdgePath({ x: 100, y: 40 }, { x: 800, y: 120 }, via)).toBe(
+      "M 100 40 C 150 40, 150 60, 200 60 L 400 60 C 450 60, 450 90, 500 90 L 700 90 C 750 90, 750 120, 800 120",
+    );
+  });
 });
 
 describe("laneEdgePath", () => {
@@ -314,8 +326,77 @@ describe("routeEdges", () => {
       expect(firstPoint(e.d)).toEqual(edge.start);
       expect(lastPoint(e.d)).toEqual(edge.end);
       expect(arrivalDirection(e.d).x).toBeGreaterThan(0);
-      if (e.lane === null) expect(e.d).toBe(forwardEdgePath(edge.start, edge.end));
+      if (e.lane === null) expect(e.d).toBe(forwardEdgePath(edge.start, edge.end, edge.via));
     });
+  });
+});
+
+describe("routeEdges with long forward edges", () => {
+  // Chains of different lengths share the columns, and several edges skip
+  // columns: L-1 -> L-5 over three, L-1 -> M-4 over two, M-1 -> L-4 over two.
+  // Heights vary, so the cards in the way don't line up.
+  const tickets = [
+    ticket("L-1"),
+    ticket("L-2", ["L-1"]),
+    ticket("L-3", ["L-2"]),
+    ticket("L-4", ["L-3", "M-1"]),
+    ticket("L-5", ["L-4", "L-1"]),
+    ticket("M-1"),
+    ticket("M-2", ["M-1"]),
+    ticket("M-3", ["M-2"]),
+    ticket("M-4", ["M-3", "L-1"]),
+    ticket("N-1"),
+    ticket("N-2", ["N-1"]),
+    ticket("N-3", ["N-2", "N-3"]),
+    ticket("N-4", ["N-3", "L-2"]),
+    ticket("C-1", ["C-2"]),
+    ticket("C-2", ["C-1", "N-1"]),
+  ];
+  const topology = computeGraphTopology(tickets);
+  const sizes = new Map<string, Size>(tickets.map((t, i) => [t.id, { width: 256, height: 64 + ((i * 41) % 80) }]));
+  const gutters = planGutters(topology);
+  const top = 40 + LANE_CLEARANCE + lanesHeight(laneCount(topology));
+  const layout = positionGraph(topology, {
+    sizes,
+    columnGap: Math.max(MIN_COLUMN_GAP, ...gutters.gaps),
+    origin: { x: gutters.left, y: top },
+  });
+  const routed = routeEdges(layout);
+  const byId = new Map<string, PositionedNode>(layout.nodes.map((n) => [n.id, n]));
+
+  it("builds the graph the test is about", () => {
+    const spans = layout.edges.filter((e) => !e.back).map((e) => byId.get(e.to)!.column - byId.get(e.from)!.column);
+    expect(spans.filter((span) => span > 1).length).toBeGreaterThanOrEqual(3);
+    expect(Math.max(...spans)).toBe(4);
+    expect(layout.edges.some((e) => e.back)).toBe(true);
+  });
+
+  it("never draws a forward edge behind a card, its own cards included", () => {
+    for (const e of routed.filter((r) => !r.back)) {
+      for (const node of layout.nodes) {
+        expect(pathHitsRect(e.d, node), `${e.from}->${e.to} crosses ${node.id}`).toBe(false);
+      }
+    }
+  });
+
+  it("runs straight across every column it passes, at the height the layout kept for it", () => {
+    for (const [i, e] of routed.entries()) {
+      const edge = layout.edges[i];
+      if (edge.back) continue;
+      expect(e.d).toBe(forwardEdgePath(edge.start, edge.end, edge.via));
+      const straight = parse(e.d).filter((c) => c.op === "L");
+      expect(straight).toHaveLength(edge.via.length / 2);
+    }
+  });
+
+  it("still keeps every back edge's lane above the cards and the long edges' runs", () => {
+    const highest = Math.min(...layout.nodes.map((n) => n.y), ...layout.edges.flatMap((e) => e.via.map((p) => p.y)));
+    expect(highest).toBe(top);
+    for (const e of routed.filter((r) => r.lane !== null)) {
+      const lane = Math.min(...polyline(e.d).map((p) => p.y));
+      expect(lane).toBe(top - LANE_CLEARANCE - e.lane! * LANE_SPACING);
+      for (const node of layout.nodes) expect(pathHitsRect(e.d, node), `${e.from}->${e.to} crosses ${node.id}`).toBe(false);
+    }
   });
 });
 

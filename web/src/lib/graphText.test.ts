@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { columnHeading, hiddenBlockersText, satisfiedDependenciesText } from "./graphText";
+import { columnHeading, gridHeading, hiddenBlockersText, satisfiedDependenciesText } from "./graphText";
 
 describe("columnHeading", () => {
   it("calls column 0 Ready and counts steps after it", () => {
@@ -7,6 +7,12 @@ describe("columnHeading", () => {
     expect(columnHeading(1)).toBe("Blocked · 1 step");
     expect(columnHeading(2)).toBe("Blocked · 2 steps");
     expect(columnHeading(12)).toBe("Blocked · 12 steps");
+  });
+});
+
+describe("gridHeading", () => {
+  it("names the grid as Ready tickets with no links", () => {
+    expect(gridHeading()).toBe("Ready · no links");
   });
 });
 

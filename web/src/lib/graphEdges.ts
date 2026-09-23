@@ -1,12 +1,16 @@
 // SVG path data for the arrows on the graph page. positionGraph() gives every
-// edge a start (middle of the blocker's right edge) and an end (middle of the
-// blocked card's left edge); this module turns those points into a drawn
-// shape. Three shapes, picked by the columns the two cards sit in rather than
-// by the back flag, so a shape always suits where its ends actually are:
+// edge a start on the blocker's right edge and an end on the blocked card's
+// left edge, spread along the side when several edges share it, and a
+// forward edge that spans several columns the points where it crosses each
+// column in between; this module turns those points into a drawn shape.
+// Three shapes, picked by the columns the two cards sit in rather than by the
+// back flag, so a shape always suits where its ends actually are:
 //
-// - Left to right (every edge that isn't a back edge): one cubic bezier that
-//   leaves the blocker horizontally and enters the blocked card horizontally,
-//   with both control points half way across.
+// - Left to right (every edge that isn't a back edge): a cubic bezier across
+//   each gap between columns, leaving and entering horizontally with both
+//   control points half way across, and a straight run across each column
+//   in between, at the height the layout kept clear for it. Gaps hold no
+//   cards, so no part of it passes behind one.
 // - Right to left (a back edge between two cards, which always points to an
 //   earlier column): anything drawn across the columns would cut through the
 //   cards in between. It runs in straight lines with small rounded corners
@@ -80,10 +84,25 @@ function pt(x: number, y: number): string {
   return `${num(x)} ${num(y)}`;
 }
 
-/** Left to right: a horizontal-tangent cubic from start to end. */
-export function forwardEdgePath(start: Point, end: Point): string {
-  const reach = (end.x - start.x) / 2;
-  return `M ${pt(start.x, start.y)} C ${pt(start.x + reach, start.y)}, ${pt(end.x - reach, end.y)}, ${pt(end.x, end.y)}`;
+/**
+ * Left to right: a horizontal-tangent cubic from start to end, or, with
+ * `via` points in entry and exit pairs, a cubic to each entry and a straight
+ * line across to its exit.
+ */
+export function forwardEdgePath(start: Point, end: Point, via: readonly Point[] = []): string {
+  const points = [start, ...via, end];
+  let d = `M ${pt(start.x, start.y)}`;
+  for (let i = 1; i < points.length; i++) {
+    const [a, b] = [points[i - 1], points[i]];
+    // Odd stretches cross a gap; even ones run across a column.
+    if (i % 2 === 0) {
+      d += ` L ${pt(b.x, b.y)}`;
+      continue;
+    }
+    const reach = (b.x - a.x) / 2;
+    d += ` C ${pt(a.x + reach, a.y)}, ${pt(b.x - reach, b.y)}, ${pt(b.x, b.y)}`;
+  }
+  return d;
 }
 
 /**
@@ -218,7 +237,8 @@ export function planGutters(topology: Routable): GutterPlan {
 
 /**
  * The path of every edge in a laid-out graph, in the layout's edge order.
- * Lane n runs LANE_CLEARANCE + n * LANE_SPACING above the top of the cards.
+ * Lane n runs LANE_CLEARANCE + n * LANE_SPACING above the top of the cards
+ * (or of a long edge's run, if one is higher).
  * Adding lanesHeight(laneCount(topology)) to the origin's y therefore keeps
  * the highest lane no more than LANE_CLEARANCE above where the cards would
  * start without lanes. Every gap and the room beside the outer columns must
@@ -226,15 +246,17 @@ export function planGutters(topology: Routable): GutterPlan {
  */
 export function routeEdges<T extends GraphTicket>(layout: GraphLayout<T>): RoutedEdge[] {
   const nodes = new Map(layout.nodes.map((n) => [n.id, n]));
+  // A long edge's straight runs can sit above every card, so they count.
   let cardsTop = Infinity;
   for (const n of layout.nodes) cardsTop = Math.min(cardsTop, n.y);
+  for (const e of layout.edges) for (const p of e.via) cardsTop = Math.min(cardsTop, p.y);
   const plan = planLanes(layout);
 
   return layout.edges.map((edge, index): RoutedEdge => {
     const base = { from: edge.from, to: edge.to, back: edge.back };
     if (edge.from === edge.to) return { ...base, d: selfLoopPath(edge.start), lane: null };
     const lane = plan.lane.get(index);
-    if (lane === undefined) return { ...base, d: forwardEdgePath(edge.start, edge.end), lane: null };
+    if (lane === undefined) return { ...base, d: forwardEdgePath(edge.start, edge.end, edge.via), lane: null };
 
     const fromColumn = layout.columns[nodes.get(edge.from)!.column];
     const toColumn = layout.columns[nodes.get(edge.to)!.column];
