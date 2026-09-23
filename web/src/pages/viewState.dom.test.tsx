@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import type { Board as BoardData, Ticket } from "../api/client";
+import type { Board as BoardData, Project, Ticket } from "../api/client";
 import { DEBOUNCE_MS } from "../lib/liveRefresh";
 
 // A live refresh replaces what a view shows, never where the user is looking
@@ -106,6 +106,19 @@ const board = (tickets: Ticket[]): BoardData => ({
   ],
 });
 
+// Every view shows one project, so the tickets have one to be shown in.
+const ACP: Project = {
+  id: "p1",
+  name: "ACP",
+  prefix: "ACP",
+  description: "",
+  icon: "",
+  color: "",
+  status: "active",
+  createdAt: "",
+  updatedAt: "",
+};
+
 const before = [makeTicket(1), makeTicket(2)];
 const after = [makeTicket(1, { title: "Ticket 1, renamed" }), makeTicket(2), makeTicket(3)];
 
@@ -142,7 +155,7 @@ beforeEach(() => {
   (globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver = FakeResizeObserver;
   (globalThis as unknown as { EventSource: unknown }).EventSource = FakeEventSource;
   serves(before);
-  mockApi.projects.list.mockResolvedValue([]);
+  mockApi.projects.list.mockResolvedValue([ACP]);
   mockApi.labels.list.mockResolvedValue([]);
   mockApi.tickets.get.mockImplementation((id: string) => Promise.resolve(makeTicket(1, { id })));
 });
@@ -160,7 +173,7 @@ describe("Dependencies across a refetch", () => {
   const zoomLevel = () => screen.getByLabelText("Zoom level").textContent;
 
   it("keeps the pan and the zoom", async () => {
-    await mount(<Graph />);
+    await mount(<Graph />, "/?project=ACP");
     await layout();
     const fitted = canvas().style.transform;
     expect(fitted).not.toBe("");
@@ -183,7 +196,7 @@ describe("Dependencies across a refetch", () => {
   });
 
   it("fits once, and not again when the tickets change", async () => {
-    await mount(<Graph />);
+    await mount(<Graph />, "/?project=ACP");
     await layout();
     const fitted = canvas().style.transform;
     await act(async () => {
@@ -200,7 +213,7 @@ describe("Dependencies across a refetch", () => {
 
 describe("Table across a refetch", () => {
   it("keeps the scroll position and the same scrolling element", async () => {
-    await mount(<Tickets />, "/table");
+    await mount(<Tickets />, "/table?project=ACP");
     const scroller = screen.getByTestId("table-scroll");
     scroller.scrollTop = 240;
 
@@ -214,7 +227,7 @@ describe("Table across a refetch", () => {
 
 describe("Kanban across a refetch", () => {
   it("keeps the scroll position and the same scrolling element", async () => {
-    await mount(<Board />, "/kanban");
+    await mount(<Board />, "/kanban?project=ACP");
     const scroller = screen.getByTestId("board-scroll");
     scroller.scrollLeft = 320;
     scroller.scrollTop = 80;
@@ -234,7 +247,7 @@ describe("the selected view across a refetch", () => {
     ["Kanban", <Board key="b" />, "/kanban"],
     ["Table", <Tickets key="t" />, "/table"],
   ])("stays on %s with its filters", async (heading, page, path) => {
-    await mount(page, `${path}?status=todo&q=ticket`);
+    await mount(page, `${path}?project=ACP&status=todo&q=ticket`);
     await liveChange(after);
     // Nothing navigated: the view, and the filters in its URL, are the
     // user's, and a change to the data is no reason to move either.

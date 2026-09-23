@@ -200,12 +200,15 @@ export default function Board() {
     onDirtyChange,
     url: ticketUrl,
   } = useTicketParam(allTickets);
-  const isShown = (ticket: Ticket) => ticket.id === activeTicket?.id || matchesFilters(ticket, filters);
+  // The board always shows one project, so its cards and count are out of that
+  // project's tickets; without one (no active project to pick) it has none.
+  const projectTickets = useMemo(() => inProject(allTickets, filters.project), [allTickets, filters.project]);
+  const isShown = (ticket: Ticket) =>
+    ticket.id === activeTicket?.id || (filters.project !== "" && matchesFilters(ticket, filters));
   const getColumnTickets = (status: string) =>
     (columns.find((c) => c.status === status)?.tickets || []).filter(isShown);
-  const shownCount = allTickets.filter((t) => matchesFilters(t, filters)).length;
-  // The board always shows one project, so its count is out of that project's tickets.
-  const projectCount = useMemo(() => inProject(allTickets, filters.project).length, [allTickets, filters.project]);
+  const shownCount = projectTickets.filter((t) => matchesFilters(t, filters)).length;
+  const projectCount = projectTickets.length;
   // The filter bar picks a project for a URL without one; until it has, the
   // board waits rather than showing every project's tickets.
   const waiting = loading || awaitingProject(filters.project, projects);
@@ -313,6 +316,7 @@ export default function Board() {
 
       <FilterPanel
         state={filterState}
+        tickets={loading ? null : allTickets}
         repos={repos}
         count={waiting ? undefined : { shown: shownCount, total: projectCount }}
       />

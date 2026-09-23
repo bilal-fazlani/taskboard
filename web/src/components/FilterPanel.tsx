@@ -3,7 +3,16 @@ import { Search, X } from "lucide-react";
 import { api, type Label, type Project } from "../api/client";
 import type { FilterState } from "../hooks/useFilters";
 import { useLiveRefresh } from "../hooks/useLiveRefresh";
-import { defaultProject, namedProject, readLastProject, rememberProject } from "../lib/defaultProject";
+import {
+  activeProjects,
+  defaultProject,
+  isArchived,
+  latestActivity,
+  namedProject,
+  readLastProject,
+  rememberProject,
+  type ActivityTicket,
+} from "../lib/defaultProject";
 import { selectOptions, urlValue, type FilterKey, type SelectOption } from "../lib/filters";
 import { PRIORITIES } from "../lib/priority";
 import { staleFilters } from "../lib/staleFilters";
@@ -69,10 +78,17 @@ function FilterSelect({
  */
 export default function FilterPanel({
   state,
+  tickets,
   repos,
   count,
 }: {
   state: FilterState;
+  /**
+   * Every project's tickets, which the pick reads each project's latest
+   * activity from, or null until they have loaded. A failed first load that
+   * the view settles on as none counts as loaded.
+   */
+  tickets: readonly ActivityTicket[] | null;
   /** The repos to offer, from the loaded tickets. */
   repos: string[];
   /** Matching and total tickets, once loaded. */
@@ -125,32 +141,54 @@ export default function FilterPanel({
   // are known.
   const projectNames = useMemo(() => projects?.map((p) => p.prefix) ?? null, [projects]);
   const labelNames = useMemo(() => labels?.map((l) => l.name) ?? null, [labels]);
-  // A view always shows one project, so while there are projects a stale one
-  // is replaced below rather than dropped; only with none left does it go.
+  // The projects the dropdown offers and the pick chooses from: the active
+  // ones, by name. A URL naming an archived one still shows it, as an extra
+  // entry, and keeps it.
+  const offered = useMemo(() => (projects ? activeProjects(projects) : null), [projects]);
+  // A view always shows one project, so while there are active projects a
+  // stale one is replaced below rather than dropped; only with none left to
+  // pick does it go.
   const stale = useMemo(
     () =>
       staleFilters(filters, { projects: projectNames, labels: labelNames }).filter(
-        (key) => key !== "project" || projectNames?.length === 0,
+        (key) => key !== "project" || offered?.length === 0,
       ),
-    [filters, projectNames, labelNames],
+    [filters, projectNames, labelNames, offered],
   );
   useEffect(() => dropFilters(stale), [stale, dropFilters]);
 
   // The project the URL names, as the list spells it, or null when it names
-  // none that exists. Every view always has one: a URL without one, or with
-  // one that was deleted, gets the last project shown or the first there is
-  // (see defaultProject.ts), replacing the history entry like any filter
-  // change. Nothing is picked until the projects have loaded, or when there
-  // are none.
+  // none that exists. An archived one counts: a link or bookmark to it still
+  // opens it. Every view always has one: a URL without one, or with one that
+  // was deleted, gets an active project picked (see defaultProject.ts),
+  // replacing the history entry like any filter change. Nothing is picked
+  // until both the projects and the tickets whose activity decides have
+  // loaded, so the pick never runs on part of the data, or when no project is
+  // active.
   const shownProject = projectNames && namedProject(projectNames, filters.project);
-  const needsProject = projectNames !== null && projectNames.length > 0 && shownProject === null;
+  const activity = useMemo(() => (tickets ? latestActivity(tickets) : null), [tickets]);
+  const needsProject = offered !== null && offered.length > 0 && shownProject === null;
   useEffect(() => {
-    if (needsProject && projectNames) setFilter("project", defaultProject(projectNames, readLastProject()));
-  }, [needsProject, projectNames, setFilter]);
+    if (needsProject && projects && activity) {
+      setFilter("project", defaultProject(projects, readLastProject(), activity));
+    }
+  }, [needsProject, projects, activity, setFilter]);
   // The project shown is the one the next view without one starts on.
   useEffect(() => {
     if (shownProject) rememberProject(shownProject);
   }, [shownProject]);
+
+  // The dropdown's entries: the active projects, plus an archived one the URL
+  // names, marked as such, after them. A value naming no project at all still
+  // shows as written (see selectOptions).
+  const projectOptions = useMemo(() => {
+    // The API leaves out an empty icon, so it can be missing as well as blank.
+    const label = (p: Project) => [p.icon, p.name].filter(Boolean).join(" ");
+    const options = (offered ?? []).map((p) => ({ value: p.prefix, label: label(p) }));
+    const archived = projects?.find((p) => p.prefix === shownProject && isArchived(p));
+    if (archived) options.push({ value: archived.prefix, label: `${label(archived)} (archived)` });
+    return options;
+  }, [offered, projects, shownProject]);
 
   const set = (key: FilterKey) => (value: string) => setFilter(key, value);
   const clear = () => {
@@ -166,9 +204,9 @@ export default function FilterPanel({
     >
       <FilterSelect
         name="Project"
-        placeholder={projects?.length === 0 ? "No projects" : "Project"}
+        placeholder={offered?.length === 0 ? (projects?.length ? "No active projects" : "No projects") : "Project"}
         value={filters.project}
-        options={(projects ?? []).map((p) => ({ value: p.prefix, label: `${p.icon} ${p.name}`.trim() }))}
+        options={projectOptions}
         ignoreCase
         onChange={set("project")}
       />

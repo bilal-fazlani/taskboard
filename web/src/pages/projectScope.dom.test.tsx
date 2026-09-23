@@ -78,14 +78,14 @@ afterAll(() => {
   }
 });
 
-const project = (prefix: string, name = prefix): Project => ({
+const project = (prefix: string, name = prefix, status = "active"): Project => ({
   id: `p-${prefix}`,
   name,
   prefix,
   description: "",
   icon: "",
   color: "",
-  status: "active",
+  status,
   createdAt: "",
   updatedAt: "",
 });
@@ -134,8 +134,8 @@ function serves(tickets: Ticket[], projects: Project[]) {
     columns: [
       { status: "todo", tickets: tickets.filter((t) => t.status === "todo") },
       { status: "in_progress", tickets: tickets.filter((t) => t.status === "in_progress") },
-      { status: "agent_review", tickets: [] },
-      { status: "done", tickets: [] },
+      { status: "agent_review", tickets: tickets.filter((t) => t.status === "agent_review") },
+      { status: "done", tickets: tickets.filter((t) => t.status === "done") },
     ],
   };
   mockApi.board.get.mockResolvedValue(board);
@@ -193,14 +193,14 @@ describe.each(views)("%s without a project in its URL", (_name, page, path, empt
     expect(shows("ACP ticket 3")).toBe(false);
   });
 
-  it("shows the first project when none was shown before", async () => {
+  it("shows the first project by name when none was shown before and no ticket has a time", async () => {
     await mount(page(), path);
     expect(urlProject()).toBe("ACP");
     expect(shows("ACP ticket 1")).toBe(true);
     expect(shows("LDR ticket 2")).toBe(false);
   });
 
-  it("shows the first project when the one last shown is gone", async () => {
+  it("shows the first project by name when the one last shown is gone", async () => {
     globalThis.localStorage.setItem(LAST_PROJECT_KEY, "GONE");
     await mount(page(), path);
     expect(urlProject()).toBe("ACP");
@@ -239,6 +239,78 @@ describe.each(views)("%s without a project in its URL", (_name, page, path, empt
     const dialog = screen.getByRole("dialog");
     expect((dialog.querySelector('[aria-label="Title"]') as HTMLInputElement).value).toBe("LDR ticket 2");
     expect(urlProject()).toBe("ACP");
+  });
+});
+
+// Archived projects are never picked and not offered, though a link to one
+// still opens it; the pick goes to the active project whose tickets changed
+// last. OLD is archived and its tickets changed last of all.
+const OLD1 = ticket("OLD", 1, { updatedAt: "2026-09-23T09:00:00Z" });
+const OLD_PROJECT = project("OLD", "An archived project", "archived");
+
+describe.each(views)("%s and archived projects", (_name, page, path, emptyText) => {
+  const options = () => [...(screen.getByLabelText("Project") as HTMLSelectElement).options].map((o) => o.value);
+
+  it("shows the active project whose tickets changed last, whatever their status", async () => {
+    // LDR's latest change is a ticket that is done, so not even drawn on the
+    // graph; ACP's are older.
+    serves(
+      [
+        { ...ACP1, updatedAt: "2026-09-21T10:00:00Z" },
+        { ...LDR1, updatedAt: "2026-09-20T10:00:00Z" },
+        ticket("LDR", 4, { status: "done", updatedAt: "2026-09-22T10:00:00+01:00" }),
+        OLD1,
+      ],
+      [OLD_PROJECT, project("ACP"), project("LDR")],
+    );
+    await mount(page(), path);
+    expect(urlProject()).toBe("LDR");
+    expect(shows("LDR ticket 1")).toBe(true);
+    expect(shows("ACP ticket 1")).toBe(false);
+  });
+
+  it("passes over a remembered project that has been archived", async () => {
+    globalThis.localStorage.setItem(LAST_PROJECT_KEY, "OLD");
+    serves([...TICKETS, OLD1], [OLD_PROJECT, ...PROJECTS]);
+    await mount(page(), path);
+    expect(urlProject()).toBe("ACP");
+    expect(shows("OLD ticket 1")).toBe(false);
+  });
+
+  it("leaves archived projects out of the dropdown, which goes by name", async () => {
+    serves([...TICKETS, OLD1], [project("LDR", "ledger"), OLD_PROJECT, project("ACP", "Control plane")]);
+    await mount(page(), `${path}?project=LDR`);
+    expect(options()).toEqual(["ACP", "LDR"]);
+  });
+
+  it("keeps an archived project its URL names, as an extra entry", async () => {
+    serves([...TICKETS, OLD1], [OLD_PROJECT, ...PROJECTS]);
+    await mount(page(), `${path}?project=OLD&ticket=ACP-1`);
+    expect(urlProject()).toBe("OLD");
+    expect(new URLSearchParams(window.location.search).get("ticket")).toBe("ACP-1");
+    expect((screen.getByLabelText("Project") as HTMLSelectElement).value).toBe("OLD");
+    expect(options()).toEqual(["ACP", "LDR", "OLD"]);
+    expect((screen.getByLabelText("Project") as HTMLSelectElement).selectedOptions[0].textContent).toBe(
+      "An archived project (archived)",
+    );
+    expect(shows("OLD ticket 1")).toBe(true);
+  });
+
+  it("shows its empty state when every project is archived", async () => {
+    serves([OLD1], [OLD_PROJECT]);
+    await mount(page(), path);
+    expect(urlProject()).toBeNull();
+    expect(shows("Loading graph…") || shows("Loading board…") || shows("Loading tickets…")).toBe(false);
+    if (emptyText) expect(shows(emptyText)).toBe(true);
+    expect(count()).toBe("0 tickets");
+  });
+
+  it("still picks when the tickets fail to load, rather than waiting on them", async () => {
+    mockApi.tickets.list.mockRejectedValue(new Error("offline"));
+    mockApi.board.get.mockRejectedValue(new Error("offline"));
+    await mount(page(), path);
+    expect(urlProject()).toBe("ACP");
+    expect(shows("Loading graph…") || shows("Loading board…") || shows("Loading tickets…")).toBe(false);
   });
 });
 

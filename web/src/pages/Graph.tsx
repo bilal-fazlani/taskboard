@@ -555,6 +555,7 @@ export default function Graph() {
 
       <FilterPanel
         state={filterState}
+        tickets={fetched}
         repos={repos}
         count={loading ? undefined : { shown: matching?.size ?? topology.nodes.length, total: topology.nodes.length }}
       />

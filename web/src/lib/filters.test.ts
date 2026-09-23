@@ -232,7 +232,7 @@ describe("inProject", () => {
     expect(inProject(tickets, "GONE")).toEqual([]);
   });
 
-  it("keeps every ticket when no project is given", () => {
-    expect(inProject(tickets, "").map((t) => t.id)).toEqual(["1", "2", "3"]);
+  it("keeps no ticket when no project is given, so a view without one shows none", () => {
+    expect(inProject(tickets, "")).toEqual([]);
   });
 });

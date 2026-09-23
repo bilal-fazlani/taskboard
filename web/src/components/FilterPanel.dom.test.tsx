@@ -44,17 +44,19 @@ class FakeEvents {
 }
 
 const label = (name: string) => ({ id: name, name, color: "#fff", ticketCount: 0 });
-const project = (prefix: string) => ({
+const project = (prefix: string, name = "Alpha", status = "active") => ({
   id: prefix,
-  name: "Alpha",
+  name,
   prefix,
   description: "",
   icon: "",
   color: "",
-  status: "",
+  status,
   createdAt: "",
   updatedAt: "",
 });
+type ActivityTicket = { projectPrefix: string; updatedAt: string };
+const touched = (projectPrefix: string, updatedAt: string): ActivityTicket => ({ projectPrefix, updatedAt });
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -67,23 +69,29 @@ let navigate: NavigateFunction;
 
 // Hands the hook's state and the router's navigate to the test after each
 // commit.
-function Harness({ panel, onCommit }: { panel: boolean; onCommit: (s: FilterState, n: NavigateFunction) => void }) {
+function Harness({
+  panel,
+  tickets,
+  onCommit,
+}: {
+  panel: boolean;
+  tickets: readonly ActivityTicket[] | null;
+  onCommit: (s: FilterState, n: NavigateFunction) => void;
+}) {
   const state = useFilters();
   const navigate = useNavigate();
   useEffect(() => onCommit(state, navigate));
-  return panel ? <FilterPanel state={state} repos={[]} /> : null;
+  return panel ? <FilterPanel state={state} tickets={tickets} repos={[]} /> : null;
 }
 
-async function mount(url: string, panel = false) {
-  window.history.replaceState(null, "", url);
-  container = document.createElement("div");
-  document.body.appendChild(container);
-  root = createRoot(container);
+// The view's tickets, as it hands them to the bar: null while they load.
+async function renderPanel(panel: boolean, tickets: readonly ActivityTicket[] | null) {
   await act(async () => {
     root.render(
       <BrowserRouter>
         <Harness
           panel={panel}
+          tickets={tickets}
           onCommit={(s, n) => {
             state = s;
             navigate = n;
@@ -92,6 +100,14 @@ async function mount(url: string, panel = false) {
       </BrowserRouter>,
     );
   });
+}
+
+async function mount(url: string, panel = false, tickets: readonly ActivityTicket[] | null = []) {
+  window.history.replaceState(null, "", url);
+  container = document.createElement("div");
+  document.body.appendChild(container);
+  root = createRoot(container);
+  await renderPanel(panel, tickets);
 }
 
 beforeEach(() => {
@@ -331,6 +347,9 @@ describe("filters that no longer name anything", () => {
     await mount("/?project=ALP", true);
     await act(async () => {});
     expect(search()).toBe("?project=ALP");
+    // A value naming no project the bar knows still shows, as written.
+    expect([...select("Project").options].map((o) => o.textContent)).toEqual(["ALP"]);
+    expect(select("Project").value).toBe("ALP");
   });
 
   it("drops the filter without adding a history entry", async () => {
@@ -360,7 +379,9 @@ describe("filters that no longer name anything", () => {
 });
 
 // Every view always shows one project. A URL without one, or naming one that
-// was deleted, gets the project last shown on any view, else the first.
+// was deleted, gets the project last shown on any view if it is still active,
+// else the active project whose tickets changed last, else the first active
+// one by name.
 describe("the project a URL without one gets", () => {
   const remember = (prefix: string) => globalThis.localStorage.setItem(LAST_PROJECT_KEY, prefix);
 
@@ -384,18 +405,18 @@ describe("the project a URL without one gets", () => {
     expect(select("Project").value).toBe("GAM");
   });
 
-  it("is the first project when none was shown before", async () => {
+  it("is the first by name when none was shown before and no project has tickets", async () => {
     await mount("/table", true);
     expect(search()).toBe("?project=ALP");
   });
 
-  it("is the first project when the one last shown was deleted", async () => {
+  it("is the first by name when the one last shown was deleted", async () => {
     remember("GONE");
     await mount("/", true);
     expect(search()).toBe("?project=ALP");
   });
 
-  it("is the first project when storage can't be used, and nothing breaks", async () => {
+  it("is the first by name when storage can't be used, and nothing breaks", async () => {
     vi.stubGlobal("localStorage", {
       getItem: () => {
         throw new Error("denied");
@@ -451,5 +472,133 @@ describe("the project a URL without one gets", () => {
     expect(select("Project").value).toBe("BET");
     // Only the project is set, which filters nothing away: nothing to clear.
     expect(container.textContent).not.toContain("Clear filters");
+  });
+});
+
+// Archived projects stay out of the way: never picked, and not offered in the
+// dropdown, which lists the active ones by name. A link to an archived one
+// still opens it.
+describe("archived projects and the project order", () => {
+  const remember = (prefix: string) => globalThis.localStorage.setItem(LAST_PROJECT_KEY, prefix);
+  const options = () => [...select("Project").options].map((o) => o.value);
+
+  // Newest first, as the API lists them.
+  beforeEach(() => {
+    projectList.mockResolvedValue([
+      project("ZED", "zed tools"),
+      project("OLD", "Archive me", "archived"),
+      project("BET", "Beta"),
+      project("ALP", "alpha"),
+    ]);
+  });
+
+  it("offers only the active projects, by name ignoring case", async () => {
+    await mount("/?project=BET", true);
+    expect(options()).toEqual(["ALP", "BET", "ZED"]);
+    expect([...select("Project").options].map((o) => o.textContent)).toEqual(["alpha", "Beta", "zed tools"]);
+  });
+
+  it("keeps an archived project a URL names, as an extra entry, without replacing it", async () => {
+    await mount("/kanban?project=OLD&status=todo&ticket=OLD-3", true, [touched("BET", "2026-09-23T10:00:00Z")]);
+    expect(search()).toBe("?project=OLD&status=todo&ticket=OLD-3");
+    expect(select("Project").value).toBe("OLD");
+    expect(options()).toEqual(["ALP", "BET", "ZED", "OLD"]);
+  });
+
+  it("labels a project without an icon by its name alone, archived or not", async () => {
+    // The API leaves an empty icon out of the JSON altogether.
+    const withoutIcon = (p: ReturnType<typeof project>) => {
+      const json: Partial<typeof p> = { ...p };
+      delete json.icon;
+      return json;
+    };
+    projectList.mockResolvedValue([
+      withoutIcon(project("ALP", "alpha")),
+      withoutIcon(project("OLD", "Archive me", "archived")),
+    ]);
+    await mount("/?project=OLD", true);
+    expect([...select("Project").options].map((o) => o.textContent)).toEqual(["alpha", "Archive me (archived)"]);
+  });
+
+  it("labels the archived project's entry with its icon and name, marked archived, whatever the URL's case", async () => {
+    projectList.mockResolvedValue([
+      { ...project("OLD", "Archive me", "archived"), icon: "📦" },
+      project("ALP", "alpha"),
+    ]);
+    await mount("/?project=old", true);
+    expect(search()).toBe("?project=old");
+    expect(select("Project").value).toBe("OLD");
+    const labels = [...select("Project").options].map((o) => o.textContent);
+    expect(labels).toEqual(["alpha", "📦 Archive me (archived)"]);
+    expect(select("Project").selectedOptions[0].textContent).toBe("📦 Archive me (archived)");
+  });
+
+  it("drops the archived project from the list again once another is chosen", async () => {
+    await mount("/?project=OLD", true);
+    await act(async () => {
+      select("Project").value = "BET";
+      select("Project").dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    expect(search()).toBe("?project=BET");
+    expect(options()).toEqual(["ALP", "BET", "ZED"]);
+  });
+
+  it("is the active project whose tickets changed last, with nothing remembered", async () => {
+    await mount("/table", true, [
+      touched("ALP", "2026-09-20T10:00:00Z"),
+      touched("ZED", "2026-09-22T10:00:00Z"),
+      touched("OLD", "2026-09-23T10:00:00Z"),
+    ]);
+    expect(search()).toBe("?project=ZED");
+  });
+
+  it("passes over a remembered project that has since been archived", async () => {
+    remember("OLD");
+    await mount("/", true, [touched("BET", "2026-09-22T10:00:00Z")]);
+    expect(search()).toBe("?project=BET");
+  });
+
+  it("is the first active project by name when none has tickets", async () => {
+    // Not ZED, the newest, and not OLD, first by name but archived.
+    await mount("/", true);
+    expect(search()).toBe("?project=ALP");
+  });
+
+  it("waits for the tickets before picking, then picks from them", async () => {
+    await mount("/?status=todo", true, null);
+    await act(async () => {});
+    expect(search()).toBe("?status=todo");
+    await renderPanel(true, [touched("ZED", "2026-09-22T10:00:00Z")]);
+    expect(search()).toBe("?status=todo&project=ZED");
+  });
+
+  it("waits for the projects too, when the tickets come first", async () => {
+    let load!: (projects: ReturnType<typeof project>[]) => void;
+    projectList.mockReturnValue(new Promise((resolve) => (load = resolve)));
+    await mount("/", true, [touched("BET", "2026-09-22T10:00:00Z")]);
+    expect(search()).toBe("");
+    await act(async () => load([project("ALP", "alpha"), project("BET", "Beta")]));
+    expect(search()).toBe("?project=BET");
+  });
+
+  it("picks nothing when every project is archived, and the bar says so", async () => {
+    projectList.mockResolvedValue([project("OLD", "Archive me", "archived")]);
+    remember("OLD");
+    await mount("/?status=todo", true, [touched("OLD", "2026-09-23T10:00:00Z")]);
+    expect(search()).toBe("?status=todo");
+    expect([...select("Project").options].map((o) => o.textContent)).toEqual(["No active projects"]);
+  });
+
+  it("drops a deleted project from the URL when every project left is archived", async () => {
+    projectList.mockResolvedValue([project("OLD", "Archive me", "archived")]);
+    await mount("/?project=GONE&status=todo", true);
+    expect(search()).toBe("?status=todo");
+  });
+
+  it("still keeps an archived project a URL names when every project is archived", async () => {
+    projectList.mockResolvedValue([project("OLD", "Archive me", "archived")]);
+    await mount("/?project=OLD", true);
+    expect(search()).toBe("?project=OLD");
+    expect(select("Project").value).toBe("OLD");
   });
 });

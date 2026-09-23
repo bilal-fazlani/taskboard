@@ -126,9 +126,14 @@ export function matchesFilters(ticket: FilterableTicket, filters: Filters): bool
   return true;
 }
 
-/** The tickets in the given project, ignoring case as the filter does; all of them when none is given. */
+/**
+ * The tickets in the given project, ignoring case as the filter does. None
+ * when no project is given: every view shows one project, and a view left
+ * without one (no active project to pick) shows its empty state rather than
+ * every project's tickets.
+ */
 export function inProject<T extends Pick<FilterableTicket, "projectPrefix">>(tickets: readonly T[], project: string): T[] {
-  if (!project) return [...tickets];
+  if (!project) return [];
   return tickets.filter((t) => same(t.projectPrefix, project));
 }
 

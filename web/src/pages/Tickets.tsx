@@ -96,10 +96,12 @@ export default function Tickets() {
   // the editor is handed the refreshed ticket and stays where it is.
   useLiveRefresh(load);
 
+  // The table always shows one project, so its rows and count are out of that
+  // project's tickets; without one (no active project to pick) it has none.
   // Filters apply client-side, so changing one never refetches.
-  const filtered = useMemo(() => tickets.filter((t) => matchesFilters(t, filters)), [tickets, filters]);
-  // The table always shows one project, so its count is out of that project's tickets.
-  const projectCount = useMemo(() => inProject(tickets, filters.project).length, [tickets, filters.project]);
+  const projectTickets = useMemo(() => inProject(tickets, filters.project), [tickets, filters.project]);
+  const filtered = useMemo(() => projectTickets.filter((t) => matchesFilters(t, filters)), [projectTickets, filters]);
+  const projectCount = projectTickets.length;
   // The filter bar picks a project for a URL without one; until it has, the
   // table waits rather than listing every project's tickets. The projects load
   // with the tickets, so once loading is over they are known (or failed, and
@@ -138,6 +140,7 @@ export default function Tickets() {
 
       <FilterPanel
         state={filterState}
+        tickets={loading ? null : tickets}
         repos={repos}
         count={waiting ? undefined : { shown: filtered.length, total: projectCount }}
       />
