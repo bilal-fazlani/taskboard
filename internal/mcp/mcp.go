@@ -230,6 +230,72 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 		}
 		return weburl.FillAll(tickets), nil
 
+	case "list_epics":
+		var a struct {
+			ProjectID string `json:"projectId"`
+		}
+		json.Unmarshal(args, &a)
+		if strings.TrimSpace(a.ProjectID) == "" {
+			return nil, fmt.Errorf("projectId is required")
+		}
+		projectID, err := s.store.ResolveProjectRef(a.ProjectID)
+		if err != nil {
+			return nil, err
+		}
+		epics, err := s.store.ListEpics(projectID)
+		if err != nil {
+			return nil, err
+		}
+		noEpic, err := s.store.NoEpicProgress(projectID)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"epics": epics, "noEpic": noEpic}, nil
+
+	case "create_epic":
+		var a models.CreateEpicRequest
+		json.Unmarshal(args, &a)
+		return s.store.CreateEpic(a)
+
+	case "update_epic":
+		var a struct {
+			ID      string `json:"id"`
+			Project string `json:"project"`
+			models.UpdateEpicRequest
+		}
+		json.Unmarshal(args, &a)
+		if a.Name == nil && a.Description == nil {
+			return nil, fmt.Errorf("nothing to update: provide name and/or description")
+		}
+		epicID, err := s.resolveEpicRefOrError(a.ID, a.Project)
+		if err != nil {
+			return nil, err
+		}
+		e, err := s.store.UpdateEpic(epicID, a.UpdateEpicRequest)
+		if err != nil {
+			return nil, err
+		}
+		if e == nil {
+			return nil, fmt.Errorf("epic not found")
+		}
+		return e, nil
+
+	case "delete_epic":
+		var a struct {
+			ID      string `json:"id"`
+			Project string `json:"project"`
+		}
+		json.Unmarshal(args, &a)
+		epicID, err := s.resolveEpicRefOrError(a.ID, a.Project)
+		if err != nil {
+			return nil, err
+		}
+		count, err := s.store.DeleteEpic(epicID)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"deleted": true, "clearedFromTickets": count}, nil
+
 	case "list_labels":
 		return s.store.ListLabels()
 
@@ -453,6 +519,31 @@ func (s *MCPServer) resolveLabelRefOrError(ref string) (string, error) {
 	return labelID, nil
 }
 
+// resolveEpicRefOrError resolves an epic argument the way update_epic and
+// delete_epic accept it: an epic id on its own, or a name together with its
+// project (id or prefix, case-insensitive), since an epic name is only
+// unique within its project. When project is given, resolution goes through
+// ResolveEpicRef, which also gives a clear error for an id that belongs to a
+// different project. When project is omitted, ref must be a literal epic id;
+// GetEpic checks it exists up front, since DeleteEpic/UpdateEpic otherwise
+// report an unknown id as a silent no-op rather than an error.
+func (s *MCPServer) resolveEpicRefOrError(ref, projectRef string) (string, error) {
+	if strings.TrimSpace(ref) == "" {
+		return "", fmt.Errorf("id is required")
+	}
+	if strings.TrimSpace(projectRef) != "" {
+		return s.store.ResolveEpicRef(projectRef, ref)
+	}
+	e, err := s.store.GetEpic(ref)
+	if err != nil {
+		return "", err
+	}
+	if e == nil {
+		return "", fmt.Errorf("no epic matches %q; pass project when addressing by name", ref)
+	}
+	return e.ID, nil
+}
+
 func (s *MCPServer) toolDefinitions() []toolDef {
 	return []toolDef{
 		// --- Projects (top-level grouping) ---
@@ -519,6 +610,61 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 				Required:   []string{"id"},
 			},
 		},
+		// --- Epics (project-scoped grouping of tickets) ---
+		{
+			Name: "list_epics",
+			Description: "List a project's epics, each with progress: counts per status, total, complete (true once it has " +
+				"at least one ticket and all are done), and lastActivityAt (latest ticket update, null when empty). Also " +
+				"returns a noEpic summary with the same counts for the project's tickets that have no epic. An epic is a " +
+				"project-scoped grouping — each ticket belongs to at most one epic, optionally.",
+			InputSchema: jsonSchema{
+				Type:       "object",
+				Properties: map[string]schemaProp{"projectId": {Type: "string", Description: "Project ID or prefix (case-insensitive)"}},
+				Required:   []string{"projectId"},
+			},
+		},
+		{
+			Name: "create_epic",
+			Description: "Create an epic within a project. An epic is an optional, project-scoped grouping for tickets — " +
+				"a ticket belongs to at most one epic. Epic names must be unique within their project, case-insensitively; " +
+				"\"none\" is reserved, since it means \"without an epic\" everywhere an epic is filtered or cleared.",
+			InputSchema: jsonSchema{
+				Type: "object",
+				Properties: map[string]schemaProp{
+					"projectId":   {Type: "string", Description: "Project ID or prefix (case-insensitive)"},
+					"name":        {Type: "string", Description: "Epic name, unique within the project (case-insensitive); \"none\" is reserved"},
+					"description": {Type: "string", Description: "Epic description"},
+				},
+				Required: []string{"projectId", "name"},
+			},
+		},
+		{
+			Name:        "update_epic",
+			Description: "Update an epic's name and/or description.",
+			InputSchema: jsonSchema{
+				Type: "object",
+				Properties: map[string]schemaProp{
+					"id":          {Type: "string", Description: "Epic ID, or its name together with project"},
+					"project":     {Type: "string", Description: "Project ID or prefix (case-insensitive); required when id is a name rather than an epic id"},
+					"name":        {Type: "string", Description: "New name, unique within the project (case-insensitive); \"none\" is reserved"},
+					"description": {Type: "string", Description: "New description"},
+				},
+				Required: []string{"id"},
+			},
+		},
+		{
+			Name: "delete_epic",
+			Description: "Delete an epic. Its tickets are not deleted; they simply lose the epic. The response's " +
+				"clearedFromTickets field reports how many tickets that was.",
+			InputSchema: jsonSchema{
+				Type: "object",
+				Properties: map[string]schemaProp{
+					"id":      {Type: "string", Description: "Epic ID, or its name together with project"},
+					"project": {Type: "string", Description: "Project ID or prefix (case-insensitive); required when id is a name rather than an epic id"},
+				},
+				Required: []string{"id"},
+			},
+		},
 		// --- Labels (global, informational tags on tickets) ---
 		{
 			Name:        "list_labels",
@@ -571,7 +717,7 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 		// --- Tickets (tasks within a project) ---
 		{
 			Name:        "list_tickets",
-			Description: "List tickets with optional filters by project, status, and priority",
+			Description: "List tickets with optional filters by project, status, priority, repo, label, and epic",
 			InputSchema: jsonSchema{
 				Type: "object",
 				Properties: map[string]schemaProp{
@@ -580,12 +726,13 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 					"priority":  {Type: "string", Description: "Filter by priority", Enum: []string{"urgent", "high", "medium", "low"}},
 					"repo":      {Type: "string", Description: "Filter to tickets attached to this repo, matched exactly"},
 					"label":     {Type: "string", Description: "Filter by label name, case-insensitive"},
+					"epic":      {Type: "string", Description: "Filter by epic name (case-insensitive) or id, or \"none\" for tickets without an epic. Without projectId, a name matches that epic in every project, and \"none\" spans every project's tickets without an epic too — pass projectId to scope the filter to one project."},
 				},
 			},
 		},
 		{
 			Name:        "get_ticket",
-			Description: "Get detailed ticket information including subtasks, labels, the tickets it depends on, and the tickets it blocks",
+			Description: "Get detailed ticket information including subtasks, labels, the epic it belongs to (if any), the tickets it depends on, and the tickets it blocks",
 			InputSchema: jsonSchema{
 				Type:       "object",
 				Properties: map[string]schemaProp{"id": {Type: "string", Description: "Ticket ID or display key (e.g. BILL-2), case-insensitive"}},
@@ -595,9 +742,10 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 		{
 			Name: "create_ticket",
 			Description: "Create a ticket (task) within a project. Tickets are concrete, actionable units of work. " +
-				"Do NOT create 'epic' or 'umbrella' tickets — use create_project for that level of grouping. " +
+				"Do NOT create 'umbrella' tickets — an epic (see create_epic) is the grouping inside a project; use " +
+				"create_project instead for a distinct, larger body of work. " +
 				"Use create_subtask or batch_create_subtasks to break tickets into steps. " +
-				"Hierarchy: Project → Ticket → Subtask.",
+				"Hierarchy: Project → Epic (optional) → Ticket → Subtask.",
 			InputSchema: jsonSchema{
 				Type: "object",
 				Properties: map[string]schemaProp{
@@ -612,6 +760,7 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 						Items:       &jsonSchema{Type: "string"},
 					},
 					"dueDate": {Type: "string", Description: "Due date (YYYY-MM-DD)"},
+					"epic":    {Type: "string", Description: "Epic name (case-insensitive) or id, within this project, to put the ticket in. One optional epic per ticket. Omit, or pass \"\" or \"none\" (any case), for no epic."},
 					"labels": {
 						Type:        "array",
 						Description: "Label names. Matched case-insensitively; unknown names are created automatically.",
@@ -643,6 +792,7 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 						Items:       &jsonSchema{Type: "string"},
 					},
 					"dueDate": {Type: "string", Description: "Due date (YYYY-MM-DD). Omit the field or pass null to leave the current due date unchanged; pass an empty string to clear it."},
+					"epic":    {Type: "string", Description: "Epic name (case-insensitive) or id, within the ticket's project. Omit or pass null to leave the ticket's epic unchanged; pass \"\" or \"none\" (any case) to remove it from its epic."},
 					"labels": {
 						Type:        "array",
 						Description: "Label names. Matched case-insensitively; unknown names are created automatically.",
