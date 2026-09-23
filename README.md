@@ -109,6 +109,8 @@ data: {}
 
 A `: keep-alive` comment arrives roughly every 20 seconds while nothing changes, so proxies and browsers don't time the connection out. Comment lines (starting with `:`) carry no event and can be ignored. The stream does not replay changes made while a client was disconnected, so clients should refetch once when the connection (re)opens, in addition to refetching on each `changed` event.
 
+`GET /api/tickets/{id}/history` returns a ticket's status changes, newest first. Every status change is recorded, whichever surface made it; the first entry, with an empty `fromStatus`, is the ticket's creation. `PUT /api/tickets/{id}` and `POST /api/tickets/{id}/move` take an optional `note`, saved with the change. Tickets carry `reviewRounds`, the number of times they have entered `agent_review`.
+
 ### CLI
 
 ```bash
@@ -117,7 +119,8 @@ taskboard project list
 
 taskboard ticket create --project <ID> --title "Implement login" --priority high
 taskboard ticket list --project <ID> --status todo
-taskboard ticket move <ID> --status done
+taskboard ticket move <ID> --status done --note "approved and landed"
+taskboard ticket history AUTH-1   # status changes, newest first, with their notes
 
 taskboard label create bug --color "#ef4444"
 taskboard label list
@@ -128,6 +131,9 @@ taskboard ticket update <ID> --labels backend,urgent --depends-on AUTH-1
 taskboard ticket update <ID> --repo acme/auth-api,acme/auth-web  # replaces the set
 taskboard ticket list --repo acme/auth-api                       # tickets touching that repo
 ```
+
+`ticket move` and `ticket update` take an optional `--note`, saved in the
+ticket's status history when the status changes. The CLI never requires one.
 
 `ticket list`, `ticket create` and `ticket update` print each ticket's link
 alongside it, so an agent working through the CLI can hand a person a URL
@@ -208,10 +214,10 @@ The reverse direction is derived, not stored. When `BILL-5` depends on `BILL-2`,
 | `delete_label`          | Delete a label and report tickets detached       |
 | **Tickets**             |                                                  |
 | `list_tickets`          | List tickets with filters                        |
-| `get_ticket`            | Get ticket details with subtasks and labels      |
+| `get_ticket`            | Get ticket details, subtasks, labels and history |
 | `create_ticket`         | Create a ticket (task) within a project          |
-| `update_ticket`         | Update ticket properties                         |
-| `move_ticket`           | Move ticket to different status column           |
+| `update_ticket`         | Update ticket properties, with an optional note  |
+| `move_ticket`           | Move ticket to a status column, with a note      |
 | `delete_ticket`         | Delete a ticket                                  |
 | **Board**               |                                                  |
 | `get_board`             | Get full Kanban board grouped by status          |
@@ -220,6 +226,14 @@ The reverse direction is derived, not stored. When `BILL-5` depends on `BILL-2`,
 | `batch_create_subtasks` | Add multiple subtasks to a ticket at once        |
 | `toggle_subtask`        | Toggle subtask completion                        |
 | `delete_subtask`        | Remove a subtask from a ticket                   |
+
+#### Status notes
+
+`move_ticket` and `update_ticket` take a `note`, saved with the status change
+in the ticket's history, which `get_ticket` returns. Over MCP a note is
+required when a ticket leaves `agent_review`: say why, either that it was
+approved and landed, or the findings it was sent back for. The web UI, HTTP
+API and CLI accept a note but never require one.
 
 `list_tickets`, `get_ticket`, `create_ticket` and `update_ticket` add a `url`
 field to each ticket — the link that opens it in the web UI — so an assistant

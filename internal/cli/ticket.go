@@ -122,7 +122,7 @@ func ticketCommands() *cobra.Command {
 	createCmd.Flags().StringSliceVar(&createLabels, "label", nil, "label name; comma-separated or repeated")
 	createCmd.Flags().StringSliceVar(&createDependsOn, "depends-on", nil, "ticket ID or key this depends on; comma-separated or repeated")
 
-	var moveStatus string
+	var moveStatus, moveNote string
 	moveCmd := &cobra.Command{
 		Use:   "move [id-or-key]",
 		Short: "Move ticket to different status, by id or display key (e.g. BILL-2)",
@@ -136,7 +136,7 @@ func ticketCommands() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			t, err := store.MoveTicket(ticketID, models.MoveTicketRequest{Status: moveStatus})
+			t, err := store.MoveTicket(ticketID, models.MoveTicketRequest{Status: moveStatus, Note: moveNote})
 			if err != nil {
 				return err
 			}
@@ -147,8 +147,38 @@ func ticketCommands() *cobra.Command {
 			return nil
 		},
 	}
-	moveCmd.Flags().StringVar(&moveStatus, "status", "", "target status (required)")
+	moveCmd.Flags().StringVar(&moveStatus, "status", "", fmt.Sprintf("target status (%s, required)", strings.Join(models.Statuses, "|")))
 	moveCmd.MarkFlagRequired("status")
+	moveCmd.Flags().StringVar(&moveNote, "note", "", noteFlagUsage)
+
+	historyCmd := &cobra.Command{
+		Use:   "history [id-or-key]",
+		Short: "Show a ticket's status changes, newest first, by id or display key (e.g. BILL-2)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			store, err := openStore()
+			if err != nil {
+				return err
+			}
+			ticketID, err := store.ResolveTicketID(args[0])
+			if err != nil {
+				return err
+			}
+			t, err := store.GetTicket(ticketID)
+			if err != nil {
+				return err
+			}
+			if t == nil {
+				return fmt.Errorf("ticket not found")
+			}
+			changes, err := store.ListStatusChanges(ticketID)
+			if err != nil {
+				return err
+			}
+			fmt.Print(formatHistory(t.DisplayKey(), changes))
+			return nil
+		},
+	}
 
 	deleteCmd := &cobra.Command{
 		Use:   "delete [id-or-key]",
@@ -172,8 +202,8 @@ func ticketCommands() *cobra.Command {
 	}
 
 	var (
-		updTitle, updDescription, updStatus, updPriority, updDue, updEpic string
-		updRepos, updLabels, updLabelAlias, updDependsOn                  []string
+		updTitle, updDescription, updStatus, updPriority, updDue, updEpic, updNote string
+		updRepos, updLabels, updLabelAlias, updDependsOn                           []string
 	)
 	updateCmd := &cobra.Command{
 		Use:   "update [id-or-key]",
@@ -208,6 +238,7 @@ func ticketCommands() *cobra.Command {
 			if cmd.Flags().Changed("status") {
 				req.Status = &updStatus
 			}
+			req.Note = updNote
 			if cmd.Flags().Changed("priority") {
 				req.Priority = &updPriority
 			}
@@ -257,6 +288,7 @@ func ticketCommands() *cobra.Command {
 	updateCmd.Flags().StringVar(&updTitle, "title", "", "new title")
 	updateCmd.Flags().StringVar(&updDescription, "description", "", "new description")
 	updateCmd.Flags().StringVar(&updStatus, "status", "", fmt.Sprintf("status (%s)", strings.Join(models.Statuses, "|")))
+	updateCmd.Flags().StringVar(&updNote, "note", "", noteFlagUsage)
 	updateCmd.Flags().StringVar(&updPriority, "priority", "", "priority (urgent|high|medium|low)")
 	updateCmd.Flags().StringVar(&updDue, "due", "", "due date (YYYY-MM-DD); empty value clears it")
 	updateCmd.Flags().StringVar(&updEpic, "epic", "", `epic name (case-insensitive) or id; "" or "none" clears it`)
@@ -265,6 +297,35 @@ func ticketCommands() *cobra.Command {
 	updateCmd.Flags().StringSliceVar(&updLabelAlias, "label", nil, "alias for --labels")
 	updateCmd.Flags().StringSliceVar(&updDependsOn, "depends-on", nil, "replace dependencies; comma-separated or repeated, empty value clears")
 
-	cmd.AddCommand(listCmd, createCmd, moveCmd, deleteCmd, updateCmd)
+	cmd.AddCommand(listCmd, createCmd, moveCmd, deleteCmd, updateCmd, historyCmd)
 	return cmd
+}
+
+const noteFlagUsage = "why the status changed, saved with the change in the ticket's history (optional; ignored when the status does not change)"
+
+// formatHistory renders a ticket's status changes, newest first, one per
+// line, with each note indented under its change. The first change, with no
+// from status, is the ticket's creation.
+func formatHistory(key string, changes []models.StatusChange) string {
+	var b strings.Builder
+	if len(changes) == 0 {
+		fmt.Fprintf(&b, "No status history for %s.\n", key)
+		return b.String()
+	}
+	fmt.Fprintf(&b, "Status history for %s, newest first:\n", key)
+	for _, c := range changes {
+		when := c.CreatedAt.Local().Format("2006-01-02 15:04")
+		if c.FromStatus == "" {
+			fmt.Fprintf(&b, "  %s  created in %s\n", when, c.ToStatus)
+		} else {
+			fmt.Fprintf(&b, "  %s  %s -> %s\n", when, c.FromStatus, c.ToStatus)
+		}
+		if c.Note == "" {
+			continue
+		}
+		for _, line := range strings.Split(c.Note, "\n") {
+			fmt.Fprintf(&b, "      %s\n", line)
+		}
+	}
+	return b.String()
 }
