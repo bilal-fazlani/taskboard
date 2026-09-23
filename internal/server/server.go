@@ -211,6 +211,13 @@ func (s *Server) setupRoutes(webFS fs.FS) {
 			r.Delete("/{id}", s.deleteLabel)
 		})
 
+		r.Route("/epics", func(r chi.Router) {
+			r.Get("/", s.listEpics)
+			r.Post("/", s.createEpic)
+			r.Put("/{id}", s.updateEpic)
+			r.Delete("/{id}", s.deleteEpic)
+		})
+
 		r.Get("/board", s.getBoard)
 		r.Get("/events", s.handleEvents)
 	})
@@ -382,6 +389,7 @@ func (s *Server) listTickets(w http.ResponseWriter, r *http.Request) {
 		Priority:  r.URL.Query().Get("priority"),
 		Repo:      r.URL.Query().Get("repo"),
 		Label:     r.URL.Query().Get("label"),
+		Epic:      r.URL.Query().Get("epic"),
 	}
 	tickets, err := s.store.ListTickets(filter)
 	if err != nil {
@@ -559,6 +567,87 @@ func (s *Server) updateLabel(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) deleteLabel(w http.ResponseWriter, r *http.Request) {
 	if _, err := s.store.DeleteLabel(chi.URLParam(r, "id")); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// epicsResponse is what GET /api/epics answers with: a project's epics (each
+// carrying its own progress — see models.Epic), plus the same progress for
+// the project's tickets that have no epic. The Epics view renders that as one
+// more row alongside the real epics, so it comes from the same request.
+type epicsResponse struct {
+	Epics  []models.Epic        `json:"epics"`
+	NoEpic *models.EpicProgress `json:"noEpic"`
+}
+
+func (s *Server) listEpics(w http.ResponseWriter, r *http.Request) {
+	projectID := r.URL.Query().Get("projectId")
+	if projectID == "" {
+		writeError(w, http.StatusBadRequest, "projectId is required")
+		return
+	}
+	epics, err := s.store.ListEpics(projectID)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	noEpic, err := s.store.NoEpicProgress(projectID)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, epicsResponse{Epics: epics, NoEpic: noEpic})
+}
+
+func (s *Server) createEpic(w http.ResponseWriter, r *http.Request) {
+	var req models.CreateEpicRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	e, err := s.store.CreateEpic(req)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, e)
+}
+
+func (s *Server) updateEpic(w http.ResponseWriter, r *http.Request) {
+	var req models.UpdateEpicRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	e, err := s.store.UpdateEpic(chi.URLParam(r, "id"), req)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	// UpdateEpic returns (nil, nil) for an unknown id, like UpdateLabel.
+	if e == nil {
+		writeError(w, http.StatusNotFound, "epic not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, e)
+}
+
+func (s *Server) deleteEpic(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	// DeleteEpic reports (0, nil) for an unknown id rather than an error (like
+	// DeleteLabel/DeleteProject), so a 404 needs its own lookup first.
+	e, err := s.store.GetEpic(id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if e == nil {
+		writeError(w, http.StatusNotFound, "epic not found")
+		return
+	}
+	if _, err := s.store.DeleteEpic(id); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
