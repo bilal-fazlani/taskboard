@@ -17,6 +17,34 @@ export interface Label {
   ticketCount: number;
 }
 
+export interface EpicRef {
+  id: string;
+  name: string;
+}
+
+export interface EpicProgress {
+  /** One entry per status, zeros included. */
+  counts: Record<string, number>;
+  total: number;
+  /** At least one ticket and every one done. An empty epic is not complete. */
+  complete: boolean;
+  lastActivityAt: string | null;
+}
+
+export interface Epic extends EpicProgress {
+  id: string;
+  projectId: string;
+  name: string;
+  description?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface EpicList {
+  epics: Epic[];
+  noEpic: EpicProgress;
+}
+
 export interface TicketRef {
   id: string;
   key: string;
@@ -170,6 +198,23 @@ export const api = {
       }),
     delete: (id: string) =>
       request<void>(`/api/labels/${id}`, { method: "DELETE" }),
+  },
+
+  epics: {
+    list: (projectId: string) =>
+      request<EpicList>(`/api/epics?projectId=${encodeURIComponent(projectId)}`),
+    create: (data: { projectId: string; name: string; description?: string }) =>
+      request<Epic>("/api/epics", {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    update: (id: string, data: { name?: string; description?: string }) =>
+      request<Epic>(`/api/epics/${id}`, {
+        method: "PUT",
+        body: JSON.stringify(data),
+      }),
+    delete: (id: string) =>
+      request<void>(`/api/epics/${id}`, { method: "DELETE" }),
   },
 
   board: {

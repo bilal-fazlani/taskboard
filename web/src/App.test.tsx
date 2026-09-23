@@ -44,12 +44,13 @@ function activeLink(html: string): string | undefined {
 }
 
 describe("views navigation", () => {
-  it("groups exactly Dependencies, Kanban and Table under Views", () => {
+  it("groups exactly Dependencies, Kanban, Table and Epics under Views", () => {
     expect(VIEWS_GROUP_LABEL).toBe("Views");
     expect(viewItems.map((i) => `${i.label} ${i.to}`)).toEqual([
       "Dependencies /",
       "Kanban /kanban",
       "Table /table",
+      "Epics /epics",
     ]);
     expect(otherItems.map((i) => `${i.label} ${i.to}`)).toEqual([
       "Projects /projects",
@@ -61,7 +62,7 @@ describe("views navigation", () => {
     const html = render("/");
     expect(html).toContain('<p id="nav-views"');
     expect(html).toMatch(/id="nav-views"[^>]*>Views<\/p>/);
-    expect(viewsGroupLinks(html)).toEqual(["Dependencies /", "Kanban /kanban", "Table /table"]);
+    expect(viewsGroupLinks(html)).toEqual(["Dependencies /", "Kanban /kanban", "Table /table", "Epics /epics"]);
     expect(html).toMatch(/href="\/projects"[^>]*>.*?Projects<\/a>/);
     expect(html).toMatch(/href="\/labels"[^>]*>.*?Labels<\/a>/);
   });
@@ -70,6 +71,7 @@ describe("views navigation", () => {
     ["/", "Dependencies"],
     ["/kanban", "Kanban"],
     ["/table", "Table"],
+    ["/epics", "Epics"],
   ])("serves %s with the heading and active nav entry %s", (path, name) => {
     const html = render(path);
     expect(heading(html)).toBe(name);
@@ -97,7 +99,8 @@ function selectedOption(html: string, name: string): string | undefined {
 }
 
 describe("filter panel", () => {
-  const views = viewItems.map((i) => [i.label, i.to]);
+  // Epics has only the project selector (see Epics.dom.test.tsx).
+  const views = viewItems.filter((i) => i.to !== "/epics").map((i) => [i.label, i.to]);
 
   it.each(views)("renders on %s with every filter and no other project selector", (_name, path) => {
     const html = render(path);
@@ -132,6 +135,7 @@ describe("filter panel", () => {
       "Dependencies /?project=ACP&amp;label=web",
       "Kanban /kanban?project=ACP&amp;label=web",
       "Table /table?project=ACP&amp;label=web",
+      "Epics /epics?project=ACP&amp;label=web",
     ]);
     expect(activeLink(html)).toBe("Kanban");
     // Projects and Labels have no filters to carry.

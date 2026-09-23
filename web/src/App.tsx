@@ -5,8 +5,9 @@ import Graph from "./pages/Graph";
 import Projects from "./pages/Projects";
 import Tickets from "./pages/Tickets";
 import Labels from "./pages/Labels";
+import Epics from "./pages/Epics";
 
-// The views live at /, /kanban and /table. Their old paths (/board, /tickets,
+// The views live at /, /kanban, /table and /epics. Their old paths (/board, /tickets,
 // /graph) are gone on purpose, with no redirects.
 export function AppRoutes() {
   return (
@@ -15,6 +16,7 @@ export function AppRoutes() {
         <Route index element={<Graph />} />
         <Route path="kanban" element={<Board />} />
         <Route path="table" element={<Tickets />} />
+        <Route path="epics" element={<Epics />} />
         <Route path="projects" element={<Projects />} />
         <Route path="labels" element={<Labels />} />
       </Route>

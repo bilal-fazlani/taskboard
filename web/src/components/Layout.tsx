@@ -1,7 +1,9 @@
+import { useEffect } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { Zap } from "lucide-react";
 import { VIEWS_GROUP_LABEL, otherItems, viewItems, type NavItem } from "../lib/navigation";
 import { filterSearch } from "../lib/filters";
+import { rememberView } from "../lib/lastView";
 
 // `search` is the query string the link carries; the views pass on the filters.
 function NavEntry({ item, search = "" }: { item: NavItem; search?: string }) {
@@ -24,7 +26,11 @@ function NavEntry({ item, search = "" }: { item: NavItem; search?: string }) {
 }
 
 export default function Layout() {
-  const viewSearch = filterSearch(useLocation().search);
+  const location = useLocation();
+  const viewSearch = filterSearch(location.search);
+
+  // The ticket view shown is the one an epic's row on the Epics view opens.
+  useEffect(() => rememberView(location.pathname), [location.pathname]);
 
   return (
     <div className="flex h-screen overflow-hidden">
