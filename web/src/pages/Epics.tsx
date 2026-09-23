@@ -7,7 +7,6 @@ import { useFilters } from "../hooks/useFilters";
 import { useLiveRefresh } from "../hooks/useLiveRefresh";
 import { awaitingProject, namedProject, type ActivityTicket } from "../lib/defaultProject";
 import {
-  NO_EPIC,
   activeCount,
   arrangeEpics,
   barSegments,
@@ -18,6 +17,7 @@ import {
   serverMessage,
   showsNoEpic,
 } from "../lib/epics";
+import { NO_EPIC } from "../lib/filters";
 import { readLastView } from "../lib/lastView";
 import { STATUS_COLORS, STATUS_LABELS } from "../lib/status";
 

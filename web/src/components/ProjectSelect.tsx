@@ -17,12 +17,12 @@ const CONTROL =
   "bg-slate-800 text-xs rounded-md border px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500";
 
 /**
- * The project dropdown on its own, for a view that has no other filters (the
- * Epics view). It keeps the rules of the filter bar's project control (see
- * FilterPanel and defaultProject.ts): the URL's `project` names the project,
- * a URL without one or with one that no longer exists gets an active project
- * picked, archived projects are offered only when the URL names one, and the
- * project shown is remembered for the next view.
+ * The project dropdown, used by the filter bar (FilterPanel) and on its own by
+ * the Epics view, which has no other filters. The rules are defaultProject.ts's:
+ * the URL's `project` names the project, a URL without one or with one that no
+ * longer exists gets an active project picked, archived projects are offered
+ * only when the URL names one, and the project shown is remembered for the
+ * next view.
  */
 export default function ProjectSelect({
   state,

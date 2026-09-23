@@ -7,11 +7,9 @@
 // outside any epic, and folds the complete epics away at the bottom.
 
 import type { Epic, EpicProgress } from "../api/client";
+import { NO_EPIC, isNoEpic } from "./filters";
 import { ACTIVE_STATUSES, DONE_STATUS, type Status } from "./status";
 import type { TicketViewPath } from "./lastView";
-
-/** The epic filter value meaning "tickets without an epic". No epic can be called this. */
-export const NO_EPIC = "none";
 
 const count = (progress: EpicProgress, status: string) => progress.counts?.[status] ?? 0;
 
@@ -113,7 +111,7 @@ export function epicLink(view: TicketViewPath, project: string, epic: string): s
 export function nameError(name: string, epics: readonly Epic[], editingId?: string): string | null {
   const trimmed = name.trim();
   if (trimmed === "") return "Enter a name";
-  if (trimmed.toLowerCase() === NO_EPIC) return `"${NO_EPIC}" is reserved for tickets without an epic.`;
+  if (isNoEpic(trimmed)) return `"${NO_EPIC}" is reserved for tickets without an epic.`;
   const taken = epics.find((e) => e.id !== editingId && e.name.trim().toLowerCase() === trimmed.toLowerCase());
   if (taken) return `This project already has an epic called "${taken.name}".`;
   return null;

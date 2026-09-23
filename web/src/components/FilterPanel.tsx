@@ -3,16 +3,8 @@ import { Search, X } from "lucide-react";
 import { api, type Epic, type Label, type Project } from "../api/client";
 import type { FilterState } from "../hooks/useFilters";
 import { useLiveRefresh } from "../hooks/useLiveRefresh";
-import {
-  activeProjects,
-  defaultProject,
-  isArchived,
-  latestActivity,
-  namedProject,
-  readLastProject,
-  rememberProject,
-  type ActivityTicket,
-} from "../lib/defaultProject";
+import ProjectSelect from "./ProjectSelect";
+import { activeProjects, namedProject, type ActivityTicket } from "../lib/defaultProject";
 import { NO_EPIC, selectOptions, urlValue, type FilterKey, type SelectOption } from "../lib/filters";
 import { PRIORITIES } from "../lib/priority";
 import { staleFilters } from "../lib/staleFilters";
@@ -27,7 +19,6 @@ const controlClass = (set: boolean) =>
 function FilterSelect({
   name,
   allLabel,
-  placeholder,
   value,
   options,
   ignoreCase,
@@ -35,10 +26,8 @@ function FilterSelect({
   onChange,
 }: {
   name: string;
-  /** The label of the empty value that sets no filter. Without one there is no such option. */
-  allLabel?: string;
-  /** Without an allLabel, what shows while the value is empty, as a disabled option. */
-  placeholder?: string;
+  /** The label of the empty value, which sets no filter. */
+  allLabel: string;
   value: string;
   options: SelectOption[];
   /** Whether the filter matches ignoring case, so a URL value in another case selects its option. */
@@ -55,15 +44,7 @@ function FilterSelect({
       onChange={(e) => onChange(e.target.value)}
       className={`${controlClass(value !== "")}${maxWidth ? ` ${maxWidth} truncate` : ""}`}
     >
-      {allLabel !== undefined ? (
-        <option value="">{allLabel}</option>
-      ) : (
-        shown.value === "" && (
-          <option value="" disabled>
-            {placeholder}
-          </option>
-        )
-      )}
+      <option value="">{allLabel}</option>
       {shown.options.map((o) => (
         <option key={o.value} value={o.value}>
           {o.label}
@@ -143,36 +124,19 @@ export default function FilterPanel({
   useEffect(() => loadOptions(), [loadOptions]);
   useLiveRefresh(loadOptions);
 
-  // Filters that no longer name anything are dropped from the URL (below),
-  // here rather than in each view, since the bar is where the projects,
-  // epics and labels are known.
+  // Filters that no longer name anything are dropped from the URL (below, and
+  // the project in ProjectSelect), here rather than in each view, since the
+  // bar is where the projects, epics and labels are known.
   const projectNames = useMemo(() => projects?.map((p) => p.prefix) ?? null, [projects]);
   const labelNames = useMemo(() => labels?.map((l) => l.name) ?? null, [labels]);
-  // The projects the dropdown offers and the pick chooses from: the active
-  // ones, by name. A URL naming an archived one still shows it, as an extra
-  // entry, and keeps it.
-  const offered = useMemo(() => (projects ? activeProjects(projects) : null), [projects]);
 
   // The project the URL names, as the list spells it, or null when it names
-  // none that exists. An archived one counts: a link or bookmark to it still
-  // opens it. Every view always has one: a URL without one, or with one that
-  // was deleted, gets an active project picked (see defaultProject.ts),
-  // replacing the history entry like any filter change. Nothing is picked
-  // until both the projects and the tickets whose activity decides have
-  // loaded, so the pick never runs on part of the data, or when no project is
-  // active.
+  // none that exists. Picking one for a URL without it, offering the
+  // dropdown's entries, remembering the one shown and dropping a stale one
+  // are ProjectSelect's job; the bar only needs to know which project its
+  // epics belong to, and whether any project is active to show.
   const shownProject = projectNames && namedProject(projectNames, filters.project);
-  const activity = useMemo(() => (tickets ? latestActivity(tickets) : null), [tickets]);
-  const needsProject = offered !== null && offered.length > 0 && shownProject === null;
-  useEffect(() => {
-    if (needsProject && projects && activity) {
-      setFilter("project", defaultProject(projects, readLastProject(), activity));
-    }
-  }, [needsProject, projects, activity, setFilter]);
-  // The project shown is the one the next view without one starts on.
-  useEffect(() => {
-    if (shownProject) rememberProject(shownProject);
-  }, [shownProject]);
+  const noActiveProject = useMemo(() => projects !== null && activeProjects(projects).length === 0, [projects]);
 
   // The epic filter offers the shown project's epics, loaded when it changes
   // and on every live change, like the projects and labels. An answer for a
@@ -197,20 +161,19 @@ export default function FilterPanel({
   // project left to show there are none at all.
   const shownEpics = useMemo(() => {
     if (shownProject) return epics && epics.project === shownProject ? epics.epics : null;
-    return offered?.length === 0 ? [] : null;
-  }, [epics, shownProject, offered]);
+    return noActiveProject ? [] : null;
+  }, [epics, shownProject, noActiveProject]);
 
   // An epic filter is dropped once it names no epic of the shown project,
-  // which is also what drops it on a switch to another project. A view always
-  // shows one project, so while there are active projects a stale one is
-  // replaced above rather than dropped; only with none left to pick does it go.
+  // which is also what drops it on a switch to another project. A stale
+  // project is ProjectSelect's to replace, or drop when none is left to pick.
   const epicNames = useMemo(() => shownEpics?.map((e) => e.name) ?? null, [shownEpics]);
   const stale = useMemo(
     () =>
       staleFilters(filters, { projects: projectNames, epics: epicNames, labels: labelNames }).filter(
-        (key) => key !== "project" || offered?.length === 0,
+        (key) => key !== "project",
       ),
-    [filters, projectNames, epicNames, labelNames, offered],
+    [filters, projectNames, epicNames, labelNames],
   );
   useEffect(() => dropFilters(stale), [stale, dropFilters]);
 
@@ -225,18 +188,6 @@ export default function FilterPanel({
     [shownEpics],
   );
 
-  // The dropdown's entries: the active projects, plus an archived one the URL
-  // names, marked as such, after them. A value naming no project at all still
-  // shows as written (see selectOptions).
-  const projectOptions = useMemo(() => {
-    // The API leaves out an empty icon, so it can be missing as well as blank.
-    const label = (p: Project) => [p.icon, p.name].filter(Boolean).join(" ");
-    const options = (offered ?? []).map((p) => ({ value: p.prefix, label: label(p) }));
-    const archived = projects?.find((p) => p.prefix === shownProject && isArchived(p));
-    if (archived) options.push({ value: archived.prefix, label: `${label(archived)} (archived)` });
-    return options;
-  }, [offered, projects, shownProject]);
-
   const set = (key: FilterKey) => (value: string) => setFilter(key, value);
   const clear = () => {
     setSearch("");
@@ -249,14 +200,7 @@ export default function FilterPanel({
       aria-label="Filter tickets"
       className="shrink-0 flex flex-wrap items-center gap-2 px-6 py-3 border-b border-slate-800/50"
     >
-      <FilterSelect
-        name="Project"
-        placeholder={offered?.length === 0 ? (projects?.length ? "No active projects" : "No projects") : "Project"}
-        value={filters.project}
-        options={projectOptions}
-        ignoreCase
-        onChange={set("project")}
-      />
+      <ProjectSelect state={state} projects={projects} tickets={tickets} />
       <FilterSelect
         name="Epic"
         allLabel="All epics"
