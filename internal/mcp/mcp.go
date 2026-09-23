@@ -357,10 +357,16 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 			return nil, err
 		}
 		t, err := s.store.GetTicket(ticketID)
-		if t == nil && err == nil {
+		if err != nil {
+			return nil, err
+		}
+		if t == nil {
 			return nil, fmt.Errorf("ticket not found")
 		}
-		return weburl.Fill(t), err
+		if t.History, err = s.store.ListStatusChanges(ticketID); err != nil {
+			return nil, err
+		}
+		return weburl.Fill(t), nil
 
 	case "create_ticket":
 		var a models.CreateTicketRequest
@@ -381,7 +387,8 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 		if err != nil {
 			return nil, err
 		}
-		t, err := s.store.UpdateTicket(ticketID, a.UpdateTicketRequest)
+		// Until agents have identities (ACP-4), "agent" means "came through MCP"; the rule should then key off the actor.
+		t, err := s.store.UpdateTicket(ticketID, a.UpdateTicketRequest, db.RequireNoteLeavingReview())
 		if err != nil {
 			return nil, err
 		}
@@ -397,7 +404,8 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 		if err != nil {
 			return nil, err
 		}
-		return s.store.MoveTicket(ticketID, a.MoveTicketRequest)
+		// Until agents have identities (ACP-4), "agent" means "came through MCP"; the rule should then key off the actor.
+		return s.store.MoveTicket(ticketID, a.MoveTicketRequest, db.RequireNoteLeavingReview())
 
 	case "delete_ticket":
 		var a struct {
@@ -543,6 +551,11 @@ func (s *MCPServer) resolveEpicRefOrError(ref, projectRef string) (string, error
 	}
 	return e.ID, nil
 }
+
+// noteParamDescription documents the note move_ticket and update_ticket take.
+const noteParamDescription = "Why the status is changing, saved with the change in the ticket's status history. " +
+	"Required when moving a ticket out of agent_review: say why it is leaving review, either that it was approved and landed, " +
+	"or the review findings it is being sent back to fix. Optional for every other change; ignored when the status does not change."
 
 func (s *MCPServer) toolDefinitions() []toolDef {
 	return []toolDef{
@@ -731,8 +744,10 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 			},
 		},
 		{
-			Name:        "get_ticket",
-			Description: "Get detailed ticket information including subtasks, labels, the epic it belongs to (if any), the tickets it depends on, and the tickets it blocks",
+			Name: "get_ticket",
+			Description: "Get detailed ticket information including subtasks, labels, the epic it belongs to (if any), the tickets it depends on, the tickets it blocks, " +
+				"and its status history (newest first, each change with its note; the first entry, with an empty fromStatus, is its creation). " +
+				"reviewRounds counts how many times it has entered agent_review.",
 			InputSchema: jsonSchema{
 				Type:       "object",
 				Properties: map[string]schemaProp{"id": {Type: "string", Description: "Ticket ID or display key (e.g. BILL-2), case-insensitive"}},
@@ -777,7 +792,7 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 		},
 		{
 			Name:        "update_ticket",
-			Description: "Update ticket properties",
+			Description: "Update ticket properties. Changing the status out of agent_review requires a note.",
 			InputSchema: jsonSchema{
 				Type: "object",
 				Properties: map[string]schemaProp{
@@ -785,6 +800,7 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 					"title":       {Type: "string", Description: "Ticket title"},
 					"description": {Type: "string", Description: "Description"},
 					"status":      {Type: "string", Description: "Status", Enum: models.Statuses},
+					"note":        {Type: "string", Description: noteParamDescription},
 					"priority":    {Type: "string", Description: "Priority", Enum: []string{"urgent", "high", "medium", "low"}},
 					"repos": {
 						Type:        "array",
@@ -809,12 +825,13 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 		},
 		{
 			Name:        "move_ticket",
-			Description: "Move ticket to a different status column",
+			Description: "Move ticket to a different status column. Moving it out of agent_review requires a note.",
 			InputSchema: jsonSchema{
 				Type: "object",
 				Properties: map[string]schemaProp{
 					"id":     {Type: "string", Description: "Ticket ID or display key (e.g. BILL-2), case-insensitive"},
 					"status": {Type: "string", Description: "Target status", Enum: models.Statuses},
+					"note":   {Type: "string", Description: noteParamDescription},
 				},
 				Required: []string{"id", "status"},
 			},

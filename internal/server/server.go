@@ -195,6 +195,7 @@ func (s *Server) setupRoutes(webFS fs.FS) {
 			r.Get("/{id}", s.getTicket)
 			r.Put("/{id}", s.updateTicket)
 			r.Post("/{id}/move", s.moveTicket)
+			r.Get("/{id}/history", s.ticketHistory)
 			r.Delete("/{id}", s.deleteTicket)
 			r.Post("/{id}/subtasks", s.addSubtask)
 		})
@@ -461,7 +462,24 @@ func (s *Server) moveTicket(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "status is required")
 		return
 	}
+	// A note is optional here, even out of agent_review: only the MCP tools
+	// require one.
 	t, err := s.store.MoveTicket(chi.URLParam(r, "id"), req)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	if t == nil {
+		writeError(w, http.StatusNotFound, "ticket not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, t)
+}
+
+// ticketHistory answers with a ticket's status changes, newest first.
+func (s *Server) ticketHistory(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	t, err := s.store.GetTicket(id)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -470,7 +488,12 @@ func (s *Server) moveTicket(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "ticket not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, t)
+	changes, err := s.store.ListStatusChanges(id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, changes)
 }
 
 func (s *Server) deleteTicket(w http.ResponseWriter, r *http.Request) {
