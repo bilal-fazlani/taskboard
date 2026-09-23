@@ -37,6 +37,7 @@ func (s *Store) ClearData() error {
 		"ticket_labels",
 		"subtasks",
 		"tickets",
+		"epics",
 		"labels",
 		"projects",
 	}
@@ -165,23 +166,22 @@ func nextTicketNumber(q dbtx, projectID string) (int, error) {
 }
 
 func (s *Store) ListTickets(filter models.TicketFilter) ([]models.Ticket, error) {
-	query := `SELECT t.id, t.project_id, t.number, t.title, t.description,
-		t.status, t.priority, t.due_date, t.position, t.created_at, t.updated_at,
-		COALESCE(p.prefix, '') as project_prefix
-		FROM tickets t LEFT JOIN projects p ON t.project_id = p.id WHERE 1=1`
+	query := ticketSelect + ` WHERE 1=1`
 	args := []any{}
 
+	projectID := ""
 	if filter.ProjectID != "" {
 		// Accepts a project id or prefix, same as ResolveProjectRef. An
 		// unresolvable value matches no tickets, the same convention the
 		// label filter below uses for an unresolvable label name.
-		projectID, ok, err := resolveProjectFilterID(s.db, filter.ProjectID)
+		resolved, ok, err := resolveProjectFilterID(s.db, filter.ProjectID)
 		if err != nil {
 			return nil, err
 		}
 		if !ok {
 			return nil, nil
 		}
+		projectID = resolved
 		query += " AND t.project_id = ?"
 		args = append(args, projectID)
 	}
@@ -218,6 +218,25 @@ func (s *Store) ListTickets(filter models.TicketFilter) ([]models.Ticket, error)
 			WHERE tl.ticket_id = t.id AND tl.label_id = ?)`
 		args = append(args, labelID)
 	}
+	if epic := strings.TrimSpace(filter.Epic); epic != "" {
+		if strings.EqualFold(epic, models.NoEpic) {
+			query += " AND t.epic_id IS NULL"
+		} else {
+			// Like the label filter, an epic that matches nothing matches
+			// no tickets rather than failing the list.
+			epicIDs, err := findEpicIDs(s.db, projectID, epic)
+			if err != nil {
+				return nil, err
+			}
+			if len(epicIDs) == 0 {
+				return nil, nil
+			}
+			query += " AND t.epic_id IN (" + strings.TrimSuffix(strings.Repeat("?,", len(epicIDs)), ",") + ")"
+			for _, id := range epicIDs {
+				args = append(args, id)
+			}
+		}
+	}
 	query += " ORDER BY t.position ASC, t.created_at DESC"
 
 	rows, err := s.db.Query(query, args...)
@@ -228,10 +247,8 @@ func (s *Store) ListTickets(filter models.TicketFilter) ([]models.Ticket, error)
 
 	var tickets []models.Ticket
 	for rows.Next() {
-		var t models.Ticket
-		if err := rows.Scan(&t.ID, &t.ProjectID, &t.Number, &t.Title, &t.Description,
-			&t.Status, &t.Priority, &t.DueDate, &t.Position, &t.CreatedAt, &t.UpdatedAt,
-			&t.ProjectPrefix); err != nil {
+		t, err := scanTicket(rows)
+		if err != nil {
 			return nil, err
 		}
 		tickets = append(tickets, t)
@@ -359,16 +376,32 @@ func (s *Store) attachListDetails(tickets []models.Ticket) error {
 	return depRows.Err()
 }
 
-func (s *Store) GetTicket(id string) (*models.Ticket, error) {
+// ticketSelect reads a ticket's own columns, its project prefix and its epic.
+// The epic comes from a join rather than a per-ticket lookup, so a list costs
+// no extra query for it.
+const ticketSelect = `SELECT t.id, t.project_id, t.number, t.title, t.description,
+	t.status, t.priority, t.due_date, t.position, t.created_at, t.updated_at,
+	COALESCE(p.prefix, '') as project_prefix, e.id, e.name
+	FROM tickets t
+	LEFT JOIN projects p ON t.project_id = p.id
+	LEFT JOIN epics e ON e.id = t.epic_id`
+
+func scanTicket(row interface{ Scan(...any) error }) (models.Ticket, error) {
 	var t models.Ticket
-	err := s.db.QueryRow(
-		`SELECT t.id, t.project_id, t.number, t.title, t.description,
-		t.status, t.priority, t.due_date, t.position, t.created_at, t.updated_at,
-		COALESCE(p.prefix, '') as project_prefix
-		FROM tickets t LEFT JOIN projects p ON t.project_id = p.id WHERE t.id = ?`, id,
-	).Scan(&t.ID, &t.ProjectID, &t.Number, &t.Title, &t.Description,
+	var epicID, epicName sql.NullString
+	if err := row.Scan(&t.ID, &t.ProjectID, &t.Number, &t.Title, &t.Description,
 		&t.Status, &t.Priority, &t.DueDate, &t.Position, &t.CreatedAt, &t.UpdatedAt,
-		&t.ProjectPrefix)
+		&t.ProjectPrefix, &epicID, &epicName); err != nil {
+		return t, err
+	}
+	if epicID.Valid {
+		t.Epic = &models.EpicRef{ID: epicID.String, Name: epicName.String}
+	}
+	return t, nil
+}
+
+func (s *Store) GetTicket(id string) (*models.Ticket, error) {
+	t, err := scanTicket(s.db.QueryRow(ticketSelect+` WHERE t.id = ?`, id))
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -447,6 +480,12 @@ func (s *Store) CreateTicket(req models.CreateTicketRequest) (*models.Ticket, er
 			return nil, err
 		}
 	}
+	var epicID *string
+	if req.Epic != nil {
+		if epicID, err = resolveTicketEpic(tx, projectID, *req.Epic); err != nil {
+			return nil, err
+		}
+	}
 
 	var labelIDs []string
 	if len(req.Labels) > 0 {
@@ -464,9 +503,9 @@ func (s *Store) CreateTicket(req models.CreateTicketRequest) (*models.Ticket, er
 	}
 
 	if _, err = tx.Exec(
-		`INSERT INTO tickets (id, project_id, number, title, description, status, priority, due_date, position, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		t.ID, t.ProjectID, t.Number, t.Title, t.Description, t.Status, t.Priority, t.DueDate, t.Position, t.CreatedAt, t.UpdatedAt,
+		`INSERT INTO tickets (id, project_id, number, title, description, status, priority, due_date, epic_id, position, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		t.ID, t.ProjectID, t.Number, t.Title, t.Description, t.Status, t.Priority, t.DueDate, epicID, t.Position, t.CreatedAt, t.UpdatedAt,
 	); err != nil {
 		return nil, err
 	}
@@ -547,6 +586,12 @@ func (s *Store) UpdateTicket(id string, req models.UpdateTicketRequest) (*models
 			return nil, err
 		}
 	}
+	var epicID *string
+	if req.Epic != nil {
+		if epicID, err = resolveTicketEpic(tx, t.ProjectID, *req.Epic); err != nil {
+			return nil, err
+		}
+	}
 	t.UpdatedAt = time.Now()
 
 	if _, err = tx.Exec(
@@ -554,6 +599,14 @@ func (s *Store) UpdateTicket(id string, req models.UpdateTicketRequest) (*models
 		t.Title, t.Description, t.Status, t.Priority, t.DueDate, t.Position, t.UpdatedAt, t.ID,
 	); err != nil {
 		return nil, err
+	}
+
+	// Written only when asked for, so an update that leaves the epic alone
+	// never writes back the epic read before this transaction began.
+	if req.Epic != nil {
+		if _, err := tx.Exec("UPDATE tickets SET epic_id = ? WHERE id = ?", epicID, id); err != nil {
+			return nil, fmt.Errorf("setting epic: %w", err)
+		}
 	}
 
 	// A nil slice leaves the set untouched; a non-nil one replaces it, so an

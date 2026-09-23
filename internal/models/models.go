@@ -27,6 +27,10 @@ type Ticket struct {
 	CreatedAt   time.Time  `json:"createdAt"`
 	UpdatedAt   time.Time  `json:"updatedAt"`
 
+	// Epic is the epic the ticket belongs to, if any. It is always in the
+	// ticket's own project.
+	Epic *EpicRef `json:"epic,omitempty"`
+
 	// Populated fields (not stored directly)
 	ProjectPrefix string      `json:"projectPrefix,omitempty"`
 	Repos         []string    `json:"repos,omitempty"`
@@ -131,7 +135,10 @@ type CreateTicketRequest struct {
 	// DueDate follows the same "omitted vs explicit" contract as
 	// UpdateTicketRequest.DueDate below, though on create there is nothing to
 	// clear: a nil pointer and a pointer to "" both just mean no due date.
-	DueDate   *string  `json:"dueDate,omitempty"`
+	DueDate *string `json:"dueDate,omitempty"`
+	// Epic follows the same contract as UpdateTicketRequest.Epic; on create a
+	// nil pointer, a pointer to "" and a pointer to "none" all mean no epic.
+	Epic      *string  `json:"epic,omitempty"`
 	Labels    []string `json:"labels,omitempty"`
 	DependsOn []string `json:"dependsOn,omitempty"`
 }
@@ -151,7 +158,16 @@ type UpdateTicketRequest struct {
 	// request with an ErrInvalidInput (HTTP 400) instead of silently dropping
 	// it. This applies identically whether the request came from the HTTP
 	// API, an MCP tool call, or the CLI.
-	DueDate   *string  `json:"dueDate,omitempty"`
+	DueDate *string `json:"dueDate,omitempty"`
+	// Epic has the DueDate contract: nil (omitted or JSON null) leaves the
+	// ticket's epic unchanged, and a pointer to "" removes it from its epic.
+	// So does "none" (any case, surrounding spaces ignored), the value that
+	// means "no epic" everywhere, filters included. A value of only spaces
+	// is an ErrInvalidInput, as it is for a due date. Anything else is an
+	// epic id or name (case-insensitive) in the ticket's own project; a
+	// value that matches no epic there is an ErrInvalidInput. On any error
+	// nothing in the request is applied.
+	Epic      *string  `json:"epic,omitempty"`
 	Position  *float64 `json:"position,omitempty"`
 	Labels    []string `json:"labels,omitempty"`
 	DependsOn []string `json:"dependsOn,omitempty"`
@@ -182,4 +198,8 @@ type TicketFilter struct {
 	Priority  string
 	Repo      string
 	Label     string
+	// Epic is an epic name (case-insensitive) or id, or models.NoEpic
+	// ("none", any case) for tickets without an epic. Without a ProjectID a
+	// name matches that epic in every project.
+	Epic string
 }
