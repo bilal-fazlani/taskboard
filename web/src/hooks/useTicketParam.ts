@@ -20,6 +20,11 @@ export interface TicketParamState<T> {
   closeRequested: boolean;
   /** Open a ticket's editor, which puts its key in the URL. */
   open: (ticket: TicketIdentity) => void;
+  /**
+   * Show another loaded ticket in the open editor, found by id, as a link
+   * between tickets does. Unsaved edits are the editor's to ask about first.
+   */
+  switchTo: (id: string) => void;
   /** Close the editor, which drops only the ticket parameter. */
   close: () => void;
   /** Keep the editor open after all, which puts the ticket parameter back. */
@@ -51,6 +56,10 @@ export interface TicketParamState<T> {
  * replacing it, so opening and closing leaves the history as it was and Back
  * still goes wherever the view came from. An editor opened straight from a
  * link pushed nothing, so closing that one replaces instead.
+ *
+ * Switching from one ticket to another replaces the entry rather than pushing
+ * one, so the editor stays a single entry however many tickets it moved
+ * through: one close, or one Back, leaves it.
  *
  * Unsaved edits are never dropped without asking, whatever asked for the
  * close. A Back that drops the parameter therefore cannot unmount the editor
@@ -127,6 +136,17 @@ export function useTicketParam<T extends TicketIdentity>(
     [params, setParams],
   );
 
+  const switchTo = useCallback(
+    (id: string) => {
+      const ticket = tickets?.find((t) => t.id === id);
+      if (!ticket) return;
+      setDirty(false);
+      setKeptGone(null);
+      setParams(withTicket(latestSearchParams(params), ticket), { replace: true });
+    },
+    [tickets, params, setParams],
+  );
+
   const close = useCallback(() => {
     setDirty(false);
     setKeptGone(null);
@@ -173,5 +193,5 @@ export function useTicketParam<T extends TicketIdentity>(
   );
 
   // setDirty is stable, so the editor's report never re-runs on its own.
-  return { selected, closeRequested, open, close, cancelClose, onDirtyChange: setDirty, url };
+  return { selected, closeRequested, open, switchTo, close, cancelClose, onDirtyChange: setDirty, url };
 }

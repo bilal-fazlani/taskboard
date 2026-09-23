@@ -350,4 +350,49 @@ describe("useTicketParam under BrowserRouter", () => {
     expect(url()).toBe("/table");
     expect(state.selected).toBeNull();
   });
+
+  it("switches to another ticket by id, keeping the filters and the history entry", async () => {
+    await mount("/kanban?status=todo");
+    await act(async () => navigate("/table"));
+    await act(async () => state.open(tickets[0]));
+    await act(async () => state.onDirtyChange(true));
+
+    await act(async () => state.switchTo("01BBB"));
+    expect(url()).toBe("/table?ticket=ACP-25");
+    expect(state.selected?.id).toBe("01BBB");
+    expect(state.closeRequested).toBe(false);
+
+    // The switch replaced the entry opening pushed, so one close leaves the
+    // editor altogether rather than landing back on the first ticket.
+    await act(async () => {
+      state.close();
+      await settle();
+    });
+    expect(url()).toBe("/table");
+    expect(state.selected).toBeNull();
+    await act(async () => {
+      window.history.back();
+      await settle();
+    });
+    expect(url()).toBe("/kanban?status=todo");
+  });
+
+  it("switches from a ticket opened straight from a link, and closes in place", async () => {
+    await mount("/table?ticket=ACP-7");
+    await act(async () => state.switchTo("01BBB"));
+    expect(url()).toBe("/table?ticket=ACP-25");
+    await act(async () => {
+      state.close();
+      await settle();
+    });
+    expect(url()).toBe("/table");
+  });
+
+  it("ignores a switch to a ticket that is not loaded", async () => {
+    await mount("/kanban");
+    await act(async () => state.open(tickets[0]));
+    await act(async () => state.switchTo("01ZZZ"));
+    expect(url()).toBe("/kanban?ticket=ACP-7");
+    expect(state.selected?.id).toBe("01AAA");
+  });
 });

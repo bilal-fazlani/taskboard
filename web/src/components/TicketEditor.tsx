@@ -4,7 +4,7 @@ import Markdown from "react-markdown";
 import { api, type EpicRef, type Ticket, type Project, type Subtask, type TicketWrite } from "../api/client";
 import LabelPicker from "./LabelPicker";
 import RepoPicker from "./RepoPicker";
-import DependencyPicker from "./DependencyPicker";
+import DependencyPicker, { TicketRefLabel } from "./DependencyPicker";
 import { saveErrorMessage } from "../lib/saveError";
 import { STATUSES, STATUS_LABELS, STATUS_STYLES, isStatus } from "../lib/status";
 import {
@@ -40,6 +40,7 @@ export default function TicketEditor({
   onClose,
   onUpdate,
   onDelete,
+  onOpenTicket,
 }: {
   ticket: Ticket;
   projects: Project[];
@@ -60,6 +61,9 @@ export default function TicketEditor({
   // edits when it fails; every page does, since each one refetches after it.
   onUpdate: (id: string, data: TicketWrite) => void | Promise<void>;
   onDelete: (id: string) => void;
+  // Opens another ticket, by id, in this editor's place: what the Depends on
+  // and Blocks rows do when clicked. Without it they are plain text.
+  onOpenTicket?: (id: string) => void;
 }) {
   const [title, setTitle] = useState(ticket.title);
   const [description, setDescription] = useState(ticket.description);
@@ -232,6 +236,12 @@ export default function TicketEditor({
   );
 
   const requestClose = useCallback(() => confirmDiscardThen(onClose), [confirmDiscardThen, onClose]);
+
+  // Following a link to another ticket leaves this one, so it asks about
+  // unsaved edits the way closing does.
+  const openLinked = onOpenTicket
+    ? (id: string) => confirmDiscardThen(() => onOpenTicket(id))
+    : undefined;
 
   // The notice's reload: the latest version replaces the edits, so it asks
   // first, down the same path every other discard takes.
@@ -735,6 +745,7 @@ export default function TicketEditor({
               <DependencyPicker
                 value={dependsOn}
                 excludeTicketId={ticket.id}
+                onOpen={openLinked}
                 onChange={(next) => {
                   setDependsOn(next);
                   markDirty();
@@ -748,10 +759,9 @@ export default function TicketEditor({
                 {detail.blocks.map((ref) => (
                   <div
                     key={ref.id}
-                    className="mb-1.5 flex items-center gap-2 rounded-md border border-slate-800 bg-slate-900/60 px-2.5 py-1.5 opacity-75"
+                    className="mb-1.5 flex items-center gap-2 rounded-md border border-slate-800 bg-slate-900/60 px-2.5 py-1.5 opacity-75 hover:opacity-100"
                   >
-                    <span className="min-w-[52px] font-mono text-[11px] text-slate-400">{ref.key}</span>
-                    <span className="flex-1 truncate text-[12.5px] text-slate-300">{ref.title}</span>
+                    <TicketRefLabel ticketRef={ref} onOpen={openLinked} />
                     <span className="rounded-full bg-slate-800 px-2 py-0.5 text-[10px] text-slate-400">
                       {ref.status.replace("_", " ")}
                     </span>

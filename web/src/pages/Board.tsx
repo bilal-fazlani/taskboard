@@ -195,6 +195,7 @@ export default function Board() {
     selected: selectedTicket,
     closeRequested,
     open: openTicket,
+    switchTo: switchTicket,
     close: closeTicket,
     cancelClose,
     onDirtyChange,
@@ -372,6 +373,7 @@ export default function Board() {
 
       {selectedTicket && (
         <TicketEditor
+          key={selectedTicket.id}
           ticket={selectedTicket}
           projects={projects ?? []}
           ticketUrl={ticketUrl}
@@ -384,6 +386,7 @@ export default function Board() {
           }}
           onUpdate={handleUpdate}
           onDelete={handleDelete}
+          onOpenTicket={switchTicket}
         />
       )}
     </div>

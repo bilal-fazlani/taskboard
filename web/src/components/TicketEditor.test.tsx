@@ -67,7 +67,7 @@ function makeTicket(overrides: Partial<Ticket> = {}): Ticket {
 
 function renderEditor(
   ticket = makeTicket(),
-  extra: { ticketUrl?: string; closeRequested?: boolean } = {},
+  extra: { ticketUrl?: string; closeRequested?: boolean; onOpenTicket?: (id: string) => void } = {},
 ) {
   const onClose = vi.fn();
   const onUpdate = vi.fn();
@@ -827,6 +827,58 @@ describe("a ticket that changed elsewhere", () => {
     await act(async () => rerenderWith({ ticket: makeTicket({ updatedAt: "2026-09-16T23:00:00Z" }) }));
     expect((screen.getByLabelText("Title") as HTMLInputElement).value).toBe("Edited title");
     expect(notice()).toBeNull();
+  });
+});
+
+describe("linked tickets", () => {
+  const withBlocks = () =>
+    mockApi.tickets.get.mockResolvedValue(
+      makeTicket({ blocks: [{ id: "t5", key: "AUTH-5", title: "Release", status: "todo" }] }),
+    );
+
+  it("opens a ticket it depends on", () => {
+    const onOpenTicket = vi.fn();
+    renderEditor(makeTicket(), { onOpenTicket });
+    fireEvent.click(screen.getByRole("button", { name: "Open AUTH-2: Build login UI" }));
+    expect(onOpenTicket).toHaveBeenCalledWith("t2");
+  });
+
+  it("opens a ticket it blocks", async () => {
+    withBlocks();
+    const onOpenTicket = vi.fn();
+    renderEditor(makeTicket(), { onOpenTicket });
+    fireEvent.click(await screen.findByRole("button", { name: "Open AUTH-5: Release" }));
+    expect(onOpenTicket).toHaveBeenCalledWith("t5");
+  });
+
+  it("removes a dependency without opening it", () => {
+    const onOpenTicket = vi.fn();
+    renderEditor(makeTicket(), { onOpenTicket });
+    fireEvent.click(screen.getByRole("button", { name: "Remove dependency AUTH-2" }));
+    expect(onOpenTicket).not.toHaveBeenCalled();
+  });
+
+  it("asks before leaving unsaved edits for a linked ticket", () => {
+    const onOpenTicket = vi.fn();
+    renderEditor(makeTicket(), { onOpenTicket });
+    editTitle();
+    fireEvent.click(screen.getByRole("button", { name: "Open AUTH-2: Build login UI" }));
+    expect(onOpenTicket).not.toHaveBeenCalled();
+
+    fireEvent.click(within(confirmDialog()!).getByRole("button", { name: "Keep editing" }));
+    expect(onOpenTicket).not.toHaveBeenCalled();
+    expect((screen.getByLabelText("Title") as HTMLInputElement).value).toBe("Edited title");
+
+    fireEvent.click(screen.getByRole("button", { name: "Open AUTH-2: Build login UI" }));
+    fireEvent.click(within(confirmDialog()!).getByRole("button", { name: "Discard" }));
+    expect(onOpenTicket).toHaveBeenCalledWith("t2");
+  });
+
+  it("shows plain rows when there is nowhere to open them", async () => {
+    withBlocks();
+    renderEditor();
+    await screen.findByText("Release");
+    expect(screen.queryByRole("button", { name: /^Open AUTH-/ })).toBeNull();
   });
 });
 

@@ -2,14 +2,42 @@ import { useEffect, useState } from "react";
 import { X } from "lucide-react";
 import { api, type Ticket, type TicketRef } from "../api/client";
 
+// A linked ticket's key and title: a button that opens it when there is
+// somewhere to open it, plain text otherwise.
+export function TicketRefLabel({ ticketRef, onOpen }: { ticketRef: TicketRef; onOpen?: (id: string) => void }) {
+  const label = (
+    <>
+      <span className="font-mono text-[11px] text-slate-400 min-w-[52px]">{ticketRef.key}</span>
+      <span className="flex-1 text-[12.5px] text-slate-300 truncate group-hover:text-blue-300 group-hover:underline">
+        {ticketRef.title}
+      </span>
+    </>
+  );
+  if (!onOpen) return label;
+  return (
+    <button
+      type="button"
+      onClick={() => onOpen(ticketRef.id)}
+      aria-label={`Open ${ticketRef.key}: ${ticketRef.title}`}
+      title={`Open ${ticketRef.key}`}
+      className="group flex min-w-0 flex-1 items-center gap-2 text-left"
+    >
+      {label}
+    </button>
+  );
+}
+
 export default function DependencyPicker({
   value,
   onChange,
   excludeTicketId,
+  onOpen,
 }: {
   value: TicketRef[];
   onChange: (refs: TicketRef[]) => void;
   excludeTicketId: string;
+  // Opens a dependency by id; without it the rows are plain text.
+  onOpen?: (id: string) => void;
 }) {
   const [all, setAll] = useState<Ticket[]>([]);
   const [query, setQuery] = useState("");
@@ -38,8 +66,7 @@ export default function DependencyPicker({
           key={ref.id}
           className="flex items-center gap-2 rounded-md border border-slate-800 bg-slate-900/60 px-2.5 py-1.5"
         >
-          <span className="font-mono text-[11px] text-slate-400 min-w-[52px]">{ref.key}</span>
-          <span className="flex-1 text-[12.5px] text-slate-300 truncate">{ref.title}</span>
+          <TicketRefLabel ticketRef={ref} onOpen={onOpen} />
           <span className="rounded-full bg-slate-800 px-2 py-0.5 text-[10px] text-slate-400">
             {ref.status.replace("_", " ")}
           </span>

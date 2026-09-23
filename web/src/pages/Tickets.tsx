@@ -93,6 +93,7 @@ export default function Tickets() {
     selected: selectedTicket,
     closeRequested,
     open: openTicket,
+    switchTo: switchTicket,
     close: closeTicket,
     cancelClose,
     onDirtyChange,
@@ -304,6 +305,7 @@ export default function Tickets() {
 
       {selectedTicket && (
         <TicketEditor
+          key={selectedTicket.id}
           ticket={selectedTicket}
           projects={projects}
           ticketUrl={ticketUrl}
@@ -316,6 +318,7 @@ export default function Tickets() {
           }}
           onUpdate={handleUpdate}
           onDelete={handleDelete}
+          onOpenTicket={switchTicket}
         />
       )}
     </div>

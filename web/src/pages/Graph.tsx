@@ -214,6 +214,7 @@ export default function Graph() {
     selected: selectedTicket,
     closeRequested,
     open: openSelected,
+    switchTo: switchTicket,
     close: closeSelected,
     cancelClose,
     onDirtyChange,
@@ -742,6 +743,7 @@ export default function Graph() {
 
       {selectedTicket && (
         <TicketEditor
+          key={selectedTicket.id}
           ticket={selectedTicket}
           projects={projects ?? []}
           ticketUrl={ticketUrl}
@@ -754,6 +756,7 @@ export default function Graph() {
           }}
           onUpdate={handleUpdate}
           onDelete={handleDelete}
+          onOpenTicket={switchTicket}
         />
       )}
     </div>
