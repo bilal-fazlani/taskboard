@@ -24,6 +24,9 @@
 //   filtered it out, say) is not an edge either. It counts towards the node's
 //   externalBlockerCount, and the node is placed at least one column right of
 //   Ready, since it is blocked by something even if that thing isn't drawn.
+// - A node's dependencyTotal is its distinct dependencies of every kind: done
+//   ones, ones drawn as an edge (back edges included), and hidden blockers.
+//   Duplicate refs to the same ticket count once, for every count above.
 // - Cycles are allowed. A depth-first search marks the edges that close a
 //   cycle as back edges; those are returned flagged and ignored for columns
 //   and row ordering, which leaves a DAG. The search only starts inside
@@ -69,6 +72,12 @@ export interface GraphNode<T extends GraphTicket = GraphTicket> {
   satisfiedDependencyCount: number;
   /** Distinct unfinished dependencies that are not in the input set, so have no edge. */
   externalBlockerCount: number;
+  /**
+   * All of the ticket's distinct dependencies: done ones, ones drawn as an
+   * edge (back edges included), and hidden blockers. satisfiedDependencyCount
+   * and externalBlockerCount are both no bigger than this.
+   */
+  dependencyTotal: number;
 }
 
 export interface GraphEdge {
@@ -181,6 +190,7 @@ export function computeGraphTopology<T extends GraphTicket>(tickets: readonly T[
   const successors: number[][] = open.map(() => []);
   const satisfied = new Array<number>(count).fill(0);
   const external = new Array<number>(count).fill(0);
+  const total = new Array<number>(count).fill(0);
   for (let v = 0; v < count; v++) {
     const seen = new Set<string>();
     for (const ref of open[v].dependsOn ?? []) {
@@ -198,6 +208,8 @@ export function computeGraphTopology<T extends GraphTicket>(tickets: readonly T[
         external[v]++;
       }
     }
+    // Every distinct ref lands in exactly one of the three buckets above.
+    total[v] = seen.size;
   }
 
   const back = breakCycles(successors, external);
@@ -260,6 +272,7 @@ export function computeGraphTopology<T extends GraphTicket>(tickets: readonly T[
       active: active[v],
       satisfiedDependencyCount: satisfied[v],
       externalBlockerCount: external[v],
+      dependencyTotal: total[v],
     })),
   );
   const edges: GraphEdge[] = successors.flatMap((vs, u) =>

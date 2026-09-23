@@ -8,7 +8,7 @@ import DependencyBand from "./DependencyBand";
 import PriorityBadge from "./PriorityBadge";
 
 /** What the graph knows about a card's dependencies, beyond the ticket itself. */
-export type GraphCardInfo = Pick<GraphNode, "satisfiedDependencyCount" | "externalBlockerCount">;
+export type GraphCardInfo = Pick<GraphNode, "satisfiedDependencyCount" | "externalBlockerCount" | "dependencyTotal">;
 
 function SubtaskProgress({ subtasks }: { subtasks: Ticket["subtasks"] }) {
   if (!subtasks || subtasks.length === 0) return null;
@@ -44,7 +44,7 @@ function StatusDot({ status, attention }: { status: string; attention: string })
 // view are already drawn as arrows: what's left to say is how many are done
 // and how many block the ticket from off the page.
 function GraphDependencies({ graph }: { graph: GraphCardInfo }) {
-  const satisfied = satisfiedDependenciesText(graph.satisfiedDependencyCount);
+  const satisfied = satisfiedDependenciesText(graph.satisfiedDependencyCount, graph.dependencyTotal);
   const hidden = hiddenBlockersText(graph.externalBlockerCount);
   if (!satisfied && !hidden) return null;
   return (

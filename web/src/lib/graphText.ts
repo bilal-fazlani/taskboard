@@ -8,10 +8,14 @@ export function columnHeading(index: number): string {
   return `Blocked · ${index} ${index === 1 ? "step" : "steps"}`;
 }
 
-/** "1 dependency done", "3 dependencies done", or null when there are none. */
-export function satisfiedDependenciesText(count: number): string | null {
-  if (count <= 0) return null;
-  return `${count} ${count === 1 ? "dependency" : "dependencies"} done`;
+/**
+ * "1 of 2 dependencies done", "3 of 3 dependencies done", "1 of 1 dependency
+ * done", or null when none are done. The noun agrees with the total, not the
+ * done count, since it always names every dependency, not just the done ones.
+ */
+export function satisfiedDependenciesText(done: number, total: number): string | null {
+  if (done <= 0) return null;
+  return `${done} of ${total} ${total === 1 ? "dependency" : "dependencies"} done`;
 }
 
 /**

@@ -117,7 +117,7 @@ function referenceModel(input: GraphTicket[]) {
     return found;
   };
 
-  return { ids, blockers, external, componentOf, referenceBackEdges };
+  return { ids, refs, blockers, external, componentOf, referenceBackEdges };
 }
 
 describe("computeGraphTopology", () => {
@@ -188,6 +188,8 @@ describe("computeGraphTopology", () => {
     expect(byId["A-3"].satisfiedDependencyCount).toBe(3);
     expect(byId["A-4"].satisfiedDependencyCount).toBe(1);
     expect(byId["A-3"].externalBlockerCount).toBe(0);
+    expect(byId["A-3"].dependencyTotal).toBe(3);
+    expect(byId["A-4"].dependencyTotal).toBe(2);
   });
 
   it("trusts an input ticket's own status over a stale ref", () => {
@@ -200,6 +202,7 @@ describe("computeGraphTopology", () => {
     expect(topology.columns).toEqual([["A-2"]]);
     expect(topology.nodes[0].satisfiedDependencyCount).toBe(1);
     expect(topology.nodes[0].externalBlockerCount).toBe(0);
+    expect(topology.nodes[0].dependencyTotal).toBe(1);
   });
 
   it("counts a repeated dependency once", () => {
@@ -209,6 +212,7 @@ describe("computeGraphTopology", () => {
     ]);
     const topology = computeGraphTopology([a, b]);
     expect(edgeList(topology)).toEqual(["A-1->A-2"]);
+    expect(topology.nodes.find((n) => n.id === "A-2")!.dependencyTotal).toBe(1);
   });
 
   it("holds a ticket with an unfinished dependency outside the input out of Ready", () => {
@@ -232,6 +236,32 @@ describe("computeGraphTopology", () => {
     // external blocker don't add up.
     expect(edgeList(topology)).toEqual(["A-1->A-4", "A-2->A-3"]);
     expect(columnOf(topology)).toEqual({ "A-1": 0, "A-2": 1, "A-3": 2, "A-4": 1 });
+    // A-2: X-1, X-2, X-3, all distinct. A-4: A-1 and X-1.
+    expect(byId["A-2"].dependencyTotal).toBe(3);
+    expect(byId["A-4"].dependencyTotal).toBe(2);
+  });
+
+  it("totals every distinct dependency once, across done, edge, back-edge and hidden kinds", () => {
+    const topology = computeGraphTopology(
+      tickets(
+        [
+          ["A-1", "done"],
+          ["A-2", "todo", ["A-3"]],
+          ["A-3", "todo", ["A-2", "A-1", "A-1", "X-1", "X-2"]],
+        ],
+        { "X-1": "todo", "X-2": "done" },
+      ),
+    );
+    const byId = Object.fromEntries(topology.nodes.map((n) => [n.id, n]));
+    // A-3 depends on: A-2 (a back edge, since A-2 and A-3 form a cycle), A-1
+    // twice (done, deduped to one), X-1 (hidden: unfinished and off the page)
+    // and X-2 (done outside the input): four distinct dependencies.
+    expect(edgeList(topology)).toEqual(["A-2->A-3 back", "A-3->A-2"]);
+    expect(byId["A-3"].satisfiedDependencyCount).toBe(2);
+    expect(byId["A-3"].externalBlockerCount).toBe(1);
+    expect(byId["A-3"].dependencyTotal).toBe(4);
+    // A-2's only dependency is its edge to A-3.
+    expect(byId["A-2"].dependencyTotal).toBe(1);
   });
 
   it("leaves Ready empty when every otherwise-ready ticket has an external blocker", () => {
@@ -557,8 +587,9 @@ describe("computeGraphTopology", () => {
       const input = tickets(specs, outside);
       const topology = computeGraphTopology(input);
       const model = referenceModel(input);
-      const { ids, blockers, external } = model;
+      const { ids, refs, blockers, external } = model;
       const column = columnOf(topology);
+      const byId = Object.fromEntries(topology.nodes.map((n) => [n.id, n]));
       const back = new Set(topology.edges.filter((e) => e.back).map((e) => `${e.from}->${e.to}`));
       const label = `graph ${graph}: ${JSON.stringify(specs)}`;
       backEdges += back.size;
@@ -589,6 +620,12 @@ describe("computeGraphTopology", () => {
       // of their lowest ticket, from the lowest ticket with an external
       // blocker or else the lowest, and follows edges in ticket order.
       expect([...back].sort(), label).toEqual(model.referenceBackEdges().sort());
+
+      // dependencyTotal is every distinct ref, whatever kind it turns out to
+      // be: done, an edge (back edges included), or hidden.
+      ids.forEach((id, v) => {
+        expect(byId[id].dependencyTotal, `${label} total of ${id}`).toBe(refs[v].length);
+      });
 
       // Every other edge runs left to right, and each column is the longest
       // path in, raised to 1 by an external blocker.

@@ -11,10 +11,15 @@ describe("columnHeading", () => {
 });
 
 describe("satisfiedDependenciesText", () => {
-  it("is absent without done dependencies and pluralises otherwise", () => {
-    expect(satisfiedDependenciesText(0)).toBeNull();
-    expect(satisfiedDependenciesText(1)).toBe("1 dependency done");
-    expect(satisfiedDependenciesText(3)).toBe("3 dependencies done");
+  it("is absent without done dependencies", () => {
+    expect(satisfiedDependenciesText(0, 0)).toBeNull();
+    expect(satisfiedDependenciesText(0, 2)).toBeNull();
+  });
+
+  it("shows done against the total, agreeing the noun with the total", () => {
+    expect(satisfiedDependenciesText(1, 2)).toBe("1 of 2 dependencies done");
+    expect(satisfiedDependenciesText(3, 3)).toBe("3 of 3 dependencies done");
+    expect(satisfiedDependenciesText(1, 1)).toBe("1 of 1 dependency done");
   });
 });
 
