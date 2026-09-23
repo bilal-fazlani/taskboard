@@ -18,6 +18,9 @@ const mockApi = vi.hoisted(() => ({
   labels: {
     list: vi.fn(),
   },
+  epics: {
+    list: vi.fn(),
+  },
 }));
 
 vi.mock("../api/client", () => ({ api: mockApi }));
@@ -102,7 +105,14 @@ function renderEditor(
 
 const saveButton = () => screen.queryByRole("button", { name: "Save Changes" });
 
+const NO_PROGRESS = { counts: {}, total: 0, complete: false, lastActivityAt: null };
+const epicList = (...names: string[]) => ({
+  epics: names.map((name) => ({ ...NO_PROGRESS, id: `e-${name}`, projectId: "p1", name, createdAt: "", updatedAt: "" })),
+  noEpic: NO_PROGRESS,
+});
+
 beforeEach(() => {
+  mockApi.epics.list.mockResolvedValue(epicList());
   mockApi.tickets.get.mockImplementation((id: string) => Promise.resolve(makeTicket({ id })));
   mockApi.tickets.list.mockResolvedValue([]);
   mockApi.labels.list.mockResolvedValue([]);
@@ -970,5 +980,106 @@ describe("a close asked for by the URL", () => {
     expect(onClose).not.toHaveBeenCalled();
     rerenderWith({ closeRequested: false });
     expect(confirmDialog()).toBeNull();
+  });
+});
+
+// The Epic select sits in the fields grid beside Due date. It offers "No
+// epic" and the project's epics by name, and saves through the ticket's epic
+// field, merging with changes made elsewhere like every other field.
+describe("the epic picker", () => {
+  const epicSelect = () => screen.getByLabelText("Epic") as HTMLSelectElement;
+  const optionNames = () => [...epicSelect().options].map((o) => o.textContent);
+  const inViews = { epic: { id: "e-Views", name: "Views" } };
+
+  beforeEach(() => {
+    mockApi.epics.list.mockResolvedValue(epicList("Views", "agents", "Realtime"));
+    mockApi.tickets.get.mockImplementation((id: string) => Promise.resolve(makeTicket({ id, ...inViews })));
+  });
+
+  async function settled() {
+    await waitFor(() => expect(mockApi.epics.list).toHaveBeenCalled());
+    await act(async () => {});
+  }
+
+  it("sits beside Due date in the fields grid", async () => {
+    renderEditor(makeTicket(inViews));
+    await settled();
+    const grid = screen.getByLabelText("Due Date").closest(".grid")!;
+    const labels = [...grid.querySelectorAll(":scope > div > label, :scope > div > span")].map((l) => l.textContent);
+    expect(labels).toEqual(["Status", "Priority", "Due Date", "Epic", "Project"]);
+  });
+
+  it("offers No epic and the project's epics by name, with the ticket's selected", async () => {
+    renderEditor(makeTicket(inViews));
+    await settled();
+    expect(mockApi.epics.list).toHaveBeenCalledWith("p1");
+    expect(optionNames()).toEqual(["No epic", "agents", "Realtime", "Views"]);
+    expect(epicSelect().value).toBe("e-Views");
+  });
+
+  it("shows No epic for a ticket without one", async () => {
+    mockApi.tickets.get.mockImplementation((id: string) => Promise.resolve(makeTicket({ id })));
+    renderEditor(makeTicket());
+    await settled();
+    expect(epicSelect().value).toBe("");
+    expect(epicSelect().selectedOptions[0].textContent).toBe("No epic");
+  });
+
+  it("shows the ticket's epic before the project's epics arrive, and if they never do", async () => {
+    mockApi.epics.list.mockRejectedValue(new Error("offline"));
+    renderEditor(makeTicket(inViews));
+    expect(epicSelect().value).toBe("e-Views");
+    await settled();
+    expect(optionNames()).toEqual(["No epic", "Views"]);
+    expect(epicSelect().value).toBe("e-Views");
+  });
+
+  it("saves a chosen epic by id", async () => {
+    const { onUpdate } = renderEditor(makeTicket(inViews));
+    await settled();
+    fireEvent.change(epicSelect(), { target: { value: "e-Realtime" } });
+    await act(async () => fireEvent.click(saveButton()!));
+    expect(onUpdate).toHaveBeenCalledWith("t1", { epic: "e-Realtime" });
+  });
+
+  it("saves No epic as the API's explicit clear", async () => {
+    const { onUpdate } = renderEditor(makeTicket(inViews));
+    await settled();
+    fireEvent.change(epicSelect(), { target: { value: "" } });
+    await act(async () => fireEvent.click(saveButton()!));
+    expect(onUpdate).toHaveBeenCalledWith("t1", { epic: "" });
+  });
+
+  it("leaves the epic out when it wasn't touched, so a change elsewhere survives", async () => {
+    const { onUpdate, rerenderWith } = renderEditor(makeTicket(inViews));
+    await settled();
+    editTitle("Mine");
+    const next = makeTicket({ updatedAt: "2026-09-23T18:00:00Z", epic: { id: "e-agents", name: "agents" } });
+    mockApi.tickets.get.mockResolvedValue(next);
+    await act(async () => rerenderWith({ ticket: next }));
+    await act(async () => fireEvent.click(saveButton()!));
+    expect(onUpdate).toHaveBeenCalledWith("t1", { title: "Mine" });
+  });
+
+  it("keeps the user's epic when the server changed only other fields", async () => {
+    const { onUpdate, rerenderWith } = renderEditor(makeTicket(inViews));
+    await settled();
+    fireEvent.change(epicSelect(), { target: { value: "e-agents" } });
+    const next = makeTicket({ updatedAt: "2026-09-23T18:00:00Z", status: "done", ...inViews });
+    mockApi.tickets.get.mockResolvedValue(next);
+    await act(async () => rerenderWith({ ticket: next }));
+    expect(epicSelect().value).toBe("e-agents");
+    await act(async () => fireEvent.click(saveButton()!));
+    expect(onUpdate).toHaveBeenCalledWith("t1", { epic: "e-agents" });
+  });
+
+  it("follows an epic changed elsewhere when nothing is unsaved", async () => {
+    const { rerenderWith } = renderEditor(makeTicket(inViews));
+    await settled();
+    const next = makeTicket({ updatedAt: "2026-09-23T18:00:00Z", epic: { id: "e-Realtime", name: "Realtime" } });
+    mockApi.tickets.get.mockResolvedValue(next);
+    await act(async () => rerenderWith({ ticket: next }));
+    expect(epicSelect().value).toBe("e-Realtime");
+    expect(saveButton()).toBeNull();
   });
 });

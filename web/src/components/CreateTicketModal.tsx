@@ -1,10 +1,10 @@
-import { useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { X } from "lucide-react";
-import type { TicketWrite, Project } from "../api/client";
+import { api, type TicketWrite, type Project } from "../api/client";
 import LabelPicker from "./LabelPicker";
 import { DEFAULT_STATUS } from "../lib/status";
 import type { Filters } from "../lib/filters";
-import { newTicketDefaults } from "../lib/newTicketDefaults";
+import { newTicketDefaults, type ProjectEpics } from "../lib/newTicketDefaults";
 
 const PRIORITIES = ["urgent", "high", "medium", "low"];
 
@@ -16,7 +16,7 @@ export default function CreateTicketModal({
   onCreate,
 }: {
   projects: Project[];
-  /** The view's filters, which the form starts from: the project the view shows. */
+  /** The view's filters, which the form starts from: the project the view shows, and the epic it filters by. */
   filters: Filters;
   defaultStatus?: string;
   onClose: () => void;
@@ -25,8 +25,32 @@ export default function CreateTicketModal({
   // Null until the user picks a project. Until then the form follows the
   // view's, so projects that load after the form opens still preselect it.
   const [pickedProjectId, setPickedProjectId] = useState<string | null>(null);
-  const defaults = newTicketDefaults(filters, projects);
+  // The epics of the project the form is on, tagged with it so a list for the
+  // project just left is never offered for the new one.
+  const [epics, setEpics] = useState<ProjectEpics | null>(null);
+  // Null until the user picks an epic, and again when they pick another
+  // project. Until then the form follows the view's epic filter, once the
+  // project's epics have loaded, as long as it is on the view's project.
+  const [pickedEpicId, setPickedEpicId] = useState<string | null>(null);
+  const defaults = newTicketDefaults(filters, projects, epics);
   const projectId = pickedProjectId ?? defaults.projectId;
+  const epicId = pickedEpicId ?? defaults.epicId;
+  const projectEpics = epics && epics.projectId === projectId ? epics.epics : [];
+  const epicFieldId = useId();
+
+  useEffect(() => {
+    if (!projectId) return;
+    let cancelled = false;
+    api.epics
+      .list(projectId)
+      .then((list) => {
+        if (!cancelled) setEpics({ projectId, epics: list?.epics ?? [] });
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [priority, setPriority] = useState("medium");
@@ -44,6 +68,7 @@ export default function CreateTicketModal({
       status: defaultStatus || DEFAULT_STATUS,
       dueDate: dueDate || undefined,
       labels,
+      epic: epicId || undefined,
     });
     setLabels([]);
   };
@@ -72,7 +97,10 @@ export default function CreateTicketModal({
             </label>
             <select
               value={projectId}
-              onChange={(e) => setPickedProjectId(e.target.value)}
+              onChange={(e) => {
+                setPickedProjectId(e.target.value);
+                setPickedEpicId(null);
+              }}
               required
               className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
             >
@@ -82,6 +110,27 @@ export default function CreateTicketModal({
                   {p.icon} {p.name}
                 </option>
               ))}
+            </select>
+          </div>
+
+          <div>
+            <label htmlFor={epicFieldId} className="block text-xs font-medium text-slate-400 mb-1.5">
+              Epic
+            </label>
+            <select
+              id={epicFieldId}
+              value={epicId}
+              onChange={(e) => setPickedEpicId(e.target.value)}
+              className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+            >
+              <option value="">No epic</option>
+              {[...projectEpics]
+                .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }))
+                .map((e) => (
+                  <option key={e.id} value={e.id}>
+                    {e.name}
+                  </option>
+                ))}
             </select>
           </div>
 

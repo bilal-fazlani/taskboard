@@ -9,11 +9,15 @@ import { LAST_PROJECT_KEY } from "../lib/defaultProject";
 import { DEBOUNCE_MS } from "../lib/liveRefresh";
 import { memoryStorage } from "../test/memoryStorage";
 
-// Web tests never reach a server: the bar loads the projects and labels it
-// offers, and nothing else.
-const { labelList, projectList } = vi.hoisted(() => ({ labelList: vi.fn(), projectList: vi.fn() }));
+// Web tests never reach a server: the bar loads the projects, epics and
+// labels it offers, and nothing else.
+const { labelList, projectList, epicList } = vi.hoisted(() => ({
+  labelList: vi.fn(),
+  projectList: vi.fn(),
+  epicList: vi.fn(),
+}));
 vi.mock("../api/client", () => ({
-  api: { labels: { list: labelList }, projects: { list: projectList } },
+  api: { labels: { list: labelList }, projects: { list: projectList }, epics: { list: epicList } },
 }));
 
 // jsdom has no EventSource. This stand-in lets one test deliver the `changed`
@@ -54,6 +58,11 @@ const project = (prefix: string, name = "Alpha", status = "active") => ({
   status,
   createdAt: "",
   updatedAt: "",
+});
+const NO_PROGRESS = { counts: {}, total: 0, complete: false, lastActivityAt: null };
+const epicListOf = (names: string[], projectId = "ALP") => ({
+  epics: names.map((name) => ({ ...NO_PROGRESS, id: `e-${name}`, projectId, name, createdAt: "", updatedAt: "" })),
+  noEpic: NO_PROGRESS,
 });
 type ActivityTicket = { projectPrefix: string; updatedAt: string };
 const touched = (projectPrefix: string, updatedAt: string): ActivityTicket => ({ projectPrefix, updatedAt });
@@ -115,6 +124,7 @@ beforeEach(() => {
   vi.stubGlobal("localStorage", memoryStorage());
   labelList.mockResolvedValue([label("web")]);
   projectList.mockResolvedValue([project("ALP")]);
+  epicList.mockResolvedValue(epicListOf([]));
 });
 
 afterEach(() => {
@@ -600,5 +610,154 @@ describe("archived projects and the project order", () => {
     await mount("/?project=OLD", true);
     expect(search()).toBe("?project=OLD");
     expect(select("Project").value).toBe("OLD");
+  });
+});
+
+// The epic filter sits right after Project, since epics belong to it, and
+// offers the shown project's epics. Like a deleted label, an epic the shown
+// project doesn't have leaves the URL, which is what drops it on a switch to
+// another project.
+describe("the epic filter", () => {
+  const change = async (name: string, value: string) =>
+    act(async () => {
+      select(name).value = value;
+      select(name).dispatchEvent(new Event("change", { bubbles: true }));
+    });
+  const labels = () => [...select("Epic").options].map((o) => o.textContent);
+
+  beforeEach(() => {
+    projectList.mockResolvedValue([project("ALP"), project("BET", "Beta")]);
+    epicList.mockImplementation(async (prefix: string) =>
+      prefix === "ALP" ? epicListOf(["Views", "agents", "Realtime"]) : epicListOf(["Billing"], "BET"),
+    );
+  });
+
+  it("comes right after Project", async () => {
+    await mount("/?project=ALP", true);
+    const names = [...container.querySelectorAll("select")].map((el) => el.getAttribute("aria-label"));
+    expect(names.slice(0, 3)).toEqual(["Project", "Epic", "Status"]);
+  });
+
+  it("offers All epics, No epic, then the shown project's epics by name", async () => {
+    await mount("/?project=ALP", true);
+    expect(epicList).toHaveBeenCalledWith("ALP");
+    expect(labels()).toEqual(["All epics", "No epic", "agents", "Realtime", "Views"]);
+    expect([...select("Epic").options].map((o) => o.value)).toEqual(["", "none", "agents", "Realtime", "Views"]);
+    expect(select("Epic").value).toBe("");
+  });
+
+  it("writes the chosen epic, or none, to the URL, and All epics removes it", async () => {
+    await mount("/?project=ALP", true);
+    await change("Epic", "Views");
+    expect(search()).toBe("?project=ALP&epic=Views");
+    expect(state.active).toBe(true);
+    await change("Epic", "none");
+    expect(search()).toBe("?project=ALP&epic=none");
+    await change("Epic", "");
+    expect(search()).toBe("?project=ALP");
+  });
+
+  it("selects the epic a URL names in another case, without a duplicate", async () => {
+    await mount("/?project=ALP&epic=VIEWS", true);
+    expect(select("Epic").value).toBe("Views");
+    expect(labels()).toEqual(["All epics", "No epic", "agents", "Realtime", "Views"]);
+    expect(search()).toBe("?project=ALP&epic=VIEWS");
+  });
+
+  it("is cleared by Clear filters, which keeps the project", async () => {
+    await mount("/?project=ALP&epic=Views", true);
+    const clear = [...container.querySelectorAll("button")].find((b) => b.textContent?.includes("Clear filters"))!;
+    await act(async () => clear.click());
+    expect(search()).toBe("?project=ALP");
+    expect(select("Epic").value).toBe("");
+  });
+
+  it("drops an epic the shown project doesn't have, keeping the other filters", async () => {
+    await mount("/?project=ALP&epic=Fleet&status=todo", true);
+    expect(search()).toBe("?project=ALP&status=todo");
+  });
+
+  it("keeps No epic whatever the project's epics are", async () => {
+    epicList.mockResolvedValue(epicListOf([]));
+    await mount("/?project=ALP&epic=none", true);
+    expect(search()).toBe("?project=ALP&epic=none");
+    expect(select("Epic").value).toBe("none");
+  });
+
+  it("is dropped by a switch to a project without that epic, once its epics have loaded", async () => {
+    await mount("/?project=ALP&epic=Views&status=todo", true);
+    expect(search()).toBe("?project=ALP&epic=Views&status=todo");
+    let load!: (list: ReturnType<typeof epicListOf>) => void;
+    epicList.mockImplementation(() => new Promise((resolve) => (load = resolve)));
+    await change("Project", "BET");
+    expect(epicList).toHaveBeenLastCalledWith("BET");
+    // The last project's epics say nothing about this one's.
+    expect(search()).toBe("?project=BET&epic=Views&status=todo");
+    await act(async () => load(epicListOf(["Billing"], "BET")));
+    expect(search()).toBe("?project=BET&status=todo");
+    expect(labels()).toEqual(["All epics", "No epic", "Billing"]);
+  });
+
+  it("keeps No epic across a switch of project", async () => {
+    await mount("/?project=ALP&epic=none", true);
+    await change("Project", "BET");
+    expect(search()).toBe("?project=BET&epic=none");
+  });
+
+  it("ignores the epics of a project no longer shown when they arrive late", async () => {
+    let loadAlp!: (list: ReturnType<typeof epicListOf>) => void;
+    epicList.mockImplementation((prefix: string) =>
+      prefix === "ALP"
+        ? new Promise((resolve) => (loadAlp = resolve))
+        : Promise.resolve(epicListOf(["Billing", "Invoices"], "BET")),
+    );
+    await mount("/?project=ALP&epic=Billing", true);
+    await change("Project", "BET");
+    expect(search()).toBe("?project=BET&epic=Billing");
+    expect(labels()).toEqual(["All epics", "No epic", "Billing", "Invoices"]);
+    await act(async () => loadAlp(epicListOf(["Views"])));
+    // BET's epics are still the ones offered: Invoices, which the URL doesn't
+    // name, would be gone had ALP's late answer replaced them.
+    expect(search()).toBe("?project=BET&epic=Billing");
+    expect(labels()).toEqual(["All epics", "No epic", "Billing", "Invoices"]);
+  });
+
+  it("keeps an epic a URL names for another project while that project's epics load", async () => {
+    await mount("/?project=ALP", true);
+    expect(labels()).toEqual(["All epics", "No epic", "agents", "Realtime", "Views"]);
+    let loadBet!: (list: ReturnType<typeof epicListOf>) => void;
+    epicList.mockImplementation(() => new Promise((resolve) => (loadBet = resolve)));
+    await act(async () => navigate("/?project=BET&epic=Billing"));
+    // ALP's epics, still the last loaded, don't have Billing, and must not
+    // count against BET's.
+    expect(search()).toBe("?project=BET&epic=Billing");
+    await act(async () => loadBet(epicListOf(["Billing"], "BET")));
+    expect(search()).toBe("?project=BET&epic=Billing");
+    expect(select("Epic").value).toBe("Billing");
+  });
+
+  it("keeps an epic until the epics have loaded, and one they could not load", async () => {
+    epicList.mockRejectedValue(new Error("offline"));
+    await mount("/?project=ALP&epic=Views", true);
+    await act(async () => {});
+    expect(search()).toBe("?project=ALP&epic=Views");
+    // A value naming no epic the bar knows still shows, as written.
+    expect(select("Epic").value).toBe("Views");
+  });
+
+  it("drops an epic deleted elsewhere on a live change", async () => {
+    (globalThis as unknown as { EventSource?: unknown }).EventSource = FakeEvents;
+    try {
+      await mount("/?project=ALP&epic=Views", true);
+      expect(search()).toBe("?project=ALP&epic=Views");
+      epicList.mockResolvedValue(epicListOf(["agents"]));
+      await act(async () => {
+        FakeEvents.opened[FakeEvents.opened.length - 1].emit("changed");
+        await new Promise((resolve) => setTimeout(resolve, DEBOUNCE_MS + 20));
+      });
+      expect(search()).toBe("?project=ALP");
+    } finally {
+      delete (globalThis as unknown as { EventSource?: unknown }).EventSource;
+    }
   });
 });

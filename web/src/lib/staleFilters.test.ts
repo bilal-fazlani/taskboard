@@ -22,7 +22,27 @@ describe("staleFilters", () => {
     // Fixed sets and free text: nothing here can name a deleted record.
     const set = filters({ status: "todo", priority: "high", repo: "nobody/nothing", q: "gone" });
     expect(staleFilters(set, known)).toEqual([]);
-    expect(CHECKED_FILTERS).toEqual(["project", "label"]);
+    expect(CHECKED_FILTERS).toEqual(["project", "epic", "label"]);
+  });
+
+  it("drops an epic the shown project doesn't have, ignoring case otherwise", () => {
+    const withEpics = { ...known, epics: ["Views", "Agents"] };
+    expect(staleFilters(filters({ project: "ACP", epic: "Fleet" }), withEpics)).toEqual(["epic"]);
+    expect(staleFilters(filters({ project: "ACP", epic: "views" }), withEpics)).toEqual([]);
+    // Another project's epics: what a switch to a project without it leaves.
+    expect(staleFilters(filters({ project: "IAGML", epic: "Views" }), { ...known, epics: ["Billing"] })).toEqual(["epic"]);
+    expect(staleFilters(filters({ project: "IAGML", epic: "Views" }), { ...known, epics: [] })).toEqual(["epic"]);
+  });
+
+  it("keeps none, which names no epic, whatever the epics are", () => {
+    for (const epic of ["none", "NONE"]) {
+      expect(staleFilters(filters({ project: "ACP", epic }), { ...known, epics: [] })).toEqual([]);
+    }
+  });
+
+  it("keeps an epic until the shown project's epics are known", () => {
+    expect(staleFilters(filters({ project: "ACP", epic: "Fleet" }), { ...known, epics: null })).toEqual([]);
+    expect(staleFilters(filters({ project: "ACP", epic: "Fleet" }), known)).toEqual([]);
   });
 
   it("drops only what is stale, leaving the other filters alone", () => {

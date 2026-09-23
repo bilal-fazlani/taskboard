@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Search, X } from "lucide-react";
-import { api, type Label, type Project } from "../api/client";
+import { api, type Epic, type Label, type Project } from "../api/client";
 import type { FilterState } from "../hooks/useFilters";
 import { useLiveRefresh } from "../hooks/useLiveRefresh";
 import {
@@ -13,7 +13,7 @@ import {
   rememberProject,
   type ActivityTicket,
 } from "../lib/defaultProject";
-import { selectOptions, urlValue, type FilterKey, type SelectOption } from "../lib/filters";
+import { NO_EPIC, selectOptions, urlValue, type FilterKey, type SelectOption } from "../lib/filters";
 import { PRIORITIES } from "../lib/priority";
 import { staleFilters } from "../lib/staleFilters";
 import { STATUSES, STATUS_LABELS } from "../lib/status";
@@ -31,6 +31,7 @@ function FilterSelect({
   value,
   options,
   ignoreCase,
+  maxWidth,
   onChange,
 }: {
   name: string;
@@ -42,6 +43,8 @@ function FilterSelect({
   options: SelectOption[];
   /** Whether the filter matches ignoring case, so a URL value in another case selects its option. */
   ignoreCase?: boolean;
+  /** A width class to cap the control at, for options whose names can run long. */
+  maxWidth?: string;
   onChange: (value: string) => void;
 }) {
   const shown = selectOptions(options, value, ignoreCase);
@@ -50,7 +53,7 @@ function FilterSelect({
       aria-label={name}
       value={shown.value}
       onChange={(e) => onChange(e.target.value)}
-      className={controlClass(value !== "")}
+      className={`${controlClass(value !== "")}${maxWidth ? ` ${maxWidth} truncate` : ""}`}
     >
       {allLabel !== undefined ? (
         <option value="">{allLabel}</option>
@@ -102,6 +105,10 @@ export default function FilterPanel({
   // is "not loaded", which is where a failed load leaves it too.
   const [projects, setProjects] = useState<Project[] | null>(null);
   const [labels, setLabels] = useState<Label[] | null>(null);
+  // The epics of the project shown, with the prefix they were loaded for, so
+  // a list that belongs to the project just left is never taken for the new
+  // one's. Null until the first load.
+  const [epics, setEpics] = useState<{ project: string; epics: Epic[] } | null>(null);
 
   // The search box keeps what was typed in its own state. The URL only
   // catches up inside a transition, and an input whose value arrives that way
@@ -136,26 +143,15 @@ export default function FilterPanel({
   useEffect(() => loadOptions(), [loadOptions]);
   useLiveRefresh(loadOptions);
 
-  // Filters that no longer name anything are dropped from the URL, here
-  // rather than in each view, since the bar is where the projects and labels
-  // are known.
+  // Filters that no longer name anything are dropped from the URL (below),
+  // here rather than in each view, since the bar is where the projects,
+  // epics and labels are known.
   const projectNames = useMemo(() => projects?.map((p) => p.prefix) ?? null, [projects]);
   const labelNames = useMemo(() => labels?.map((l) => l.name) ?? null, [labels]);
   // The projects the dropdown offers and the pick chooses from: the active
   // ones, by name. A URL naming an archived one still shows it, as an extra
   // entry, and keeps it.
   const offered = useMemo(() => (projects ? activeProjects(projects) : null), [projects]);
-  // A view always shows one project, so while there are active projects a
-  // stale one is replaced below rather than dropped; only with none left to
-  // pick does it go.
-  const stale = useMemo(
-    () =>
-      staleFilters(filters, { projects: projectNames, labels: labelNames }).filter(
-        (key) => key !== "project" || offered?.length === 0,
-      ),
-    [filters, projectNames, labelNames, offered],
-  );
-  useEffect(() => dropFilters(stale), [stale, dropFilters]);
 
   // The project the URL names, as the list spells it, or null when it names
   // none that exists. An archived one counts: a link or bookmark to it still
@@ -177,6 +173,57 @@ export default function FilterPanel({
   useEffect(() => {
     if (shownProject) rememberProject(shownProject);
   }, [shownProject]);
+
+  // The epic filter offers the shown project's epics, loaded when it changes
+  // and on every live change, like the projects and labels. An answer for a
+  // project no longer shown is ignored.
+  const epicsFor = useRef<string | null>(null);
+  const loadEpics = useCallback(() => {
+    const project = epicsFor.current;
+    if (!project) return;
+    api.epics
+      .list(project)
+      .then((list) => {
+        if (epicsFor.current === project) setEpics({ project, epics: list?.epics ?? [] });
+      })
+      .catch(() => {});
+  }, []);
+  useEffect(() => {
+    epicsFor.current = shownProject;
+    loadEpics();
+  }, [shownProject, loadEpics]);
+  useLiveRefresh(loadEpics);
+  // The shown project's epics, or null while they are unknown. With no active
+  // project left to show there are none at all.
+  const shownEpics = useMemo(() => {
+    if (shownProject) return epics && epics.project === shownProject ? epics.epics : null;
+    return offered?.length === 0 ? [] : null;
+  }, [epics, shownProject, offered]);
+
+  // An epic filter is dropped once it names no epic of the shown project,
+  // which is also what drops it on a switch to another project. A view always
+  // shows one project, so while there are active projects a stale one is
+  // replaced above rather than dropped; only with none left to pick does it go.
+  const epicNames = useMemo(() => shownEpics?.map((e) => e.name) ?? null, [shownEpics]);
+  const stale = useMemo(
+    () =>
+      staleFilters(filters, { projects: projectNames, epics: epicNames, labels: labelNames }).filter(
+        (key) => key !== "project" || offered?.length === 0,
+      ),
+    [filters, projectNames, epicNames, labelNames, offered],
+  );
+  useEffect(() => dropFilters(stale), [stale, dropFilters]);
+
+  // "No epic", then the shown project's epics by name.
+  const epicOptions = useMemo(
+    () => [
+      { value: NO_EPIC, label: "No epic" },
+      ...[...(shownEpics ?? [])]
+        .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }))
+        .map((e) => ({ value: e.name, label: e.name })),
+    ],
+    [shownEpics],
+  );
 
   // The dropdown's entries: the active projects, plus an archived one the URL
   // names, marked as such, after them. A value naming no project at all still
@@ -209,6 +256,15 @@ export default function FilterPanel({
         options={projectOptions}
         ignoreCase
         onChange={set("project")}
+      />
+      <FilterSelect
+        name="Epic"
+        allLabel="All epics"
+        value={filters.epic}
+        options={epicOptions}
+        ignoreCase
+        maxWidth="max-w-[12rem]"
+        onChange={set("epic")}
       />
       <FilterSelect
         name="Status"

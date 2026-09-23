@@ -7,6 +7,8 @@ import {
   ArrowRight,
   ArrowDown,
   Calendar,
+  Layers,
+  ArrowUpDown,
   Ticket as TicketIcon,
 } from "lucide-react";
 import { api, type Ticket, type Project, type TicketWrite } from "../api/client";
@@ -17,6 +19,7 @@ import { useFilters } from "../hooks/useFilters";
 import { useLiveRefresh } from "../hooks/useLiveRefresh";
 import { useTicketParam } from "../hooks/useTicketParam";
 import { awaitingProject } from "../lib/defaultProject";
+import { nextEpicSort, sortByEpic, type EpicSort } from "../lib/epicSort";
 import { inProject, matchesFilters, repoOptions } from "../lib/filters";
 import { STATUS_LABELS, STATUS_STYLES, isStatus, isDone } from "../lib/status";
 
@@ -55,11 +58,33 @@ function PriorityBadge({ priority }: { priority: string }) {
   );
 }
 
+// The Epic column's header, which sorts the table by epic. It steps through
+// ascending, descending and back to the table's own order.
+function EpicHeader({ sort, onSort }: { sort: EpicSort; onSort: () => void }) {
+  const Icon = sort === "asc" ? ArrowUp : sort === "desc" ? ArrowDown : ArrowUpDown;
+  return (
+    <th
+      aria-sort={sort === "asc" ? "ascending" : sort === "desc" ? "descending" : "none"}
+      className="text-left px-4 py-3 font-medium"
+    >
+      <button
+        type="button"
+        onClick={onSort}
+        className="inline-flex items-center gap-1 uppercase tracking-wider hover:text-slate-300 transition-colors"
+      >
+        Epic
+        <Icon aria-hidden="true" className={`w-3 h-3 ${sort ? "text-slate-300" : "text-slate-600"}`} />
+      </button>
+    </th>
+  );
+}
+
 export default function Tickets() {
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
+  const [epicSort, setEpicSort] = useState<EpicSort>(null);
 
   const filterState = useFilters();
   const { filters } = filterState;
@@ -101,6 +126,7 @@ export default function Tickets() {
   // Filters apply client-side, so changing one never refetches.
   const projectTickets = useMemo(() => inProject(tickets, filters.project), [tickets, filters.project]);
   const filtered = useMemo(() => projectTickets.filter((t) => matchesFilters(t, filters)), [projectTickets, filters]);
+  const rows = useMemo(() => sortByEpic(filtered, epicSort), [filtered, epicSort]);
   const projectCount = projectTickets.length;
   // The filter bar picks a project for a URL without one; until it has, the
   // table waits rather than listing every project's tickets. The projects load
@@ -163,6 +189,7 @@ export default function Tickets() {
               <tr className="border-b border-slate-800 text-xs text-slate-500 uppercase tracking-wider">
                 <th className="text-left px-6 py-3 font-medium">Key</th>
                 <th className="text-left px-6 py-3 font-medium">Title</th>
+                <EpicHeader sort={epicSort} onSort={() => setEpicSort(nextEpicSort)} />
                 <th className="text-left px-4 py-3 font-medium">Labels</th>
                 <th className="text-left px-4 py-3 font-medium">Repos</th>
                 <th className="text-left px-6 py-3 font-medium">Status</th>
@@ -172,7 +199,7 @@ export default function Tickets() {
               </tr>
             </thead>
             <tbody>
-              {filtered.map((ticket) => (
+              {rows.map((ticket) => (
                 <tr
                   key={ticket.id}
                   onClick={() => openTicket(ticket)}
@@ -200,6 +227,19 @@ export default function Tickets() {
                           {ticket.dependsOn.map((d) => d.key).join(", ")}
                         </span>
                       </div>
+                    )}
+                  </td>
+                  <td className="px-4 py-3">
+                    {ticket.epic ? (
+                      <span
+                        title={ticket.epic.name}
+                        className="inline-flex max-w-[12rem] items-center gap-1 text-xs text-slate-400"
+                      >
+                        <Layers aria-hidden="true" className="w-3 h-3 shrink-0 text-slate-500" />
+                        <span className="truncate">{ticket.epic.name}</span>
+                      </span>
+                    ) : (
+                      <span className="text-xs text-slate-700">—</span>
                     )}
                   </td>
                   <td className="px-4 py-3">

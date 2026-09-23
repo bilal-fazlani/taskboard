@@ -7,11 +7,14 @@
 //
 // Each filter takes a single value. The project is named by its prefix rather
 // than its id so the URL reads well: /kanban?project=ACP&status=todo&label=web.
+// The epic is named by its name, or `none` for tickets without one.
 // Values are kept as written: dropping ones that no longer name a project or
 // label is a separate concern.
 
 export interface Filters {
   project: string;
+  /** An epic of the project by name, or NO_EPIC for tickets without one. */
+  epic: string;
   status: string;
   priority: string;
   label: string;
@@ -23,7 +26,16 @@ export interface Filters {
 export type FilterKey = keyof Filters;
 
 /** The query parameter names, which are also the Filters fields, in display order. */
-export const FILTER_KEYS: readonly FilterKey[] = ["project", "status", "priority", "label", "repo", "q"];
+export const FILTER_KEYS: readonly FilterKey[] = ["project", "epic", "status", "priority", "label", "repo", "q"];
+
+/**
+ * The epic filter's value for tickets without an epic. No epic can be called
+ * this, in any case, so it never clashes with a name.
+ */
+export const NO_EPIC = "none";
+
+/** Whether an epic filter value means "no epic", in any case. */
+export const isNoEpic = (value: string) => value.toLowerCase() === NO_EPIC;
 
 /**
  * The filters that narrow down a project's tickets: every one but the project,
@@ -32,7 +44,7 @@ export const FILTER_KEYS: readonly FilterKey[] = ["project", "status", "priority
  */
 export const NARROWING_KEYS: readonly FilterKey[] = FILTER_KEYS.filter((key) => key !== "project");
 
-export const EMPTY_FILTERS: Filters = { project: "", status: "", priority: "", label: "", repo: "", q: "" };
+export const EMPTY_FILTERS: Filters = { project: "", epic: "", status: "", priority: "", label: "", repo: "", q: "" };
 
 /** The fields of a ticket that filtering reads. */
 export interface FilterableTicket {
@@ -45,6 +57,8 @@ export interface FilterableTicket {
   projectPrefix: string;
   repos?: string[];
   labels?: readonly { name: string }[] | null;
+  /** The API leaves it out when the ticket has no epic. */
+  epic?: { name: string } | null;
 }
 
 export function parseFilters(params: URLSearchParams): Filters {
@@ -108,12 +122,16 @@ export function ticketKey(ticket: Pick<FilterableTicket, "projectPrefix" | "numb
 const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 
 /**
- * Whether a ticket passes every filter. Project, label and the search compare
- * case-insensitively; status and priority are fixed lowercase sets; repos are
- * matched exactly, as they are everywhere else.
+ * Whether a ticket passes every filter. Project, epic, label and the search
+ * compare case-insensitively; status and priority are fixed lowercase sets;
+ * repos are matched exactly, as they are everywhere else. The epic filter's
+ * NO_EPIC matches the tickets without an epic.
  */
 export function matchesFilters(ticket: FilterableTicket, filters: Filters): boolean {
   if (filters.project && !same(ticket.projectPrefix, filters.project)) return false;
+  if (filters.epic) {
+    if (isNoEpic(filters.epic) ? ticket.epic : !ticket.epic || !same(ticket.epic.name, filters.epic)) return false;
+  }
   if (filters.status && ticket.status !== filters.status) return false;
   if (filters.priority && ticket.priority !== filters.priority) return false;
   if (filters.label && !(ticket.labels ?? []).some((l) => same(l.name, filters.label))) return false;

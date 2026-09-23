@@ -20,6 +20,7 @@ function makeTicket(overrides: Partial<Ticket> = {}): Ticket {
     labels: [{ id: "l1", name: "frontend", color: "#3b82f6", ticketCount: 0 }],
     subtasks: [],
     dependsOn: [{ id: "t2", key: "AUTH-2", title: "Build login UI", status: "todo" }],
+    epic: { id: "e1", name: "Login" },
     ...overrides,
   };
 }
@@ -41,10 +42,15 @@ describe("ticketFields", () => {
       status: "todo",
       priority: "high",
       dueDate: "2026-10-01",
+      epic: "e1",
       repos: ["acme/auth-web"],
       labels: ["frontend"],
       dependsOn: ["t2"],
     });
+  });
+
+  it("reads a ticket without an epic, which the API leaves out, as no epic", () => {
+    expect(ticketFields(makeTicket({ epic: undefined })).epic).toBe("");
   });
 
   it("reads the empty collections the API leaves out as empty", () => {
@@ -75,6 +81,11 @@ describe("changedFields", () => {
   it("counts clearing the due date as a change", () => {
     expect(changedFields(base, edited({ dueDate: "" }))).toEqual(["dueDate"]);
   });
+
+  it("counts a changed or cleared epic as a change", () => {
+    expect(changedFields(base, edited({ epic: "e2" }))).toEqual(["epic"]);
+    expect(changedFields(base, edited({ epic: "" }))).toEqual(["epic"]);
+  });
 });
 
 describe("editedWrite", () => {
@@ -90,6 +101,18 @@ describe("editedWrite", () => {
     const write = editedWrite(base, edited({ dueDate: "" }));
     expect(write).toEqual({ dueDate: "" });
     expect("dueDate" in write).toBe(true);
+  });
+
+  it("sends a chosen epic by id, and no epic as the API's explicit clear", () => {
+    expect(editedWrite(base, edited({ epic: "e2" }))).toEqual({ epic: "e2" });
+    const cleared = editedWrite(base, edited({ epic: "" }));
+    expect(cleared).toEqual({ epic: "" });
+    expect("epic" in cleared).toBe(true);
+  });
+
+  it("leaves an untouched epic out, so one changed elsewhere survives the save", () => {
+    const write = editedWrite(base, edited({ priority: "low" }));
+    expect("epic" in write).toBe(false);
   });
 
   it("leaves an untouched due date out entirely, whatever shape it arrived in", () => {
@@ -113,6 +136,7 @@ describe("editedWrite", () => {
       status: "done",
       priority: "low",
       dueDate: "2026-12-24",
+      epic: "",
       repos: ["acme/api"],
       labels: ["urgent"],
       dependsOn: [],

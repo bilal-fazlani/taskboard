@@ -1,5 +1,5 @@
-import { Calendar, Check, CheckCircle2, EyeOff } from "lucide-react";
-import type { Ticket } from "../api/client";
+import { Calendar, Check, CheckCircle2, EyeOff, Layers } from "lucide-react";
+import type { EpicRef, Ticket } from "../api/client";
 import { attentionClasses } from "../lib/attention";
 import type { GraphNode } from "../lib/graphLayout";
 import { hiddenBlockersText, satisfiedDependenciesText } from "../lib/graphText";
@@ -40,6 +40,18 @@ function StatusDot({ status, attention }: { status: string; attention: string })
   );
 }
 
+// The epic before the key in the card's header: a neutral icon and the name,
+// which is cut short at a fixed width and shown in full on hover. Epics have
+// no colour of their own, so it stays the key's grey.
+function EpicCrumb({ epic }: { epic: EpicRef }) {
+  return (
+    <span data-testid="card-epic" title={epic.name} className="inline-flex min-w-0 max-w-[8rem] items-center gap-1">
+      <Layers aria-hidden="true" className="h-3 w-3 shrink-0" />
+      <span className="truncate">{epic.name}</span>
+    </span>
+  );
+}
+
 // Replaces the dependency band on the graph, where unfinished dependencies in
 // view are already drawn as arrows: what's left to say is how many are done
 // and how many block the ticket from off the page.
@@ -73,7 +85,8 @@ function GraphDependencies({ graph }: { graph: GraphCardInfo }) {
  * presentational: the board wraps it for dragging, the graph positions it.
  * Passing `graph` turns it into the graph's card, which adds a status dot
  * before the key and swaps the dependency band for done and hidden-blocker
- * counts. Without it the card renders exactly as the board always has.
+ * counts. Without it the card renders exactly as the board always has. A
+ * ticket in an epic shows the epic before its key, after the graph's dot.
  */
 export default function TicketCard({
   ticket,
@@ -96,7 +109,18 @@ export default function TicketCard({
       } ${attention.card}`}
     >
       <div className="flex items-start justify-between gap-2">
-        {graph ? (
+        {ticket.epic ? (
+          <span className="inline-flex min-w-0 items-center gap-1.5 text-[11px] text-slate-500">
+            {graph && <StatusDot status={ticket.status} attention={attention.dot} />}
+            <EpicCrumb epic={ticket.epic} />
+            <span aria-hidden="true" className="shrink-0 text-slate-600">
+              /
+            </span>
+            <span className="shrink-0 whitespace-nowrap font-mono">
+              {ticket.projectPrefix}-{ticket.number}
+            </span>
+          </span>
+        ) : graph ? (
           <span className="inline-flex items-center gap-1.5 text-[11px] font-mono text-slate-500">
             <StatusDot status={ticket.status} attention={attention.dot} />
             {ticket.projectPrefix}-{ticket.number}

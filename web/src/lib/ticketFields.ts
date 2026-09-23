@@ -18,6 +18,8 @@ export interface TicketFields {
   priority: string;
   /** As <input type="date"> holds it: "YYYY-MM-DD", or "" for no due date. */
   dueDate: string;
+  /** The epic's id, or "" for no epic. */
+  epic: string;
   repos: string[];
   /** Label names, which is what the API takes. */
   labels: string[];
@@ -33,6 +35,7 @@ export const FIELD_KEYS: readonly FieldKey[] = [
   "status",
   "priority",
   "dueDate",
+  "epic",
   "repos",
   "labels",
   "dependsOn",
@@ -58,6 +61,7 @@ export function ticketFields(ticket: Ticket): TicketFields {
     status: ticket.status,
     priority: ticket.priority,
     dueDate: toDateInputValue(ticket.dueDate),
+    epic: ticket.epic?.id ?? "",
     repos: ticket.repos || [],
     labels: (ticket.labels || []).map((l) => l.name),
     dependsOn: (ticket.dependsOn || []).map((d) => d.id),
@@ -79,8 +83,9 @@ export function changedFields(a: TicketFields, b: TicketFields): FieldKey[] {
 /**
  * What to send for an edit of `base` into `current`: the changed fields and
  * nothing else. The API reads an omitted field as "leave it unchanged", which
- * is what makes a field-by-field save possible — including for dueDate, where
- * an omitted field leaves the due date alone and an empty string clears it.
+ * is what makes a field-by-field save possible — including for dueDate and
+ * the epic, where an omitted field leaves it alone and an empty string clears
+ * it.
  */
 export function editedWrite(base: TicketFields, current: TicketFields): TicketWrite {
   const write: TicketWrite = {};

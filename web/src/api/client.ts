@@ -78,6 +78,8 @@ export interface Ticket {
   subtasks: Subtask[];
   dependsOn?: TicketRef[];
   blocks?: TicketRef[];
+  /** Left out when the ticket has no epic. */
+  epic?: EpicRef;
 }
 
 /**
@@ -96,6 +98,8 @@ export interface TicketWrite {
   repos?: string[];
   labels?: string[];
   dependsOn?: string[];
+  /** An epic's name or id in the ticket's project; "" clears it, and leaving it out leaves it alone. */
+  epic?: string;
 }
 
 export interface BoardColumn {

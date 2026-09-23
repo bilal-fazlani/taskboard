@@ -10,13 +10,15 @@ import { memoryStorage } from "../test/memoryStorage";
 
 // The new-ticket form on each view that offers one starts in the project the
 // view shows, so the ticket doesn't land in another project and vanish from
-// view. The project stays changeable, and a project the user picks stays
-// picked when the projects reload. The API is mocked.
+// view, and on the epic the view filters by. The project and epic stay
+// changeable, and a project the user picks stays picked when the projects
+// reload. The API is mocked.
 
 const mockApi = vi.hoisted(() => ({
   tickets: { list: vi.fn(), get: vi.fn(), create: vi.fn() },
   projects: { list: vi.fn() },
   labels: { list: vi.fn() },
+  epics: { list: vi.fn() },
   board: { get: vi.fn() },
 }));
 
@@ -139,6 +141,7 @@ const form = () => screen.getByRole("heading", { name: "New Ticket" }).closest("
 const projectSelect = () => form().querySelector("select")!;
 
 beforeEach(() => {
+  mockApi.epics.list.mockResolvedValue({ epics: [], noEpic: { counts: {}, total: 0, complete: false, lastActivityAt: null } });
   FakeEventSource.opened = [];
   vi.stubGlobal("EventSource", FakeEventSource);
   vi.stubGlobal("localStorage", memoryStorage());
@@ -230,5 +233,113 @@ describe("Table's new-ticket form opened before the projects load", () => {
     fireEvent.change(projectSelect(), { target: { value: "p-ACP" } });
     await liveChange();
     expect(projectSelect().value).toBe("p-ACP");
+  });
+});
+
+// Each project's epics, answered whether asked by prefix (the filter bar) or
+// by id (the form).
+const NO_PROGRESS = { counts: {}, total: 0, complete: false, lastActivityAt: null };
+const EPICS: Record<string, string[]> = { ACP: ["Graph"], LDR: ["Views", "Billing"] };
+function epicsOf(ref: string) {
+  const prefix = ref.replace(/^p-/, "");
+  return {
+    epics: (EPICS[prefix] ?? []).map((name) => ({
+      ...NO_PROGRESS,
+      id: `e-${prefix}-${name}`,
+      projectId: `p-${prefix}`,
+      name,
+      createdAt: "",
+      updatedAt: "",
+    })),
+    noEpic: NO_PROGRESS,
+  };
+}
+function servesEpics() {
+  mockApi.epics.list.mockImplementation(async (ref: string) => epicsOf(ref));
+}
+
+describe.each(views)("%s's new-ticket form epic", (_name, page, path, newTicketButton) => {
+  const epicSelect = () => within(form()).getByLabelText("Epic") as HTMLSelectElement;
+  const create = async (title = "Here") => {
+    fireEvent.change(screen.getByPlaceholderText("What needs to be done?"), { target: { value: title } });
+    await act(async () => screen.getByRole("button", { name: "Create Ticket" }).click());
+    return mockApi.tickets.create.mock.calls[0][0];
+  };
+
+  beforeEach(servesEpics);
+
+  it("offers No epic and the form's project's epics by name", async () => {
+    await mount(page(), `${path}?project=LDR`);
+    await act(async () => newTicketButton().click());
+    await settle();
+    expect([...epicSelect().options].map((o) => o.textContent)).toEqual(["No epic", "Billing", "Views"]);
+  });
+
+  it("starts on the epic the view filters by, and creates the ticket in it", async () => {
+    await mount(page(), `${path}?project=LDR&epic=views`);
+    await act(async () => newTicketButton().click());
+    await settle();
+    expect(epicSelect().value).toBe("e-LDR-Views");
+    expect(await create()).toMatchObject({ projectId: "p-LDR", epic: "e-LDR-Views" });
+  });
+
+  it.each([
+    ["no epic filter", ""],
+    ["the filter for tickets without an epic", "&epic=none"],
+  ])("starts on no epic with %s, and sends none", async (_what, query) => {
+    await mount(page(), `${path}?project=LDR${query}`);
+    await act(async () => newTicketButton().click());
+    await settle();
+    expect(epicSelect().value).toBe("");
+    const sent = await create();
+    expect(sent.projectId).toBe("p-LDR");
+    expect(sent.epic).toBeUndefined();
+  });
+
+  it("still lets another epic, or none, be chosen", async () => {
+    await mount(page(), `${path}?project=LDR&epic=Views`);
+    await act(async () => newTicketButton().click());
+    await settle();
+    fireEvent.change(epicSelect(), { target: { value: "e-LDR-Billing" } });
+    expect((await create()).epic).toBe("e-LDR-Billing");
+  });
+
+  it("offers the new project's epics, on no epic, when another project is chosen", async () => {
+    await mount(page(), `${path}?project=LDR&epic=Views`);
+    await act(async () => newTicketButton().click());
+    await settle();
+    fireEvent.change(projectSelect(), { target: { value: "p-ACP" } });
+    await settle();
+    expect([...epicSelect().options].map((o) => o.textContent)).toEqual(["No epic", "Graph"]);
+    expect(epicSelect().value).toBe("");
+    const sent = await create();
+    expect(sent).toMatchObject({ projectId: "p-ACP" });
+    expect(sent.epic).toBeUndefined();
+  });
+
+  it("resets a picked epic to No epic on a switch of project, never offering the last project's epics", async () => {
+    await mount(page(), `${path}?project=LDR`);
+    await act(async () => newTicketButton().click());
+    await settle();
+    fireEvent.change(epicSelect(), { target: { value: "e-LDR-Billing" } });
+    expect(epicSelect().value).toBe("e-LDR-Billing");
+
+    // ACP's epics are still on their way when the project changes.
+    let arrive!: () => void;
+    mockApi.epics.list.mockImplementation((ref: string) =>
+      ref === "p-ACP" ? new Promise((resolve) => (arrive = () => resolve(epicsOf(ref)))) : Promise.resolve(epicsOf(ref)),
+    );
+    fireEvent.change(projectSelect(), { target: { value: "p-ACP" } });
+    await settle();
+    expect([...epicSelect().options].map((o) => o.textContent)).toEqual(["No epic"]);
+    expect(epicSelect().value).toBe("");
+
+    await act(async () => arrive());
+    await settle();
+    expect([...epicSelect().options].map((o) => o.textContent)).toEqual(["No epic", "Graph"]);
+    expect(epicSelect().value).toBe("");
+    const sent = await create();
+    expect(sent.projectId).toBe("p-ACP");
+    expect(sent.epic).toBeUndefined();
   });
 });

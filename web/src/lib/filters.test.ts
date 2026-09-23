@@ -3,6 +3,7 @@ import {
   EMPTY_FILTERS,
   FILTER_KEYS,
   NARROWING_KEYS,
+  NO_EPIC,
   filterSearch,
   hasFilters,
   inProject,
@@ -27,6 +28,7 @@ function ticket(overrides: Partial<FilterableTicket> = {}): FilterableTicket {
     projectPrefix: "ACP",
     repos: ["bilal-fazlani/taskboard"],
     labels: [{ name: "web" }, { name: "M2:Realtime" }],
+    epic: { name: "Realtime" },
     ...overrides,
   };
 }
@@ -68,6 +70,26 @@ describe("matchesFilters", () => {
     expect(matchesFilters(ticket({ labels: null }), f({ label: "web" }))).toBe(false);
   });
 
+  it("filters by epic name, case-insensitively", () => {
+    expect(matchesFilters(ticket(), f({ epic: "Realtime" }))).toBe(true);
+    expect(matchesFilters(ticket(), f({ epic: "REALTIME" }))).toBe(true);
+    expect(matchesFilters(ticket(), f({ epic: "Views" }))).toBe(false);
+    // A name, not a prefix of one.
+    expect(matchesFilters(ticket(), f({ epic: "Real" }))).toBe(false);
+    // The API leaves the field out when a ticket has no epic.
+    expect(matchesFilters(ticket({ epic: undefined }), f({ epic: "Realtime" }))).toBe(false);
+    expect(matchesFilters(ticket({ epic: null }), f({ epic: "Realtime" }))).toBe(false);
+  });
+
+  it("matches only the tickets without an epic for none, in any case", () => {
+    expect(NO_EPIC).toBe("none");
+    for (const epic of ["none", "None", "NONE"]) {
+      expect(matchesFilters(ticket({ epic: undefined }), f({ epic })), epic).toBe(true);
+      expect(matchesFilters(ticket({ epic: null }), f({ epic })), epic).toBe(true);
+      expect(matchesFilters(ticket(), f({ epic })), epic).toBe(false);
+    }
+  });
+
   it("filters by repo, exactly", () => {
     expect(matchesFilters(ticket(), f({ repo: "bilal-fazlani/taskboard" }))).toBe(true);
     expect(matchesFilters(ticket(), f({ repo: "Bilal-Fazlani/Taskboard" }))).toBe(false);
@@ -101,7 +123,7 @@ describe("matchesFilters", () => {
   });
 
   it("requires every set filter to match", () => {
-    const all = f({ project: "ACP", status: "todo", priority: "high", label: "web", repo: "bilal-fazlani/taskboard", q: "hook" });
+    const all = f({ project: "ACP", epic: "realtime", status: "todo", priority: "high", label: "web", repo: "bilal-fazlani/taskboard", q: "hook" });
     expect(matchesFilters(ticket(), all)).toBe(true);
     for (const key of FILTER_KEYS) {
       expect(matchesFilters(ticket(), { ...all, [key]: "nope" }), key).toBe(false);
@@ -113,12 +135,34 @@ describe("URL state", () => {
   it("reads every filter, and empty strings for missing ones", () => {
     expect(parseFilters(new URLSearchParams(""))).toEqual(EMPTY_FILTERS);
     expect(
-      parseFilters(new URLSearchParams("project=ACP&status=todo&priority=high&label=web&repo=a%2Fb&q=live+hook&ticket=ACP-7")),
-    ).toEqual({ project: "ACP", status: "todo", priority: "high", label: "web", repo: "a/b", q: "live hook" });
+      parseFilters(new URLSearchParams("project=ACP&epic=Views&status=todo&priority=high&label=web&repo=a%2Fb&q=live+hook&ticket=ACP-7")),
+    ).toEqual({ project: "ACP", epic: "Views", status: "todo", priority: "high", label: "web", repo: "a/b", q: "live hook" });
+  });
+
+  it.each([
+    ["an epic's name", "Agent review & status"],
+    ["none", "none"],
+  ])("round-trips the epic filter set to %s", (_what, epic) => {
+    const params = withFilter(new URLSearchParams("project=ACP"), "epic", epic);
+    expect(params.get("epic")).toBe(epic);
+    expect(parseFilters(new URL(`/?${params.toString()}`, "http://localhost").searchParams).epic).toBe(epic);
+    expect(filterSearch(`?${params.toString()}&ticket=ACP-7`)).toBe(`?${params.toString()}`);
+  });
+
+  it("writes the epic right after the project, and drops it when emptied", () => {
+    let params = new URLSearchParams();
+    for (const key of FILTER_KEYS) params = withFilter(params, key, f({ project: "ACP", epic: "none", status: "todo" })[key]);
+    expect(params.toString()).toBe("project=ACP&epic=none&status=todo");
+    expect(withFilter(params, "epic", "").toString()).toBe("project=ACP&status=todo");
+  });
+
+  it("clears the epic with the other narrowing filters, keeping the project", () => {
+    const params = new URLSearchParams("project=ACP&epic=Views&label=web&ticket=ACP-7");
+    expect(withoutFilters(params, NARROWING_KEYS).toString()).toBe("project=ACP&ticket=ACP-7");
   });
 
   it("round-trips filters through the query string", () => {
-    const filters = f({ project: "ACP", status: "in_progress", label: "M3:Views", repo: "bilal-fazlani/taskboard", q: "a & b = c?" });
+    const filters = f({ project: "ACP", epic: "Views", status: "in_progress", label: "M3:Views", repo: "bilal-fazlani/taskboard", q: "a & b = c?" });
     let params = new URLSearchParams();
     for (const key of FILTER_KEYS) params = withFilter(params, key, filters[key]);
     const url = `/kanban?${params.toString()}`;
@@ -210,13 +254,14 @@ describe("selectOptions", () => {
 
 describe("filters other than the project", () => {
   it("are every filter but the project", () => {
-    expect(NARROWING_KEYS).toEqual(["status", "priority", "label", "repo", "q"]);
+    expect(NARROWING_KEYS).toEqual(["epic", "status", "priority", "label", "repo", "q"]);
   });
 
   it("make a view filtered, where the project alone does not", () => {
     expect(hasFilters(f({ project: "ACP" }), NARROWING_KEYS)).toBe(false);
     expect(hasFilters(f({ project: "ACP" }))).toBe(true);
     expect(hasFilters(f({ project: "ACP", q: "x" }), NARROWING_KEYS)).toBe(true);
+    expect(hasFilters(f({ project: "ACP", epic: "none" }), NARROWING_KEYS)).toBe(true);
   });
 });
 

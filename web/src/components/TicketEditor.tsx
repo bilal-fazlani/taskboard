@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { X, Trash2, CheckCircle2, Circle, Pencil, Eye, Copy, Check, RefreshCw, AlertTriangle } from "lucide-react";
 import Markdown from "react-markdown";
-import { api, type Ticket, type Project, type Subtask, type TicketWrite } from "../api/client";
+import { api, type EpicRef, type Ticket, type Project, type Subtask, type TicketWrite } from "../api/client";
 import LabelPicker from "./LabelPicker";
 import RepoPicker from "./RepoPicker";
 import DependencyPicker from "./DependencyPicker";
@@ -66,6 +66,7 @@ export default function TicketEditor({
   const [status, setStatus] = useState(ticket.status);
   const [priority, setPriority] = useState(ticket.priority);
   const [dueDate, setDueDate] = useState(toDateInputValue(ticket.dueDate));
+  const [epic, setEpic] = useState(ticket.epic?.id ?? "");
   const [repos, setRepos] = useState<string[]>(ticket.repos || []);
   const [labels, setLabels] = useState<string[]>((ticket.labels || []).map((l) => l.name));
   const [dependsOn, setDependsOn] = useState(ticket.dependsOn || []);
@@ -104,6 +105,7 @@ export default function TicketEditor({
     status,
     priority,
     dueDate,
+    epic,
     repos,
     labels,
     dependsOn: dependsOn.map((d) => d.id),
@@ -117,6 +119,7 @@ export default function TicketEditor({
     setStatus(full.status);
     setPriority(full.priority);
     setDueDate(toDateInputValue(full.dueDate));
+    setEpic(full.epic?.id ?? "");
     setRepos(full.repos || []);
     setLabels((full.labels || []).map((l) => l.name));
     setDependsOn(full.dependsOn || []);
@@ -148,6 +151,25 @@ export default function TicketEditor({
   const statusId = `${ids}-status`;
   const priorityId = `${ids}-priority`;
   const dueDateId = `${ids}-due`;
+  const epicId = `${ids}-epic`;
+
+  // The project's epics, which the Epic select offers. Reloaded whenever the
+  // ticket changes, so one added since the editor opened shows up too. Until
+  // they arrive, and if they never do, the select still shows the ticket's
+  // own epic.
+  const [epics, setEpics] = useState<EpicRef[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    api.epics
+      .list(ticket.projectId)
+      .then((list) => {
+        if (!cancelled) setEpics((list?.epics ?? []).map(({ id, name }) => ({ id, name })));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [ticket.projectId, ticket.updatedAt]);
 
   // The full ticket, fetched on open and again whenever the ticket the editor
   // was handed changes — which is how an edit made elsewhere, arriving as a
@@ -354,6 +376,13 @@ export default function TicketEditor({
   };
 
   const ticketKey = `${ticket.projectPrefix}-${ticket.number}`;
+  // "No epic", then the project's epics by name, plus the ticket's own epic if
+  // the list doesn't have it (yet), so the select never shows a blank.
+  const epicOptions = [...epics];
+  for (const own of [detail.epic, ticket.epic]) {
+    if (own && !epicOptions.some((e) => e.id === own.id)) epicOptions.push(own);
+  }
+  epicOptions.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
   const statusStyle = isStatus(status) ? STATUS_STYLES[status] : "bg-slate-500/20 text-slate-400";
   const statusLabel = isStatus(status) ? STATUS_LABELS[status] : status.replace("_", " ");
 
@@ -649,6 +678,27 @@ export default function TicketEditor({
                   }}
                   className={SELECT}
                 />
+              </div>
+              <div>
+                <label htmlFor={epicId} className={FIELD_LABEL}>
+                  Epic
+                </label>
+                <select
+                  id={epicId}
+                  value={epic}
+                  onChange={(e) => {
+                    setEpic(e.target.value);
+                    markDirty();
+                  }}
+                  className={SELECT}
+                >
+                  <option value="">No epic</option>
+                  {epicOptions.map((e) => (
+                    <option key={e.id} value={e.id}>
+                      {e.name}
+                    </option>
+                  ))}
+                </select>
               </div>
               <div>
                 <span className={FIELD_LABEL}>Project</span>

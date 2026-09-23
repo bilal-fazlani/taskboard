@@ -105,22 +105,28 @@ describe("filter panel", () => {
   it.each(views)("renders on %s with every filter and no other project selector", (_name, path) => {
     const html = render(path);
     expect(html).toContain('role="search"');
-    for (const name of ["Status", "Priority", "Label", "Repo"]) {
+    for (const name of ["Epic", "Status", "Priority", "Label", "Repo"]) {
       expect(selectedOption(html, name), name).toBe("");
     }
     // Every view always has a project: there is no "All projects", only a
     // placeholder that can't be picked until the bar has picked one.
     expect(html).toMatch(/<select aria-label="Project"[^>]*><option value="" disabled="" selected="">Project<\/option><\/select>/);
     expect(html).toContain('<input type="search" aria-label="Search"');
-    expect(html.match(/<select/g)).toHaveLength(5);
+    expect(html.match(/<select/g)).toHaveLength(6);
+    // The epic comes right after the project, since epics belong to it.
+    expect(html.match(/<select aria-label="(\w+)"/g)!.slice(0, 2)).toEqual([
+      '<select aria-label="Project"',
+      '<select aria-label="Epic"',
+    ]);
     expect(html).not.toMatch(/All projects/i);
     // Nothing to clear.
     expect(html).not.toContain("Clear filters");
   });
 
   it.each(views)("reads its state from the URL on %s", (_name, path) => {
-    const html = render(`${path}?project=ACP&status=in_progress&priority=high&label=web&repo=a%2Fb&q=live+%26+hook&ticket=ACP-7`);
+    const html = render(`${path}?project=ACP&epic=none&status=in_progress&priority=high&label=web&repo=a%2Fb&q=live+%26+hook&ticket=ACP-7`);
     expect(selectedOption(html, "Project")).toBe("ACP");
+    expect(selectedOption(html, "Epic")).toBe("none");
     expect(selectedOption(html, "Status")).toBe("in_progress");
     expect(selectedOption(html, "Priority")).toBe("high");
     expect(selectedOption(html, "Label")).toBe("web");

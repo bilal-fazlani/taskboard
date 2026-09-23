@@ -13,6 +13,7 @@ const mockApi = vi.hoisted(() => ({
   tickets: { list: vi.fn(), get: vi.fn() },
   projects: { list: vi.fn() },
   labels: { list: vi.fn() },
+  epics: { list: vi.fn() },
   board: { get: vi.fn() },
 }));
 
@@ -150,6 +151,7 @@ async function mount(page: React.ReactNode, path = "/") {
 }
 
 beforeEach(() => {
+  mockApi.epics.list.mockResolvedValue({ epics: [], noEpic: { counts: {}, total: 0, complete: false, lastActivityAt: null } });
   FakeResizeObserver.instances = [];
   FakeEventSource.opened = [];
   (globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver = FakeResizeObserver;
