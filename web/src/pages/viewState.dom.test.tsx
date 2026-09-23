@@ -213,6 +213,47 @@ describe("Dependencies across a refetch", () => {
   });
 });
 
+// Hide mode fits afresh when the user changes the filters, never when a live
+// refresh changes which cards they lay out: agents move tickets all the time,
+// and the view under the user must neither jump nor blink.
+describe("Dependencies in hide mode across a refetch", () => {
+  const canvas = () => document.querySelector<HTMLElement>("[data-graph-canvas]")!;
+  const card = (key: string) => screen.queryByRole("button", { name: new RegExp(`^${key} `) });
+  const high = (number: number, overrides: Partial<Ticket> = {}) => makeTicket(number, { priority: "high", ...overrides });
+  const start = [high(1), high(2, { dependsOn: [{ id: "t1", key: "ACP-1", title: "Ticket 1", status: "todo" }] }), makeTicket(3)];
+
+  it.each([
+    ["a matching ticket is added", "/?project=ACP&priority=high&unmatched=hide", [...start, high(4)], "ACP-4", true],
+    ["a matching ticket is finished", "/?project=ACP&priority=high&unmatched=hide", [high(1, { status: "done" }), start[1], start[2]], "ACP-1", false],
+    ["a ticket moves into the filter", "/?project=ACP&priority=high&unmatched=hide", [start[0], start[1], high(3)], "ACP-3", true],
+    ["a ticket is added with no filter set", "/?project=ACP&unmatched=hide", [...start, makeTicket(4)], "ACP-4", true],
+  ] as const)("keeps the pan and never hides the graph when %s", async (_what, path, next, key, shown) => {
+    serves(start);
+    await mount(<Graph />, path);
+    await layout();
+    await act(async () => {
+      canvas().parentElement!.dispatchEvent(new WheelEvent("wheel", { deltaX: 30, deltaY: 200, bubbles: true }));
+    });
+    const moved = canvas().style.transform;
+    expect(canvas().className).not.toContain("invisible");
+
+    let blanked = false;
+    const watcher = new MutationObserver(() => {
+      if (document.querySelector("[data-graph-canvas]")?.classList.contains("invisible")) blanked = true;
+    });
+    watcher.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["class"] });
+    await liveChange([...next]);
+    // Before the new card is even measured, nothing has moved or blanked.
+    expect(card(key) !== null).toBe(shown);
+    expect(canvas().className).not.toContain("invisible");
+    expect(canvas().style.transform).toBe(moved);
+    await layout();
+    watcher.disconnect();
+    expect(blanked).toBe(false);
+    expect(canvas().style.transform).toBe(moved);
+  });
+});
+
 describe("Table across a refetch", () => {
   it("keeps the scroll position and the same scrolling element", async () => {
     await mount(<Tickets />, "/table?project=ACP");

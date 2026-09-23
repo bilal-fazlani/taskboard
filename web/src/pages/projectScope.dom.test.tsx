@@ -24,6 +24,7 @@ vi.mock("../api/client", () => ({ api: mockApi }));
 import Board from "./Board";
 import Graph from "./Graph";
 import Tickets from "./Tickets";
+import { AppRoutes } from "../App";
 
 // jsdom has no ResizeObserver; this one reports every observed element when
 // a test says the browser has laid the page out.
@@ -424,5 +425,221 @@ describe("Dependencies for one project", () => {
     });
     await layout();
     expect(document.querySelectorAll(".graph-changed")).toHaveLength(0);
+  });
+});
+
+// Dependencies dims the cards the filters don't match by default, or with
+// `unmatched=hide` in the URL leaves them off the graph. The project filter
+// always hides, whichever the mode.
+describe("Dependencies dimming or hiding the cards the filters don't match", () => {
+  const canvas = () => document.querySelector<HTMLElement>("[data-graph-canvas]");
+  const card = (key: string) => screen.queryByRole("button", { name: new RegExp(`^${key} `) });
+  const edges = () => canvas()!.querySelectorAll(":scope > svg > path");
+  const dimmed = (key: string) => card(key)!.className.includes("opacity-20");
+  const columnCounts = () => [...canvas()!.querySelectorAll("h3 + span")].map((s) => s.textContent);
+  const radio = (name: "Dim" | "Hide") => screen.getByRole("radio", { name }) as HTMLInputElement;
+  const urlMode = () => new URLSearchParams(window.location.search).get("unmatched");
+  const urlHas = (key: string) => new URLSearchParams(window.location.search).has(key);
+  const pick = (name: string, value: string) =>
+    act(async () => {
+      const select = screen.getByLabelText(name) as HTMLSelectElement;
+      select.value = value;
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+  const wheel = () =>
+    act(async () => {
+      canvas()!.parentElement!.dispatchEvent(new WheelEvent("wheel", { deltaY: 300, bubbles: true }));
+    });
+
+  it("dims them by default, with Dim picked and nothing in the URL", async () => {
+    await mount(<Graph />, "/?project=ACP&priority=high");
+    await layout();
+    expect(radio("Dim").checked).toBe(true);
+    expect(radio("Hide").checked).toBe(false);
+    expect(urlHas("unmatched")).toBe(false);
+    expect(dimmed("ACP-1")).toBe(true);
+    expect(dimmed("ACP-3")).toBe(true);
+    expect(dimmed("ACP-2")).toBe(false);
+    expect(edges()).toHaveLength(1);
+    // Each column counts its matching cards out of all of them.
+    expect(columnCounts()).toEqual(["0 of 1", "1 of 2"]);
+    expect(count()).toBe("1 of 3 tickets");
+  });
+
+  it("in hide mode lays out only the matching cards, drops their edges and counts a hidden blocker", async () => {
+    await mount(<Graph />, "/?project=ACP&priority=high&unmatched=hide");
+    await layout();
+    expect(radio("Hide").checked).toBe(true);
+    expect(card("ACP-1")).toBeNull();
+    expect(card("ACP-3")).toBeNull();
+    expect(dimmed("ACP-2")).toBe(false);
+    // ACP-2's blocker, ACP-1, is filtered out: no arrow, but the card still
+    // says something unseen blocks it, and it stays right of Ready.
+    expect(edges()).toHaveLength(0);
+    expect(card("ACP-2")!.textContent).toContain("1 hidden blocker");
+    expect(canvas()!.textContent).toMatch(/Ready0/);
+    // Every card shown matches, so each column has a plain count.
+    expect(columnCounts()).toEqual(["0", "1"]);
+    expect(count()).toBe("1 of 3 tickets");
+  });
+
+  it("counts cross-project and filtered-out blockers as one", async () => {
+    const ACP4 = ticket("ACP", 4, { priority: "high", dependsOn: [ref(ACP1), ref(LDR1)] });
+    serves([...TICKETS, ACP4], PROJECTS);
+    await mount(<Graph />, "/?project=ACP&priority=high&unmatched=hide");
+    await layout();
+    expect(card("ACP-4")!.textContent).toContain("2 hidden blockers");
+  });
+
+  it("switches between dim and hide live, and writes the parameter only for hide", async () => {
+    await mount(<Graph />, "/?project=ACP&priority=high");
+    await layout();
+    await act(async () => radio("Hide").click());
+    await layout();
+    expect(urlMode()).toBe("hide");
+    expect(radio("Hide").checked).toBe(true);
+    expect(card("ACP-1")).toBeNull();
+    expect(card("ACP-2")).toBeTruthy();
+
+    await act(async () => radio("Dim").click());
+    await layout();
+    expect(urlHas("unmatched")).toBe(false);
+    expect(radio("Dim").checked).toBe(true);
+    expect(dimmed("ACP-1")).toBe(true);
+    expect(new URLSearchParams(window.location.search).get("priority")).toBe("high");
+  });
+
+  it.each([
+    ["dim", ""],
+    ["hide", "&unmatched=hide"],
+  ])("hides the other projects' tickets in %s mode", async (_mode, param) => {
+    await mount(<Graph />, `/?project=ACP&status=todo${param}`);
+    await layout();
+    expect(card("LDR-1")).toBeNull();
+    expect(card("LDR-2")).toBeNull();
+    expect(card("ACP-2")).toBeTruthy();
+    // ACP-3's blocker is in LDR, hidden by the project in either mode.
+    expect(card("ACP-3")!.textContent).toContain("1 hidden blocker");
+    expect(count()).toBe("2 of 3 tickets");
+  });
+
+  it("keeps hide mode on a reload, and when the filters are cleared", async () => {
+    await mount(<Graph />, "/?project=ACP&priority=high&unmatched=hide&ticket=ACP-2");
+    await layout();
+    expect(radio("Hide").checked).toBe(true);
+    expect(card("ACP-1")).toBeNull();
+    await act(async () => screen.getByRole("button", { name: /Clear filters/ }).click());
+    await layout();
+    expect(urlHas("priority")).toBe(false);
+    expect(urlMode()).toBe("hide");
+    expect(radio("Hide").checked).toBe(true);
+    // With no filter left, every card is laid out and none is dimmed.
+    for (const key of ["ACP-1", "ACP-2", "ACP-3"]) expect(dimmed(key)).toBe(false);
+    expect(count()).toBe("3 tickets");
+  });
+
+  it.each(["bogus", "dim", "HIDE", ""])("drops unmatched=%s from the URL and dims", async (value) => {
+    await mount(<Graph />, `/?project=ACP&priority=high&unmatched=${value}`);
+    await layout();
+    expect(urlHas("unmatched")).toBe(false);
+    expect(new URLSearchParams(window.location.search).get("priority")).toBe("high");
+    expect(radio("Dim").checked).toBe(true);
+    expect(dimmed("ACP-1")).toBe(true);
+  });
+
+  it("says so when the filters match no open ticket in hide mode", async () => {
+    // Done tickets are never on the graph, so status Done matches none.
+    await mount(<Graph />, "/?project=ACP&status=done&unmatched=hide");
+    expect(canvas()).toBeNull();
+    expect(shows("No open tickets match the filters")).toBe(true);
+    expect(shows("Switch to Dim or clear filters to see the rest.")).toBe(true);
+    expect(shows("No open tickets")).toBe(false);
+    // Dim mode still shows every card, dimmed.
+    await act(async () => radio("Dim").click());
+    await layout();
+    expect(shows("No open tickets match the filters")).toBe(false);
+    expect(dimmed("ACP-1")).toBe(true);
+  });
+
+  it("still says there are no open tickets when the project has none, in hide mode", async () => {
+    serves([ticket("ACP", 1, { status: "done" }), LDR1], PROJECTS);
+    await mount(<Graph />, "/?project=ACP&status=done&unmatched=hide");
+    expect(shows("No open tickets")).toBe(true);
+    expect(shows("No open tickets match the filters")).toBe(false);
+  });
+
+  it("fits afresh when the mode changes", async () => {
+    await mount(<Graph />, "/?project=ACP&priority=high");
+    await layout();
+    await wheel();
+    const panned = canvas()!.style.transform;
+    await act(async () => radio("Hide").click());
+    await layout();
+    expect(canvas()!.className).not.toContain("invisible");
+    expect(canvas()!.style.transform).not.toBe(panned);
+
+    await wheel();
+    const pannedAgain = canvas()!.style.transform;
+    await act(async () => radio("Dim").click());
+    await layout();
+    expect(canvas()!.style.transform).not.toBe(pannedAgain);
+  });
+
+  it("in hide mode fits afresh when the filters change, and in dim mode doesn't", async () => {
+    await mount(<Graph />, "/?project=ACP&priority=high&unmatched=hide");
+    await layout();
+    await wheel();
+    const panned = canvas()!.style.transform;
+    await pick("Priority", "");
+    await layout();
+    expect(card("ACP-1")).toBeTruthy();
+    expect(canvas()!.style.transform).not.toBe(panned);
+
+    await act(async () => radio("Dim").click());
+    await layout();
+    await wheel();
+    const pannedInDim = canvas()!.style.transform;
+    await pick("Priority", "high");
+    await layout();
+    expect(canvas()!.style.transform).toBe(pannedInDim);
+  });
+});
+
+// Kanban and Table always hide what the filters don't match. They offer no
+// choice and ignore the parameter, but leave it in the URL, so it is still
+// set on the way back to Dependencies.
+describe.each([
+  ["Kanban", () => <Board />, "/kanban"],
+  ["Table", () => <Tickets />, "/table"],
+] as const)("%s and the unmatched parameter", (_name, page, path) => {
+  const params = () => new URLSearchParams(window.location.search);
+
+  it.each(["hide", "bogus"])("ignores unmatched=%s but keeps it, through Clear filters too", async (value) => {
+    await mount(page(), `${path}?project=ACP&priority=high&unmatched=${value}`);
+    expect(screen.queryByRole("radiogroup")).toBeNull();
+    expect(params().get("unmatched")).toBe(value);
+    expect(shows("ACP ticket 2")).toBe(true);
+    expect(shows("ACP ticket 1")).toBe(false);
+    await act(async () => screen.getByRole("button", { name: /Clear filters/ }).click());
+    expect(params().has("priority")).toBe(false);
+    expect(params().get("unmatched")).toBe(value);
+  });
+});
+
+describe("Hide mode across the views", () => {
+  it("goes to Kanban and back with the filters, and is still picked on Dependencies", async () => {
+    await mount(<AppRoutes />, "/?project=ACP&priority=high&unmatched=hide");
+    expect((screen.getByRole("radio", { name: "Hide" }) as HTMLInputElement).checked).toBe(true);
+    await act(async () => screen.getByRole("link", { name: "Kanban" }).click());
+    expect(window.location.pathname).toBe("/kanban");
+    expect(window.location.search).toBe("?project=ACP&priority=high&unmatched=hide");
+    expect(screen.queryByRole("radiogroup")).toBeNull();
+    await act(async () => screen.getByRole("link", { name: "Dependencies" }).click());
+    for (let i = 0; i < 3; i++) await act(async () => {});
+    expect(window.location.pathname).toBe("/");
+    expect(new URLSearchParams(window.location.search).get("unmatched")).toBe("hide");
+    expect((screen.getByRole("radio", { name: "Hide" }) as HTMLInputElement).checked).toBe(true);
+    expect(screen.queryByRole("button", { name: /^ACP-1 / })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^ACP-2 / })).toBeTruthy();
   });
 });

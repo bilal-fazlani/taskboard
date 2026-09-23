@@ -99,10 +99,44 @@ export function withoutFilters(params: URLSearchParams, keys: readonly FilterKey
   return next;
 }
 
+// How Dependencies shows the cards the filters don't match: dimmed in place,
+// the default, or left off the graph. It is a display mode rather than a
+// filter, so it is no FilterKey: it doesn't make a view filtered, Clear
+// filters leaves it, and it names nothing that can be deleted. It lives in the
+// URL all the same, as `unmatched=hide` and only in hide mode, so a link
+// shows what its sender saw; Kanban and Table, which always hide, ignore it.
+
+export type UnmatchedMode = "dim" | "hide";
+
+/** The query parameter that carries hide mode. */
+export const UNMATCHED_PARAM = "unmatched";
+
+/** The mode the params ask for: hide for `unmatched=hide`, and dim for anything else. */
+export function parseUnmatched(params: URLSearchParams): UnmatchedMode {
+  return params.get(UNMATCHED_PARAM) === "hide" ? "hide" : "dim";
+}
+
+/**
+ * Whether the params carry an `unmatched` value that means nothing, such as
+ * `dim` or a typo, which is dropped from the URL like any invalid value.
+ */
+export function hasInvalidUnmatched(params: URLSearchParams): boolean {
+  return params.has(UNMATCHED_PARAM) && parseUnmatched(params) !== "hide";
+}
+
+/** The params in the given mode: `unmatched=hide` for hide, no parameter for dim. Others are kept. */
+export function withUnmatched(params: URLSearchParams, mode: UnmatchedMode): URLSearchParams {
+  const next = new URLSearchParams(params);
+  if (mode === "hide") next.set(UNMATCHED_PARAM, "hide");
+  else next.delete(UNMATCHED_PARAM);
+  return next;
+}
+
 /**
  * Just the filter part of a query string, as `?…` or "" when there is none,
- * for links to another view. Other parameters stay behind with the view they
- * belong to.
+ * for links to another view. Hide mode goes along with the filters, so it's
+ * still set on coming back to Dependencies. Other parameters stay behind with
+ * the view they belong to.
  */
 export function filterSearch(search: string): string {
   const params = new URLSearchParams(search);
@@ -111,6 +145,7 @@ export function filterSearch(search: string): string {
     const value = params.get(key);
     if (value) kept.set(key, value);
   }
+  if (parseUnmatched(params) === "hide") kept.set(UNMATCHED_PARAM, "hide");
   const qs = kept.toString();
   return qs ? `?${qs}` : "";
 }

@@ -21,3 +21,23 @@ export const fieldClass = (set: boolean) =>
  * transparent, so its box and its text sit where the fields' do.
  */
 export const CONTROL_BUTTON = `${CONTROL_BOX} inline-flex items-center gap-1 border-transparent text-slate-400 transition-colors hover:bg-slate-800 hover:text-slate-200`;
+
+/**
+ * A segmented control's frame, such as Dependencies' Dim | Hide: the fields'
+ * height, radius, border and text, with its options inset by 2px. A set one,
+ * off its default, has a set field's blue border.
+ */
+export const segmentedClass = (set: boolean) =>
+  `inline-flex h-8 items-stretch gap-0.5 rounded-md border bg-slate-800 p-0.5 text-xs leading-[normal] ${
+    set ? "border-blue-500/60" : "border-slate-700"
+  }`;
+
+/**
+ * One option of a segmented control, a label around a visually hidden radio.
+ * The selected one is filled: neutral while the control is on its default,
+ * tinted blue when it's set, like a set field's border.
+ */
+export const segmentClass = (selected: boolean, set: boolean) =>
+  `flex cursor-pointer items-center rounded px-2 transition-colors has-[:focus-visible]:ring-1 has-[:focus-visible]:ring-blue-500 ${
+    selected ? (set ? "bg-blue-500/20 text-slate-100" : "bg-slate-700 text-slate-100") : "text-slate-400 hover:text-slate-200"
+  }`;

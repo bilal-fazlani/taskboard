@@ -135,6 +135,49 @@ describe("filter panel", () => {
     expect(html).toContain("Clear filters");
   });
 
+  // The radios' values, the checked one marked with a star, or null when the
+  // page has no dim-or-hide choice.
+  function unmatchedChoice(html: string): string[] | null {
+    const group = /<div role="radiogroup" aria-label="Cards the filters don&#x27;t match"[^>]*>(.*?)<\/div>/.exec(html);
+    if (!group) return null;
+    return [...group[1].matchAll(/<input type="radio"([^>]*)\/>([^<]*)/g)].map(
+      (m) => `${m[2]}${/checked=""/.test(m[1]) ? "*" : ""}`,
+    );
+  }
+
+  it("offers Dim or Hide on Dependencies only, after the search and before Clear filters, with Dim the default", () => {
+    expect(unmatchedChoice(render("/?project=ACP&label=web"))).toEqual(["Dim*", "Hide"]);
+    // Shown with no filter to dim or hide by, too, so the bar doesn't jump.
+    expect(unmatchedChoice(render("/?project=ACP"))).toEqual(["Dim*", "Hide"]);
+    const html = render("/?project=ACP&label=web");
+    const at = (text: string) => html.indexOf(text);
+    expect(at('aria-label="Search"')).toBeLessThan(at('role="radiogroup"'));
+    expect(at('role="radiogroup"')).toBeLessThan(at("Clear filters"));
+    // A tooltip says what it's for; there is no visible label.
+    expect(html).toContain('title="Cards the filters don&#x27;t match: dim them or hide them"');
+    expect(unmatchedChoice(render("/kanban?project=ACP&label=web"))).toBeNull();
+    expect(unmatchedChoice(render("/table?project=ACP&label=web"))).toBeNull();
+    expect(unmatchedChoice(render("/kanban?project=ACP&unmatched=hide"))).toBeNull();
+  });
+
+  it("reads hide mode from the URL on Dependencies, and dim for a value that means nothing", () => {
+    expect(unmatchedChoice(render("/?project=ACP&label=web&unmatched=hide"))).toEqual(["Dim", "Hide*"]);
+    expect(unmatchedChoice(render("/?project=ACP&unmatched=bogus"))).toEqual(["Dim*", "Hide"]);
+  });
+
+  it("carries hide mode to the other views with the filters", () => {
+    const html = render("/?ticket=ACP-7&unmatched=hide&label=web&project=ACP");
+    expect(viewsGroupLinks(html)).toEqual([
+      "Dependencies /?project=ACP&amp;label=web&amp;unmatched=hide",
+      "Kanban /kanban?project=ACP&amp;label=web&amp;unmatched=hide",
+      "Table /table?project=ACP&amp;label=web&amp;unmatched=hide",
+    ]);
+    // Kanban ignores it but keeps it in its links, for the way back.
+    expect(viewsGroupLinks(render("/kanban?project=ACP&unmatched=hide"))[0]).toBe("Dependencies /?project=ACP&amp;unmatched=hide");
+    expect(viewsGroupLinks(render("/?project=ACP&unmatched=bogus"))[1]).toBe("Kanban /kanban?project=ACP");
+    expect(render("/?project=ACP&unmatched=hide")).toMatch(/href="\/epics"/);
+  });
+
   it("carries the filters, and only the filters, to the other views, not to Projects, Epics or Labels", () => {
     const html = render("/kanban?ticket=ACP-7&label=web&project=ACP");
     expect(viewsGroupLinks(html)).toEqual([

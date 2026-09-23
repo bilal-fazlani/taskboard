@@ -1,12 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { Search, X } from "lucide-react";
 import { api, type Epic, type Label, type Project } from "../api/client";
 import type { FilterState } from "../hooks/useFilters";
 import { useLiveRefresh } from "../hooks/useLiveRefresh";
-import { CONTROL_BUTTON, fieldClass } from "./controlStyles";
+import { CONTROL_BUTTON, fieldClass, segmentClass, segmentedClass } from "./controlStyles";
 import ProjectSelect from "./ProjectSelect";
 import { activeProjects, namedProject, type ActivityTicket } from "../lib/defaultProject";
-import { NO_EPIC, selectOptions, urlValue, type FilterKey, type SelectOption } from "../lib/filters";
+import { NO_EPIC, selectOptions, urlValue, type FilterKey, type SelectOption, type UnmatchedMode } from "../lib/filters";
 import { PRIORITIES } from "../lib/priority";
 import { staleFilters } from "../lib/staleFilters";
 import { STATUSES, STATUS_LABELS } from "../lib/status";
@@ -49,6 +49,44 @@ function FilterSelect({
   );
 }
 
+const UNMATCHED_MODES: readonly { mode: UnmatchedMode; label: string }[] = [
+  { mode: "dim", label: "Dim" },
+  { mode: "hide", label: "Hide" },
+];
+
+/**
+ * Dependencies' choice between dimming and hiding the cards the filters don't
+ * match. It has no visible label, only a tooltip, and its radios are native
+ * ones, visually hidden, so the arrow keys move between them. Dim, the
+ * default, looks like an unset field; Hide stands out in blue like a set one.
+ */
+function UnmatchedToggle({ mode, onChange }: { mode: UnmatchedMode; onChange: (mode: UnmatchedMode) => void }) {
+  const name = useId();
+  const set = mode !== "dim";
+  return (
+    <div
+      role="radiogroup"
+      aria-label="Cards the filters don't match"
+      title="Cards the filters don't match: dim them or hide them"
+      className={segmentedClass(set)}
+    >
+      {UNMATCHED_MODES.map((option) => (
+        <label key={option.mode} className={segmentClass(option.mode === mode, set)}>
+          <input
+            type="radio"
+            name={name}
+            value={option.mode}
+            checked={option.mode === mode}
+            onChange={() => onChange(option.mode)}
+            className="sr-only"
+          />
+          {option.label}
+        </label>
+      ))}
+    </div>
+  );
+}
+
 /**
  * The filter bar shared by Dependencies, Kanban and Table. Its state is the
  * URL's (see useFilters); each page decides what a filter does to its tickets
@@ -60,6 +98,7 @@ export default function FilterPanel({
   tickets,
   repos,
   count,
+  unmatched,
 }: {
   state: FilterState;
   /**
@@ -72,6 +111,12 @@ export default function FilterPanel({
   repos: string[];
   /** Matching and total tickets, once loaded. */
   count?: { shown: number; total: number };
+  /**
+   * Whether the cards the filters don't match are dimmed or hidden, and how
+   * to change it; given by Dependencies only, which is the only view that
+   * shows the choice. It is no filter, so Clear filters leaves it alone.
+   */
+  unmatched?: { mode: UnmatchedMode; onChange: (mode: UnmatchedMode) => void };
 }) {
   const { filters, active, latestFilters, setFilter, dropFilters, clearFilters } = state;
   // The projects and labels the bar offers, and checks the URL's filters
@@ -248,6 +293,7 @@ export default function FilterPanel({
           className={`${fieldClass(filters.q !== "")} w-60 pl-7 placeholder:text-slate-500`}
         />
       </div>
+      {unmatched && <UnmatchedToggle mode={unmatched.mode} onChange={unmatched.onChange} />}
       {active && (
         <button
           type="button"

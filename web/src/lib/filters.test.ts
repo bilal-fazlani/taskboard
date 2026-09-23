@@ -4,15 +4,19 @@ import {
   FILTER_KEYS,
   NARROWING_KEYS,
   NO_EPIC,
+  UNMATCHED_PARAM,
   filterSearch,
   hasFilters,
+  hasInvalidUnmatched,
   inProject,
   matchesFilters,
   parseFilters,
+  parseUnmatched,
   repoOptions,
   selectOptions,
   urlValue,
   withFilter,
+  withUnmatched,
   withoutFilters,
   type FilterableTicket,
   type Filters,
@@ -201,6 +205,56 @@ describe("URL state", () => {
     expect(filterSearch("?ticket=ACP-7")).toBe("");
     expect(filterSearch("?ticket=ACP-7&label=web&project=ACP&q=")).toBe("?project=ACP&label=web");
     expect(filterSearch("?q=a%26b")).toBe("?q=a%26b");
+  });
+
+  it("carries hide mode to another view, and nothing for dim or a value that means nothing", () => {
+    expect(filterSearch("?unmatched=hide&ticket=ACP-7&label=web&project=ACP")).toBe(
+      "?project=ACP&label=web&unmatched=hide",
+    );
+    expect(filterSearch("?unmatched=hide")).toBe("?unmatched=hide");
+    expect(filterSearch("?project=ACP&unmatched=dim")).toBe("?project=ACP");
+    expect(filterSearch("?project=ACP&unmatched=HIDE")).toBe("?project=ACP");
+  });
+});
+
+describe("unmatched mode", () => {
+  const params = (qs: string) => new URLSearchParams(qs);
+
+  it("is hide only for unmatched=hide, and dim otherwise", () => {
+    expect(UNMATCHED_PARAM).toBe("unmatched");
+    expect(parseUnmatched(params("unmatched=hide"))).toBe("hide");
+    expect(parseUnmatched(params(""))).toBe("dim");
+    expect(parseUnmatched(params("unmatched=dim"))).toBe("dim");
+    expect(parseUnmatched(params("unmatched=Hide"))).toBe("dim");
+    expect(parseUnmatched(params("unmatched="))).toBe("dim");
+  });
+
+  it("calls any value but hide invalid, and no value valid", () => {
+    expect(hasInvalidUnmatched(params(""))).toBe(false);
+    expect(hasInvalidUnmatched(params("project=ACP&unmatched=hide"))).toBe(false);
+    expect(hasInvalidUnmatched(params("unmatched=dim"))).toBe(true);
+    expect(hasInvalidUnmatched(params("unmatched=bogus"))).toBe(true);
+    expect(hasInvalidUnmatched(params("unmatched="))).toBe(true);
+  });
+
+  it("is written only in hide mode, keeping every other parameter", () => {
+    const start = params("project=ACP&ticket=ACP-7");
+    const hidden = withUnmatched(start, "hide");
+    expect(hidden.toString()).toBe("project=ACP&ticket=ACP-7&unmatched=hide");
+    expect(withUnmatched(hidden, "dim").toString()).toBe("project=ACP&ticket=ACP-7");
+    expect(withUnmatched(params("unmatched=bogus&q=x"), "dim").toString()).toBe("q=x");
+    // The input is never modified.
+    expect(start.toString()).toBe("project=ACP&ticket=ACP-7");
+  });
+
+  it("is no filter: not parsed as one, not counted, and not removed by clearing the filters", () => {
+    const withHide = params("project=ACP&unmatched=hide");
+    expect(parseFilters(withHide)).toEqual({ ...EMPTY_FILTERS, project: "ACP" });
+    expect(hasFilters(parseFilters(withHide), NARROWING_KEYS)).toBe(false);
+    expect((FILTER_KEYS as readonly string[]).includes(UNMATCHED_PARAM)).toBe(false);
+    expect(withoutFilters(params("project=ACP&label=web&unmatched=hide"), NARROWING_KEYS).toString()).toBe(
+      "project=ACP&unmatched=hide",
+    );
   });
 });
 

@@ -7,11 +7,12 @@ import TicketCard from "../components/TicketCard";
 import FilterPanel from "../components/FilterPanel";
 import { useChangeGlow } from "../hooks/useChangeGlow";
 import { useFilters } from "../hooks/useFilters";
+import { useUnmatched } from "../hooks/useUnmatched";
 import { useLiveRefresh } from "../hooks/useLiveRefresh";
 import { useTicketParam } from "../hooks/useTicketParam";
 import { CHANGE_GLOW_CLASS } from "../lib/changeGlow";
 import { awaitingProject } from "../lib/defaultProject";
-import { inProject, matchesFilters, repoOptions } from "../lib/filters";
+import { NARROWING_KEYS, inProject, matchesFilters, repoOptions } from "../lib/filters";
 import {
   chainFinder,
   chainRole,
@@ -86,8 +87,9 @@ const CARD_CHAIN_CLASSES: Record<ChainRole, string> = {
   none: "opacity-22",
 };
 
-// A card or edge the filters don't match dims rather than leaving the graph,
-// so the arrows stay whole. A lit chain overrides this while it's shown.
+// In dim mode, the default, a card or edge the filters don't match dims
+// rather than leaving the graph, so the arrows stay whole. A lit chain
+// overrides this while it's shown. Hide mode leaves those cards out instead.
 const FILTERED_OUT = "opacity-20";
 
 const EDGE_CHAIN_STYLES: Record<Exclude<EdgeChainRole, "none">, { className: string; marker: string }> = {
@@ -122,7 +124,8 @@ const FIT_INSETS: Insets = { top: FIT_PADDING, right: FIT_PADDING, bottom: 16 + 
 const TOOL_BUTTON =
   "flex items-center justify-center w-7 h-7 rounded text-slate-400 transition-colors hover:text-slate-200 hover:bg-slate-800 disabled:text-slate-700 disabled:hover:bg-transparent";
 
-// With filters set, a column's count is its matching cards out of all of them.
+// With filters set in dim mode, a column's count is its matching cards out of
+// all of them. In hide mode every card shown matches, so it's a plain count.
 function ColumnHeader({ column, matching }: { column: PositionedColumn; matching?: number }) {
   return (
     <div
@@ -149,7 +152,8 @@ export default function Graph() {
   // Null until the first load.
   const [projects, setProjects] = useState<Project[] | null>(null);
   // Every project's tickets, null until the first fetch. The graph is laid
-  // out from the selected project's alone; the other filters only dim cards.
+  // out from the selected project's alone; the other filters dim cards, or in
+  // hide mode leave them out too.
   // Neither refetches: the editor can open any project's ticket.
   const [fetched, setFetched] = useState<Ticket[] | null>(null);
   // Bumped after an edit to refetch.
@@ -168,6 +172,9 @@ export default function Graph() {
   const [panning, setPanning] = useState(false);
   const filterState = useFilters();
   const { filters } = filterState;
+  const { mode: unmatched, setMode: setUnmatched } = useUnmatched();
+  // Hide mode only changes anything while a filter but the project is set.
+  const hiding = unmatched === "hide" && filterState.active;
 
   // Reloaded with the tickets, so the editor names a project that was renamed
   // elsewhere. A failed reload keeps the projects already loaded, and a reply
@@ -229,7 +236,17 @@ export default function Graph() {
   // Only the selected project's tickets are laid out. A dependency on another
   // project's unfinished ticket is not an edge: the card counts it as a
   // hidden blocker and sits right of Ready, as for any blocker not drawn.
-  const shownTickets = useMemo(() => inProject(fetched ?? [], filters.project), [fetched, filters.project]);
+  const projectTickets = useMemo(() => inProject(fetched ?? [], filters.project), [fetched, filters.project]);
+  // Hide mode lays out only the tickets the filters match, so an unfinished
+  // blocker they leave out is counted as hidden, like one in another project,
+  // and the columns may shift left. A dependency on a done ticket still
+  // counts as done, from the status its reference carries.
+  const shownTickets = useMemo(
+    () => (hiding ? projectTickets.filter((t) => matchesFilters(t, filters)) : projectTickets),
+    [hiding, projectTickets, filters],
+  );
+  // The project's open tickets, which the count is out of in either mode.
+  const projectOpenCount = useMemo(() => projectTickets.filter((t) => !isDone(t.status)).length, [projectTickets]);
   // Once per fetched ticket set or project; measuring only repositions.
   const topology = useMemo(() => computeGraphTopology(shownTickets), [shownTickets]);
   // Back edges' vertical runs need room in the gaps and beside the outer
@@ -263,14 +280,14 @@ export default function Graph() {
   // project brings no card in and nothing flashes.
   const openTickets = useMemo(() => fetched?.filter((t) => !isDone(t.status)) ?? null, [fetched]);
   const glowing = useChangeGlow(openTickets);
-  // The ids of the cards the filters match, or null when no filter but the
-  // project is set: every card on the graph is in the project.
+  // The ids of the cards the filters match, or null when every card on the
+  // graph does: with no filter but the project set, or in hide mode.
   const matching = useMemo(
     () =>
-      filterState.active
+      filterState.active && !hiding
         ? new Set(topology.nodes.filter((node) => matchesFilters(node.ticket, filters)).map((node) => node.id))
         : null,
-    [filterState.active, topology, filters],
+    [filterState.active, hiding, topology, filters],
   );
   const dimmed = (id: string) => matching !== null && !matching.has(id);
   // Matching cards per column, for the column headers.
@@ -280,7 +297,7 @@ export default function Graph() {
     for (const node of topology.nodes) if (matching.has(node.id)) counts[node.column]++;
     return counts;
   }, [matching, topology]);
-  const repos = useMemo(() => repoOptions(shownTickets, filters.repo), [shownTickets, filters.repo]);
+  const repos = useMemo(() => repoOptions(projectTickets, filters.repo), [projectTickets, filters.repo]);
   // Adjacency once per topology; the chains once per pick, not per render.
   const findChains = useMemo(() => chainFinder(topology), [topology]);
   const lit = highlightedCard(picked);
@@ -367,19 +384,23 @@ export default function Graph() {
   const canvasWidth = layout.width + gutters.right;
   const canvasHeight = Math.max(layout.height, origin.y + CARD_SIZE.height);
 
-  // The view fits itself only on first load and when the project changes,
-  // which lays out a different graph. Other filters, tickets appearing or
-  // leaving, the column count changing, cards resizing and the window
-  // resizing never move it; the Fit button does. A pending fit waits for the
-  // tickets to arrive and form a graph, for every card to be measured, so it
-  // fits the real extent, and for the viewport's size. With no open tickets
-  // the fit stays pending, so the first graph shown is fitted. The fit is
-  // state adjusted while rendering: React renders again before committing, so
-  // the unfitted graph is never painted, and the canvas stays invisible while
-  // a fit is pending.
-  const [laidOutProject, setLaidOutProject] = useState(filters.project.toLowerCase());
-  if (filters.project.toLowerCase() !== laidOutProject) {
-    setLaidOutProject(filters.project.toLowerCase());
+  // The view fits itself only on first load and on the user's changes that
+  // lay out a different graph: the project, dim or hide mode, and, while hide
+  // mode leaves cards out, the filters. It is keyed on those choices and never
+  // on the cards they lay out, so tickets appearing or leaving in a live
+  // refresh don't move it, in either mode. Nor do filters in dim mode, the
+  // column count changing, cards resizing and the window resizing; the Fit
+  // button does. A pending fit waits for the tickets to arrive and form a
+  // graph, for every card to be measured, so it fits the real extent, and for
+  // the viewport's size. With no open tickets the fit stays pending, so the
+  // first graph shown is fitted. The fit is state adjusted while rendering:
+  // React renders again before committing, so the unfitted graph is never
+  // painted, and the canvas stays invisible while a fit is pending.
+  const hiddenBy = hiding ? NARROWING_KEYS.map((key) => filters[key]).join("\n") : "";
+  const graphKey = `${filters.project.toLowerCase()}\n${unmatched}\n${hiddenBy}`;
+  const [laidOut, setLaidOut] = useState(graphKey);
+  if (graphKey !== laidOut) {
+    setLaidOut(graphKey);
     setFitPending(true);
   }
   const measured = useMemo(() => topology.nodes.every((node) => sizes.has(node.id)), [topology, sizes]);
@@ -540,7 +561,7 @@ export default function Graph() {
   // Fit frames the cards the filters match; the dimmed ones keep their places
   // and may end up outside the view, and so may a back edge's lane or a
   // self-loop between two matching cards, which run outside their box. With no
-  // filter set, or with every card or none of them matching, matchingBounds
+  // filter set, in hide mode, or with every card or none of them matching, matchingBounds
   // answers null and Fit frames the whole canvas, as first load always does.
   const fit = () => {
     if (!viewportSize) return;
@@ -558,7 +579,8 @@ export default function Graph() {
         state={filterState}
         tickets={fetched}
         repos={repos}
-        count={loading ? undefined : { shown: matching?.size ?? topology.nodes.length, total: topology.nodes.length }}
+        count={loading ? undefined : { shown: matching?.size ?? topology.nodes.length, total: projectOpenCount }}
+        unmatched={{ mode: unmatched, onChange: setUnmatched }}
       />
 
       <div
@@ -580,11 +602,22 @@ export default function Graph() {
             Loading graph…
           </div>
         ) : topology.nodes.length === 0 ? (
+          // Hide mode can leave out every open ticket the project has, which
+          // is not the same as having none.
           <div className="flex flex-col items-center justify-center gap-1 h-full text-center">
-            <p className="text-sm text-slate-400">No open tickets</p>
-            <p className="text-xs text-slate-600">
-              Tickets that aren't done show up here, arranged by what blocks them.
-            </p>
+            {hiding && projectOpenCount > 0 ? (
+              <>
+                <p className="text-sm text-slate-400">No open tickets match the filters</p>
+                <p className="text-xs text-slate-600">Switch to Dim or clear filters to see the rest.</p>
+              </>
+            ) : (
+              <>
+                <p className="text-sm text-slate-400">No open tickets</p>
+                <p className="text-xs text-slate-600">
+                  Tickets that aren't done show up here, arranged by what blocks them.
+                </p>
+              </>
+            )}
           </div>
         ) : (
           <div
