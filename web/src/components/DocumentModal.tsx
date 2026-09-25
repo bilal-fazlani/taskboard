@@ -29,8 +29,9 @@ type Saved = { revision: number; content: string };
 // An HTML document is never fetched here or edited: it fills the modal in a
 // frame pointed at the server's raw route, sandboxed to scripts only there
 // and here (DOCUMENT_SANDBOX), so it runs in an opaque origin and cannot act
-// as the board. The frame's src carries the revision, so an agent's save
-// reloads it.
+// as the board. The frame's src carries the revision, and a new revision
+// mounts a new frame, so an agent's save reloads it without adding a
+// history entry.
 //
 // A save sends the revision the text started from, so one made after
 // someone else's is refused (409) rather than overwriting it. While editing,
@@ -278,6 +279,10 @@ export default function DocumentModal({
   if (!editable) {
     body = (
       <iframe
+        // A new revision mounts a new frame rather than changing this one's
+        // src: a frame navigating adds a joint session history entry, and
+        // × (which goes Back) would then only step back inside the frame.
+        key={`${doc.id}:${doc.revision}`}
         title={shown}
         src={api.documents.rawUrl(doc.id, doc.revision)}
         sandbox={DOCUMENT_SANDBOX}

@@ -389,11 +389,22 @@ describe("HTML documents", () => {
     expect(screen.getByRole("button", { name: "Delete Report.html" })).toBeTruthy();
   });
 
-  it("reloads the frame when an agent saves a new revision", () => {
+  it("reloads the frame when an agent saves a new revision, in a new frame element", () => {
     const { rerender } = setup(page);
+    const before = screen.getByTitle("Report.html");
+    // The same revision keeps the frame.
+    rerender({ doc: { ...page }, documents: [page] });
+    expect(screen.getByTitle("Report.html")).toBe(before);
+
     const next = { ...page, revision: 4 };
     rerender({ doc: next, documents: [next] });
-    expect(screen.getByTitle("Report.html").getAttribute("src")).toBe("/api/documents/h1/raw?rev=4");
+    const after = screen.getByTitle("Report.html");
+    expect(after.getAttribute("src")).toBe("/api/documents/h1/raw?rev=4");
+    // A new element, not a new src on the old one: changing a frame's src
+    // adds a browser history entry, so × (a Back) would only go back inside
+    // the frame and leave the modal open.
+    expect(after).not.toBe(before);
+    expect(before.isConnected).toBe(false);
   });
 
   it("never opens an HTML document in edit mode", () => {
