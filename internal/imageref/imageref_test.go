@@ -87,6 +87,8 @@ func TestRenameMarkdownForms(t *testing.T) {
 		{name: "spaced form with a character reference is text, as on the web", in: "![a&amp;b](Login screen.png) ![c](Login&#32;x screen.png)", want: "![a&amp;b](Login screen.png) ![c](Login&#32;x screen.png)", uses: 0},
 		{name: "spaced form with a backslash escape is text, as on the web", img: Image{Name: "Login _screen", Format: "png"}, in: `![a](Login \_screen.png) ![b\*](Login _screen.png)`, want: `![a](Login \_screen.png) ![b\*](Login _screen.png)`, uses: 0},
 		{name: "spaced form beside one with a character reference", in: "![a&amp;b](Login screen.png) and ![c](Login screen.png)", want: "![a&amp;b](Login screen.png) and ![c](Home page.png)", uses: 1, rewritten: 1},
+		{name: "a pasted image's reference", img: Image{Name: "Pasted image 2", Format: "png"}, newName: "Checkout form", in: "Steps:\n\n![](Pasted image 2.png)\n", want: "Steps:\n\n![](Checkout form.png)\n", uses: 1, rewritten: 1},
+		{name: "a pasted image's reference, angle-bracketed for underscores", img: Image{Name: "my _draft_ shot", Format: "png"}, newName: "final _cut_ shot", in: "![](<my _draft_ shot.png>)", want: "![](<final _cut_ shot.png>)", uses: 1, rewritten: 1},
 		{name: "empty text", in: "", want: "", uses: 0},
 	})
 }
