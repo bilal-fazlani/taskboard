@@ -290,3 +290,17 @@ func (s *Server) rawDocument(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	io.WriteString(w, d.Content)
 }
+
+// searchDocuments answers GET /api/documents/search?q=&projectId= with the
+// ids of the tickets whose own documents match q by display name or
+// readable text: {"ticketIds": [...]}. The web search asks it for the part of
+// the search it cannot do itself.
+func (s *Server) searchDocuments(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	ids, err := s.store.SearchDocumentTickets(q.Get("q"), q.Get("projectId"))
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string][]string{"ticketIds": ids})
+}

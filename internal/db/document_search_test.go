@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -157,4 +158,99 @@ func TestMissingTextCheckUsesTheIndex(t *testing.T) {
 	if len(plan) == 0 || plan[0] != "SCAN d USING COVERING INDEX idx_documents_revision" {
 		t.Fatalf("query plan = %q", plan)
 	}
+}
+
+func TestSearchDocumentTickets(t *testing.T) {
+	s := newTestStore(t)
+	p := seedProject(t, s, "Docs", "DOC")
+	other := seedProject(t, s, "Other", "OTH")
+	named := seedTicket(t, s, p.ID, "Named")
+	inText := seedTicket(t, s, p.ID, "In text")
+	styled := seedTicket(t, s, p.ID, "Styled page")
+	linked := seedTicket(t, s, p.ID, "Linked")
+	seedTicket(t, s, p.ID, "No documents")
+	elsewhere := seedTicket(t, s, other.ID, "Elsewhere")
+	e := seedEpic(t, s, p.ID, "Launch")
+
+	seedDocument(t, s, named.ID, "Storage plan", "nothing here")
+	seedDocument(t, s, inText.ID, "Notes", "We compared the ÉTUDE results.")
+	if _, err := s.CreateDocument(models.CreateDocumentRequest{
+		TicketID: styled.ID, Name: "Report", Format: models.DocumentFormatHTML,
+		Content: `<style>.a { color: red }</style><div class="wrapper"><p>Latency <b>bud</b>get</p><p>one</p><p>two</p></div>`,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	seedDocument(t, s, linked.ID, "Links", "Read [the runbook](https://example.com/zebra) and ![a diagram](arch.png).")
+	seedDocument(t, s, elsewhere.ID, "Storage", "")
+	if _, err := s.CreateDocument(models.CreateDocumentRequest{EpicID: e.ID, Name: "Epic storage", Content: "étude giraffe"}); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		q, project string
+		want       []string
+	}{
+		// Display names, in any case, anywhere in a word.
+		{"storage", "DOC", []string{named.ID}},
+		{"  STORAGE ", "", sortedIDs(named.ID, elsewhere.ID)},
+		{"plan.md", "DOC", []string{named.ID}},
+		{"report.html", "doc", []string{styled.ID}},
+		// Readable text, with a Unicode case fold.
+		{"nothing here", "DOC", []string{named.ID}},
+		{"étude", "doc", []string{inText.ID}},
+		{"ÉTUDE", "DOC", []string{inText.ID}},
+		// HTML: visible text, joined across inline tags, never markup.
+		{"budget", "DOC", []string{styled.ID}},
+		{"style", "DOC", []string{}},
+		{"wrapper", "DOC", []string{}},
+		{"color", "DOC", []string{}},
+		{"onetwo", "DOC", []string{}},
+		// Markdown: link and alt text, not their addresses.
+		{"runbook", "DOC", []string{linked.ID}},
+		{"diagram", "DOC", []string{linked.ID}},
+		{"zebra", "DOC", []string{}},
+		{"arch.png", "DOC", []string{}},
+		// Epic documents are never searched.
+		{"giraffe", "DOC", []string{}},
+		{"epic storage", "", []string{}},
+		{"absent", "DOC", []string{}},
+		{"   ", "DOC", []string{}},
+		{"storage", "NOPE", []string{}},
+	} {
+		got, err := s.SearchDocumentTickets(tc.q, tc.project)
+		if err != nil {
+			t.Fatalf("search %q: %v", tc.q, err)
+		}
+		if got == nil || !slices.Equal(got, tc.want) {
+			t.Errorf("search %q in %q = %#v, want %#v", tc.q, tc.project, got, tc.want)
+		}
+	}
+
+	// A ticket with several matching documents is listed once.
+	seedDocument(t, s, named.ID, "Storage notes", "")
+	got, err := s.SearchDocumentTickets("storage", "DOC")
+	if err != nil || !slices.Equal(got, []string{named.ID}) {
+		t.Fatalf("two matching documents: %#v, %v", got, err)
+	}
+
+	// The search follows a content save, and not the old text.
+	content := "now about zebras"
+	doc, err := s.ResolveDocumentRef(DocumentOwner{TicketID: inText.ID}, "Notes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.UpdateDocument(doc, models.UpdateDocumentRequest{Content: &content}); err != nil {
+		t.Fatal(err)
+	}
+	for q, want := range map[string][]string{"étude": {}, "zebra": {inText.ID}} {
+		got, err := s.SearchDocumentTickets(q, "DOC")
+		if err != nil || !slices.Equal(got, want) {
+			t.Errorf("after the save, search %q = %#v, %v; want %#v", q, got, err, want)
+		}
+	}
+}
+
+func sortedIDs(ids ...string) []string {
+	slices.Sort(ids)
+	return ids
 }

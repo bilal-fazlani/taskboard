@@ -4,6 +4,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"testing"
 
@@ -466,5 +467,37 @@ func TestEpicDocumentsOverHTTP(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusNoContent {
 		t.Fatalf("delete by epic name status = %d", resp.StatusCode)
+	}
+}
+
+func TestSearchDocumentsOverHTTP(t *testing.T) {
+	r := serve(t)
+	tk, _ := seedTicketDocument(t, r)
+	if _, err := r.srv.store.CreateDocument(models.CreateDocumentRequest{
+		TicketID: tk.ID, Name: "Report", Format: models.DocumentFormatHTML,
+		Content: "<style>p { margin: 0 }</style><p>Readable words</p>",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	type result struct {
+		TicketIDs []string `json:"ticketIds"`
+	}
+	for _, tc := range []struct {
+		query string
+		want  []string
+	}{
+		{"q=SPEC&projectId=DOC", []string{tk.ID}},
+		{"q=design+spec.md&projectId=doc", []string{tk.ID}},
+		{"q=readable+WORDS&projectId=DOC", []string{tk.ID}},
+		{"q=style&projectId=DOC", []string{}},
+		{"q=margin&projectId=DOC", []string{}},
+		{"q=spec&projectId=NOPE", []string{}},
+		{"q=", []string{}},
+	} {
+		got, status := doRequest[result](t, http.MethodGet, r.url+"/api/documents/search?"+tc.query, "")
+		if status != http.StatusOK || got.TicketIDs == nil || !slices.Equal(got.TicketIDs, tc.want) {
+			t.Errorf("search %s: %d %#v, want %#v", tc.query, status, got.TicketIDs, tc.want)
+		}
 	}
 }

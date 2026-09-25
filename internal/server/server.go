@@ -224,6 +224,7 @@ func (s *Server) setupRoutes(webFS fs.FS) {
 
 		r.Route("/documents", func(r chi.Router) {
 			r.Post("/", s.createDocument)
+			r.Get("/search", s.searchDocuments)
 			r.Get("/{ref}", s.getDocument)
 			r.Put("/{ref}", s.updateDocument)
 			r.Delete("/{ref}", s.deleteDocument)

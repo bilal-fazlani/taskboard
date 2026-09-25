@@ -3,9 +3,63 @@ package db
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 
 	"github.com/tcarac/taskboard/internal/doctext"
+	"github.com/tcarac/taskboard/internal/models"
 )
+
+// SearchDocumentTickets returns the ids of the tickets that have a document
+// whose display name ("Plan.md") or readable text contains q anywhere, even
+// inside a word, ignoring case. It reads the text kept in document_search,
+// never the content. Only tickets' own documents count, not epics'. With
+// projectRef (id or prefix) it looks in that project only. q is trimmed; an
+// empty q, or a project that names nothing, matches no tickets. Case is
+// folded here with strings.ToLower rather than in SQL, whose lower() and
+// LIKE fold ASCII only. The result is sorted and never nil.
+func (s *Store) SearchDocumentTickets(q, projectRef string) ([]string, error) {
+	ids := []string{}
+	needle := strings.ToLower(strings.TrimSpace(q))
+	if needle == "" {
+		return ids, nil
+	}
+	query := `SELECT d.ticket_id, d.name, d.format, COALESCE(ds.text, '') FROM documents d
+		JOIN tickets t ON t.id = d.ticket_id
+		LEFT JOIN document_search ds ON ds.document_id = d.id`
+	var args []any
+	if strings.TrimSpace(projectRef) != "" {
+		projectID, ok, err := resolveProjectFilterID(s.db, projectRef)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			return ids, nil
+		}
+		query += " WHERE t.project_id = ?"
+		args = append(args, projectID)
+	}
+	query += " ORDER BY d.ticket_id"
+
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("searching documents: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var ticketID, name, format, text string
+		if err := rows.Scan(&ticketID, &name, &format, &text); err != nil {
+			return nil, err
+		}
+		if len(ids) > 0 && ids[len(ids)-1] == ticketID {
+			continue
+		}
+		if strings.Contains(strings.ToLower(models.DocumentDisplayName(name, format)), needle) ||
+			strings.Contains(strings.ToLower(text), needle) {
+			ids = append(ids, ticketID)
+		}
+	}
+	return ids, rows.Err()
+}
 
 // saveDocumentText records a document's readable text as of revision, the
 // revision its content has once the caller's write lands.
