@@ -178,3 +178,45 @@ func (s *Server) downloadDocument(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	io.WriteString(w, d.Content)
 }
+
+// documentSandbox is the sandbox an HTML document runs in, framed or opened
+// on its own. Scripts run, and may load from the internet, but nothing else
+// is granted: with no allow-same-origin the page has an opaque origin, so it
+// cannot read the board's storage and its writes arrive with Origin: null,
+// which rejectCrossOriginWrites refuses; with no allow-top-navigation or
+// allow-popups it cannot navigate the board away or escape into a new
+// window; and with no allow-forms, allow-modals or allow-downloads its forms
+// don't submit, alert/confirm/prompt/print are blocked and it cannot start a
+// download. It must match the iframe's sandbox attribute (DOCUMENT_SANDBOX
+// in web/src/lib/documents.ts).
+const documentSandbox = "sandbox allow-scripts"
+
+// rawDocument serves a document's content inline, for the web UI's HTML
+// frame. The sandbox header applies even when the URL is opened directly in
+// a tab, where no iframe attribute is there to confine it.
+func (s *Server) rawDocument(w http.ResponseWriter, r *http.Request) {
+	id, ok := s.documentID(w, r)
+	if !ok {
+		return
+	}
+	d, err := s.store.GetDocument(id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if d == nil {
+		writeError(w, http.StatusNotFound, "document not found")
+		return
+	}
+	contentType := "text/plain; charset=utf-8"
+	if d.Format == models.DocumentFormatHTML {
+		contentType = "text/html; charset=utf-8"
+	}
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Content-Security-Policy", documentSandbox)
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Referrer-Policy", "no-referrer")
+	w.WriteHeader(http.StatusOK)
+	io.WriteString(w, d.Content)
+}

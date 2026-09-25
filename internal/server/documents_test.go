@@ -226,3 +226,150 @@ func TestStaleSaveIsAConflict(t *testing.T) {
 		t.Fatalf("save at the current revision: %d %+v", status, saved)
 	}
 }
+
+// The sandbox tokens the raw route may grant, and those it must never grant.
+// allow-forms, allow-modals and allow-downloads were ruled out on purpose:
+// the page's forms don't submit, alert/confirm/prompt/print are blocked, and
+// it cannot start a download of its own.
+var forbiddenSandboxTokens = []string{
+	"allow-same-origin", "allow-top-navigation", "allow-popups",
+	"allow-forms", "allow-modals", "allow-downloads",
+}
+
+func TestRawDocumentIsSandboxed(t *testing.T) {
+	r := serve(t)
+	tk, _ := seedTicketDocument(t, r)
+	page, err := r.srv.store.CreateDocument(models.CreateDocumentRequest{
+		TicketID: tk.ID, Name: "Report", Format: models.DocumentFormatHTML, Content: "<script>1</script>",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, path := range []string{
+		"/api/documents/" + page.ID + "/raw?rev=1",
+		"/api/documents/" + url.PathEscape("Report.html") + "/raw?ticket=DOC-1",
+	} {
+		resp, err := http.Get(r.url + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK || string(body) != "<script>1</script>" {
+			t.Fatalf("%s: %d %q", path, resp.StatusCode, body)
+		}
+		for header, want := range map[string]string{
+			"Content-Type":            "text/html; charset=utf-8",
+			"Content-Security-Policy": "sandbox allow-scripts",
+			"X-Content-Type-Options":  "nosniff",
+			"Cache-Control":           "no-store",
+			"Referrer-Policy":         "no-referrer",
+		} {
+			if got := resp.Header.Get(header); got != want {
+				t.Errorf("%s: %s = %q, want %q", path, header, got, want)
+			}
+		}
+		csp := resp.Header.Get("Content-Security-Policy")
+		for _, token := range forbiddenSandboxTokens {
+			if strings.Contains(csp, token) {
+				t.Errorf("%s: Content-Security-Policy %q grants %s", path, csp, token)
+			}
+		}
+		if got := resp.Header.Get("Access-Control-Allow-Origin"); got != "" {
+			t.Errorf("%s: Access-Control-Allow-Origin = %q, want none", path, got)
+		}
+		if got := resp.Header.Get("Content-Disposition"); got != "" {
+			t.Errorf("%s: Content-Disposition = %q, want none (shown inline)", path, got)
+		}
+	}
+}
+
+func TestRawMarkdownDocumentIsPlainText(t *testing.T) {
+	r := serve(t)
+	_, d := seedTicketDocument(t, r)
+	resp, err := http.Get(r.url + "/api/documents/" + d.ID + "/raw")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || string(body) != "# Spec\n" {
+		t.Fatalf("raw markdown: %d %q", resp.StatusCode, body)
+	}
+	if got := resp.Header.Get("Content-Type"); got != "text/plain; charset=utf-8" {
+		t.Errorf("Content-Type = %q", got)
+	}
+	if got := resp.Header.Get("Content-Security-Policy"); got != "sandbox allow-scripts" {
+		t.Errorf("Content-Security-Policy = %q", got)
+	}
+
+	_, status := errorBody(t, http.MethodGet, r.url+"/api/documents/nope/raw", "")
+	if status != http.StatusNotFound {
+		t.Fatalf("unknown document raw status = %d, want 404", status)
+	}
+}
+
+// Downloading an HTML document through the board's own route is untouched
+// by the sandbox: it is an attachment named with the display name.
+func TestDownloadHTMLDocument(t *testing.T) {
+	r := serve(t)
+	tk, _ := seedTicketDocument(t, r)
+	page, err := r.srv.store.CreateDocument(models.CreateDocumentRequest{
+		TicketID: tk.ID, Name: "Report", Format: models.DocumentFormatHTML, Content: "<h1>x</h1>",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.Get(r.url + "/api/documents/" + page.ID + "/download")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || string(body) != "<h1>x</h1>" {
+		t.Fatalf("download: %d %q", resp.StatusCode, body)
+	}
+	if got := resp.Header.Get("Content-Disposition"); got != `attachment; filename=Report.html` {
+		t.Errorf("Content-Disposition = %q", got)
+	}
+}
+
+// A sandboxed frame has an opaque origin, which the browser sends as
+// "Origin: null". Its scripts must not be able to write to the board, even
+// with a "simple" request that needs no CORS preflight.
+func TestWriteFromASandboxedFrameIsRefused(t *testing.T) {
+	r := serve(t)
+	_, d := seedTicketDocument(t, r)
+
+	for _, tc := range []struct{ method, path, body string }{
+		{http.MethodPut, "/api/documents/" + d.ID, `{"content":"pwned"}`},
+		{http.MethodDelete, "/api/documents/" + d.ID, ""},
+		{http.MethodPost, "/api/tickets", `{"projectId":"DOC","title":"pwned"}`},
+	} {
+		req, err := http.NewRequest(tc.method, r.url+tc.path, strings.NewReader(tc.body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Origin", "null")
+		req.Header.Set("Content-Type", "text/plain")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusForbidden {
+			t.Errorf("%s %s from Origin: null = %d, want 403", tc.method, tc.path, resp.StatusCode)
+		}
+	}
+	if got, _ := r.srv.store.GetDocument(d.ID); got == nil || got.Content != "# Spec\n" {
+		t.Fatal("the document changed")
+	}
+	tickets, err := r.srv.store.ListTickets(models.TicketFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tickets) != 1 {
+		t.Fatalf("tickets = %d, want only the seeded one", len(tickets))
+	}
+}

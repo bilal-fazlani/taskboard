@@ -226,6 +226,7 @@ func (s *Server) setupRoutes(webFS fs.FS) {
 			r.Put("/{ref}", s.updateDocument)
 			r.Delete("/{ref}", s.deleteDocument)
 			r.Get("/{ref}/download", s.downloadDocument)
+			r.Get("/{ref}/raw", s.rawDocument)
 		})
 
 		r.Get("/board", s.getBoard)
