@@ -148,7 +148,7 @@ func TestDocCommandErrors(t *testing.T) {
 	txt := filepath.Join(t.TempDir(), "notes.txt")
 	os.WriteFile(txt, []byte("x"), 0o644)
 	if _, err := runCLI(t, "--db", path, "doc", "add", "DOC-1", "--file", txt); err == nil ||
-		err.Error() != "Only .md, .html and .htm files can be attached." {
+		err.Error() != "Only .md, .html, .htm, .png, .jpg, .jpeg, .gif and .webp files can be attached." {
 		t.Fatalf("txt file: %v", err)
 	}
 	if _, err := runCLI(t, "--db", path, "doc", "show", "Plan"); err == nil || !strings.Contains(err.Error(), "--ticket") {

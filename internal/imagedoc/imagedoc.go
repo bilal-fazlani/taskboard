@@ -61,21 +61,6 @@ type Prepared struct {
 	ThumbnailType string
 }
 
-// formatName is how a format is named in messages.
-func formatName(format string) string {
-	switch format {
-	case models.DocumentFormatPNG:
-		return "PNG"
-	case models.DocumentFormatJPEG:
-		return "JPEG"
-	case models.DocumentFormatGIF:
-		return "GIF"
-	case models.DocumentFormatWebP:
-		return "WebP"
-	}
-	return format
-}
-
 // Sniff names the image format data holds by its first bytes: one of the
 // image formats, "svg" for an SVG (or other XML) file, or "".
 func Sniff(data []byte) string {
@@ -106,13 +91,13 @@ func Prepare(format string, data []byte) (*Prepared, error) {
 	if !models.IsImageFormat(format) {
 		return nil, fmt.Errorf("imagedoc: %q is not an image format", format)
 	}
-	name := formatName(format)
+	name := models.ImageFormatName(format)
 	switch sniffed := Sniff(data); {
 	case sniffed == format:
 	case sniffed == "svg":
 		return nil, refuse("This isn't a %s image: it's an SVG, and SVG images can't be attached.", name)
 	case sniffed != "":
-		return nil, refuse("This isn't a %s image: its content is %s.", name, formatName(sniffed))
+		return nil, refuse("This isn't a %s image: its content is %s.", name, models.ImageFormatName(sniffed))
 	default:
 		return nil, refuse("This isn't a %s image: its content is not PNG, JPEG, GIF or WebP.", name)
 	}

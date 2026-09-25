@@ -32,6 +32,22 @@ func IsImageFormat(format string) bool {
 	return false
 }
 
+// ImageFormatName is how an image format is named to people: "PNG",
+// "JPEG", "GIF", "WebP". Any other format comes back as it is.
+func ImageFormatName(format string) string {
+	switch format {
+	case DocumentFormatPNG:
+		return "PNG"
+	case DocumentFormatJPEG:
+		return "JPEG"
+	case DocumentFormatGIF:
+		return "GIF"
+	case DocumentFormatWebP:
+		return "WebP"
+	}
+	return format
+}
+
 // ImageMediaType is the Content-Type an image format is served with, and ""
 // for a format that is not an image.
 func ImageMediaType(format string) string {
