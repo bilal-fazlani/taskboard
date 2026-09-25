@@ -45,7 +45,7 @@ import {
   planGutters,
   routeEdges,
 } from "../lib/graphEdges";
-import { mergeSizes } from "../lib/graphSizes";
+import { entrySize, mergeSizes, pruneSizes } from "../lib/graphSizes";
 import { columnHeading, gridHeading } from "../lib/graphText";
 import { isDone } from "../lib/status";
 import {
@@ -390,9 +390,8 @@ export default function Graph() {
       observerRef.current = new ResizeObserver((entries) => {
         const measured: [string, Size][] = [];
         for (const entry of entries) {
-          const card = entry.target as HTMLElement;
-          const id = card.dataset.ticketId;
-          if (id) measured.push([id, { width: card.offsetWidth, height: card.offsetHeight }]);
+          const id = (entry.target as HTMLElement).dataset.ticketId;
+          if (id) measured.push([id, entrySize(entry)]);
         }
         flushSync(() => setSizes((prev) => mergeSizes(prev, measured)));
       });
@@ -403,7 +402,7 @@ export default function Graph() {
     attached.add(el);
     if (!watched.has(el)) {
       watched.add(el);
-      observer.observe(el);
+      observer.observe(el, { box: "border-box" });
     }
     return () => {
       attached.delete(el);
@@ -414,6 +413,14 @@ export default function Graph() {
       });
     };
   }, []);
+
+  // A card that leaves the graph takes its size with it. One that comes back
+  // is a new element, which the observer measures afresh before it's painted.
+  // State adjusted while rendering, like the fit below; pruneSizes hands back
+  // the same map while nothing has left, so this settles at once.
+  const nodeIds = useMemo(() => new Set(topology.nodes.map((node) => node.id)), [topology]);
+  const keptSizes = pruneSizes(sizes, nodeIds);
+  if (keptSizes !== sizes) setSizes(keptSizes);
 
   const handleUpdate = async (id: string, data: TicketWrite) => {
     await api.tickets.update(id, data);
