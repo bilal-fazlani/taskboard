@@ -449,6 +449,24 @@ describe("Dependencies for one project", () => {
   });
 });
 
+describe("Kanban for one project", () => {
+  it("offers only the project's repos", async () => {
+    serves([...TICKETS, ticket("LDR", 3, { repos: ["other/repo"] })], PROJECTS);
+    await mount(<Board />, "/kanban?project=ACP");
+    const repos = [...(screen.getByLabelText("Repo") as HTMLSelectElement).options].map((o) => o.value);
+    expect(repos).toEqual(["", "acme/api", "acme/web"]);
+  });
+});
+
+describe("Table for one project", () => {
+  it("offers only the project's repos", async () => {
+    serves([...TICKETS, ticket("LDR", 3, { repos: ["other/repo"] })], PROJECTS);
+    await mount(<Tickets />, "/table?project=ACP");
+    const repos = [...(screen.getByLabelText("Repo") as HTMLSelectElement).options].map((o) => o.value);
+    expect(repos).toEqual(["", "acme/api", "acme/web"]);
+  });
+});
+
 // Dependencies dims the cards the filters don't match by default, or with
 // `unmatched=hide` in the URL leaves them off the graph. The project filter
 // always hides, whichever the mode.

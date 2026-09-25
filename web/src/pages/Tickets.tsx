@@ -139,7 +139,7 @@ export default function Tickets() {
   // with the tickets, so once loading is over they are known (or failed, and
   // there are none to wait for).
   const waiting = loading || awaitingProject(filters.project, projects);
-  const repos = useMemo(() => repoOptions(tickets, filters.repo), [tickets, filters.repo]);
+  const repos = useMemo(() => repoOptions(projectTickets, filters.repo), [projectTickets, filters.repo]);
 
   const handleCreate = async (data: TicketWrite) => {
     await api.tickets.create(data);

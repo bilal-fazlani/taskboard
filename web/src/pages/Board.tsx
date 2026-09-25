@@ -215,7 +215,7 @@ export default function Board() {
   // The filter bar picks a project for a URL without one; until it has, the
   // board waits rather than showing every project's tickets.
   const waiting = loading || awaitingProject(filters.project, projects);
-  const repos = useMemo(() => repoOptions(allTickets, filters.repo), [allTickets, filters.repo]);
+  const repos = useMemo(() => repoOptions(projectTickets, filters.repo), [projectTickets, filters.repo]);
 
   const findTicketById = (id: UniqueIdentifier): Ticket | undefined => {
     for (const col of columns) {
