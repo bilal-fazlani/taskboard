@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { api, type DocumentMeta } from "../api/client";
+import { IMAGE_SCROLL } from "../hooks/useImageStepping";
 import { adjacentImage, displayName, imageDimensions, imagePosition } from "../lib/documents";
 
 // The image viewer, shown by the document window for an image: the picture
@@ -100,6 +101,7 @@ export default function ImageView({
         role="region"
         aria-label={`${shown} at 100%`}
         data-testid="image-scroll"
+        {...{ [IMAGE_SCROLL]: "" }}
         tabIndex={0}
         className="absolute inset-0 overflow-auto focus:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-blue-500"
       >

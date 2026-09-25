@@ -299,3 +299,56 @@ describe("previous and next buttons, and the hint", () => {
     expect(screen.queryByRole("button", { name: "Next image" })).toBeNull();
   });
 });
+
+describe("the 100% view and the keyboard", () => {
+  // jsdom lays nothing out, so the region's scroll metrics are set by hand.
+  function scrollable(el: HTMLElement, metrics: { scrollLeft: number; clientWidth: number; scrollWidth: number }) {
+    for (const [key, value] of Object.entries(metrics)) Object.defineProperty(el, key, { configurable: true, value });
+  }
+
+  it("lets ← and → pan a wide image while it can still scroll that way, and steps at the edge", () => {
+    const { onStep } = setup(photo);
+    fireEvent.click(screen.getByRole("button", { name: "100%" }));
+    const region = screen.getByTestId("image-scroll");
+    region.focus();
+
+    scrollable(region, { scrollLeft: 0, clientWidth: 500, scrollWidth: 4000 });
+    // Not handled: the browser scrolls the region.
+    expect(fireEvent.keyDown(region, { key: "ArrowRight" })).toBe(true);
+    expect(onStep).not.toHaveBeenCalled();
+    // Nothing further left: ← steps.
+    expect(fireEvent.keyDown(region, { key: "ArrowLeft" })).toBe(false);
+    expect(onStep).toHaveBeenLastCalledWith(login);
+
+    scrollable(region, { scrollLeft: 1200, clientWidth: 500, scrollWidth: 4000 });
+    expect(fireEvent.keyDown(region, { key: "ArrowLeft" })).toBe(true);
+    expect(fireEvent.keyDown(region, { key: "ArrowRight" })).toBe(true);
+    expect(onStep).toHaveBeenCalledTimes(1);
+
+    scrollable(region, { scrollLeft: 3500, clientWidth: 500, scrollWidth: 4000 });
+    expect(fireEvent.keyDown(region, { key: "ArrowRight" })).toBe(false);
+    expect(onStep).toHaveBeenLastCalledWith(spinner);
+  });
+
+  it("steps as usual from the 100% view of an image that fits", () => {
+    const { onStep } = setup(photo);
+    fireEvent.click(screen.getByRole("button", { name: "100%" }));
+    const region = screen.getByTestId("image-scroll");
+    scrollable(region, { scrollLeft: 0, clientWidth: 800, scrollWidth: 800 });
+    fireEvent.keyDown(region, { key: "ArrowRight" });
+    expect(onStep).toHaveBeenCalledExactlyOnceWith(spinner);
+  });
+
+  it("keeps focus in the viewer when a step takes the focused 100% view away", () => {
+    const { rerender } = setup(photo);
+    fireEvent.click(screen.getByRole("button", { name: "100%" }));
+    const region = screen.getByTestId("image-scroll");
+    region.focus();
+    expect(document.activeElement).toBe(region);
+    rerender({ doc: spinner });
+    const dialog = screen.getByRole("dialog", { name: "Spinner.gif" });
+    expect(region.isConnected).toBe(false);
+    expect(document.activeElement).toBe(dialog);
+  });
+});
+
