@@ -144,3 +144,79 @@ describe("image viewer", () => {
     expect(onClose).toHaveBeenCalledTimes(3);
   });
 });
+
+describe("stepping with ← and →", () => {
+  it("steps to the next and the previous of the owner's images, skipping other documents", () => {
+    const { onStep } = setup(photo);
+    fireEvent.keyDown(document.body, { key: "ArrowRight" });
+    expect(onStep).toHaveBeenLastCalledWith(spinner);
+    fireEvent.keyDown(document.body, { key: "ArrowLeft" });
+    expect(onStep).toHaveBeenLastCalledWith(login);
+    expect(onStep).toHaveBeenCalledTimes(2);
+  });
+
+  it("stops at either end", () => {
+    const first = setup(login);
+    fireEvent.keyDown(document.body, { key: "ArrowLeft" });
+    expect(first.onStep).not.toHaveBeenCalled();
+    cleanup();
+    const last = setup(spinner);
+    fireEvent.keyDown(document.body, { key: "ArrowRight" });
+    expect(last.onStep).not.toHaveBeenCalled();
+  });
+
+  it("shows the image it is handed next, fitted", () => {
+    const { rerender } = setup(photo);
+    fireEvent.click(screen.getByRole("button", { name: "100%" }));
+    rerender({ doc: spinner });
+    expect(screen.getByRole("dialog", { name: "Spinner.gif" })).toBeTruthy();
+    expect(picture().getAttribute("src")).toBe("/api/documents/i3/image?rev=1");
+    expect(picture().dataset.zoom).toBe("fit");
+    expect(screen.getByTestId("image-facts").textContent).toBe("3 of 3 images · 64×64");
+  });
+
+  it("does nothing while the rename field is open", () => {
+    const { onStep } = setup(photo);
+    fireEvent.click(screen.getByRole("button", { name: "Rename Holiday photo.jpg" }));
+    const input = screen.getByRole("textbox", { name: "Document name" });
+    fireEvent.keyDown(input, { key: "ArrowRight" });
+    // Even with focus moved off the field.
+    fireEvent.keyDown(document.body, { key: "ArrowLeft" });
+    expect(onStep).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.keyDown(document.body, { key: "ArrowRight" });
+    expect(onStep).toHaveBeenCalledExactlyOnceWith(spinner);
+  });
+
+  it("does nothing while the delete question is up", () => {
+    const { onStep } = setup(photo);
+    fireEvent.click(screen.getByRole("button", { name: "Delete Holiday photo.jpg" }));
+    const cancel = within(screen.getByRole("alertdialog")).getByRole("button", { name: "Cancel" });
+    fireEvent.keyDown(cancel, { key: "ArrowRight" });
+    fireEvent.keyDown(document.body, { key: "ArrowLeft" });
+    expect(onStep).not.toHaveBeenCalled();
+    fireEvent.click(cancel);
+    fireEvent.keyDown(document.body, { key: "ArrowLeft" });
+    expect(onStep).toHaveBeenCalledExactlyOnceWith(login);
+  });
+
+  it("leaves arrows alone in a field, with a modifier, or once handled", () => {
+    const { onStep } = setup(photo);
+    const field = document.createElement("input");
+    document.body.appendChild(field);
+    fireEvent.keyDown(field, { key: "ArrowRight" });
+    field.remove();
+    for (const mod of ["altKey", "ctrlKey", "metaKey", "shiftKey"]) fireEvent.keyDown(document.body, { key: "ArrowRight", [mod]: true });
+    const handled = new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true });
+    handled.preventDefault();
+    document.body.dispatchEvent(handled);
+    expect(onStep).not.toHaveBeenCalled();
+  });
+
+  it("does not step from a text document", () => {
+    mockApi.documents.get.mockResolvedValue({ ...spec, content: "x" });
+    const { onStep } = setup(spec);
+    fireEvent.keyDown(document.body, { key: "ArrowRight" });
+    expect(onStep).not.toHaveBeenCalled();
+  });
+});

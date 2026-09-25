@@ -4,6 +4,7 @@ import { api, type Epic } from "../api/client";
 import { useDocParam } from "../hooks/useDocParam";
 import { useOwnerDocuments } from "../hooks/useOwnerDocuments";
 import { useEscape } from "../lib/escapeStack";
+import { documentWindowKey } from "../lib/documents";
 import DocumentModal from "./DocumentModal";
 import DocumentsSection from "./DocumentsSection";
 import EpicForm from "./EpicForm";
@@ -154,7 +155,7 @@ export default function EpicModal({
 
       {docParam.selected && (
         <DocumentModal
-          key={docParam.selected.id}
+          key={documentWindowKey(docParam.selected)}
           doc={docParam.selected}
           documents={documents ?? []}
           owner={owner}
@@ -171,6 +172,7 @@ export default function EpicModal({
             docParam.cancelClose();
           }}
           onDirtyChange={docParam.onDirtyChange}
+          onStep={docParam.step}
           onClose={docParam.close}
           onRenamed={(doc) => {
             docParam.renamed(doc);

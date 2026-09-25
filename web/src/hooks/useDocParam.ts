@@ -41,6 +41,12 @@ export interface DocParamState {
   /** Point the URL at a document's new name after a rename from the UI. */
   renamed: (doc: DocumentMeta) => void;
   /**
+   * Show another document in place of the open one (the image viewer's ←
+   * and →). The entry is replaced, not pushed, so one × or Back still
+   * closes it.
+   */
+  step: (doc: DocumentMeta) => void;
+  /**
    * "Save as a new document" made this copy of the deleted document. The
    * deleted one stays held until the list has the copy, which the URL then
    * names.
@@ -192,6 +198,13 @@ export function useDocParam(documents: readonly DocumentMeta[] | null, ownerNoun
     },
     [params, overlays],
   );
+  const step = useCallback(
+    (doc: DocumentMeta) => {
+      setNotice(null);
+      overlays.replace(withDoc(latestSearchParams(params), doc));
+    },
+    [params, overlays],
+  );
   const dismissNotice = useCallback(() => setNotice(null), []);
 
   // setDirty is stable, so the modal's report never re-runs on its own.
@@ -207,6 +220,7 @@ export function useDocParam(documents: readonly DocumentMeta[] | null, ownerNoun
     close,
     cancelClose,
     renamed,
+    step,
     recreated,
     onDirtyChange: setDirty,
   };

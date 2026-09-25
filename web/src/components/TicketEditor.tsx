@@ -17,6 +17,7 @@ import LabelPicker from "./LabelPicker";
 import RepoPicker from "./RepoPicker";
 import DependencyPicker, { TicketRefLabel } from "./DependencyPicker";
 import { activityEntries } from "../lib/activity";
+import { documentWindowKey } from "../lib/documents";
 import { useEscape } from "../lib/escapeStack";
 import { useDocParam } from "../hooks/useDocParam";
 import { useOwnerDocuments } from "../hooks/useOwnerDocuments";
@@ -904,7 +905,7 @@ export default function TicketEditor({
           sees the document's keys; the editor is inert while it is open. */}
       {docParam.selected && (
         <DocumentModal
-          key={docParam.selected.id}
+          key={documentWindowKey(docParam.selected)}
           doc={docParam.selected}
           documents={documents ?? []}
           owner={{ ticketId: ticket.id }}
@@ -920,6 +921,7 @@ export default function TicketEditor({
             docParam.cancelClose();
           }}
           onDirtyChange={docParam.onDirtyChange}
+          onStep={docParam.step}
           onClose={docParam.close}
           onRenamed={(doc) => {
             docParam.renamed(doc);

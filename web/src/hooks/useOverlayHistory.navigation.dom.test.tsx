@@ -147,6 +147,27 @@ describe("useOverlayHistory with the Navigation API", () => {
     expect(overlays.depth).toBe(0);
   });
 
+  it("after the document's entry was replaced (an image stepped to another), closes it in one press, then the editor", async () => {
+    await mount("/kanban");
+    await act(async () => overlays.push(params("ticket=ACP-7")));
+    await act(async () => overlays.push(params("ticket=ACP-7&doc=One.png")));
+    await act(async () => overlays.replace(params("ticket=ACP-7&doc=Two.png")));
+    await act(async () => overlays.replace(params("ticket=ACP-7&doc=Three.png")));
+    const nav = installNavigation(3);
+    await act(async () => {
+      overlays.closeOne(params("ticket=ACP-7"));
+      await settle();
+    });
+    expect(nav.back).toHaveBeenCalledTimes(1);
+    expect(url()).toBe("/kanban?ticket=ACP-7");
+    await act(async () => {
+      overlays.closeAll();
+      await settle();
+    });
+    expect(nav.traverseTo).toHaveBeenCalledExactlyOnceWith("k0");
+    expect(url()).toBe("/kanban");
+  });
+
   it("closeAll from a linked-in overlay still ends on the plain view", async () => {
     await mount("/table?project=ACP&ticket=ACP-7");
     await act(async () => overlays.push(params("project=ACP&ticket=ACP-25")));

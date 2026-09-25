@@ -14,6 +14,8 @@ const mockApi = vi.hoisted(() => ({
     create: vi.fn(),
     downloadUrl: (id: string) => `/api/documents/${id}/download`,
     rawUrl: (id: string, rev: number) => `/api/documents/${id}/raw?rev=${rev}`,
+    imageUrl: (id: string, rev: number) => `/api/documents/${id}/image?rev=${rev}`,
+    thumbnailUrl: (id: string, rev: number) => `/api/documents/${id}/thumbnail?rev=${rev}`,
   },
 }));
 vi.mock("../api/client", () => ({ api: mockApi }));
@@ -159,4 +161,33 @@ describe("EpicModal", () => {
     expect(onCloseCancelled).toHaveBeenCalledTimes(1);
     expect((screen.getByRole("textbox", { name: "Document content" }) as HTMLTextAreaElement).value).toBe("# Mine");
   });
+
+  it("shows the epic's images with thumbnails, steps through them in place, and × closes in one press", async () => {
+    const shot: DocumentMeta = { ...plan, id: "i1", name: "Shot", format: "png", size: 2048, width: 320, height: 200 };
+    const photo: DocumentMeta = { ...plan, id: "i2", name: "Photo", format: "webp", size: 4096, width: 100, height: 50 };
+    mockApi.documents.list.mockResolvedValue([plan, shot, photo]);
+    const { onClose } = setup();
+    fireEvent.click(await screen.findByRole("button", { name: "Shot.png" }));
+    expect(screen.getAllByTestId("document-thumbnail").map((t) => t.getAttribute("src"))).toEqual([
+      "/api/documents/i1/thumbnail?rev=1",
+      "/api/documents/i2/thumbnail?rev=1",
+    ]);
+    expect(screen.getByText("2 KB · 320×200")).toBeTruthy();
+    const viewer = await screen.findByRole("dialog", { name: "Shot.png" });
+    expect(within(viewer).getByTestId("image-facts").textContent).toBe("1 of 2 images · 320×200");
+    const length = window.history.length;
+
+    fireEvent.keyDown(document.body, { key: "ArrowRight" });
+    expect(await screen.findByRole("dialog", { name: "Photo.webp" })).toBe(viewer);
+    expect(new URLSearchParams(window.location.search).get("doc")).toBe("Photo.webp");
+    expect(window.history.length).toBe(length);
+
+    fireEvent.click(within(viewer).getByRole("button", { name: "Close document" }));
+    await settle();
+    expect(screen.queryByRole("dialog", { name: "Photo.webp" })).toBeNull();
+    expect(new URLSearchParams(window.location.search).get("epic")).toBe("Launch");
+    expect(new URLSearchParams(window.location.search).has("doc")).toBe(false);
+    expect(onClose).not.toHaveBeenCalled();
+  });
 });
+
