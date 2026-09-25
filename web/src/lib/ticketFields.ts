@@ -68,9 +68,13 @@ export function ticketFields(ticket: Ticket): TicketFields {
   };
 }
 
+// Repos, labels and dependencies are sets: the server keeps no order for
+// them and may list the same ones in another order, which is no change.
 function same(a: string | string[], b: string | string[]): boolean {
   if (Array.isArray(a) && Array.isArray(b)) {
-    return a.length === b.length && a.every((value, i) => value === b[i]);
+    const inA = new Set(a);
+    const inB = new Set(b);
+    return inA.size === inB.size && [...inA].every((value) => inB.has(value));
   }
   return a === b;
 }

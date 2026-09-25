@@ -71,11 +71,35 @@ describe("changedFields", () => {
     expect(changedFields(base, edited({ priority: "low", title: "New" }))).toEqual(["title", "priority"]);
   });
 
-  it("compares collections by their values, order included", () => {
+  it("compares collections by their values", () => {
     expect(changedFields(base, edited({ labels: ["frontend"] }))).toEqual([]);
     expect(changedFields(base, edited({ labels: [] }))).toEqual(["labels"]);
     expect(changedFields(base, edited({ repos: ["acme/auth-web", "acme/api"] }))).toEqual(["repos"]);
     expect(changedFields(base, edited({ dependsOn: ["t3", "t2"] }))).toEqual(["dependsOn"]);
+    expect(changedFields(base, edited({ dependsOn: ["t3"] }))).toEqual(["dependsOn"]);
+  });
+
+  it("reads repos, labels and dependencies as sets, so another order is no change", () => {
+    const many = edited({
+      repos: ["acme/auth-web", "acme/api"],
+      labels: ["frontend", "urgent"],
+      dependsOn: ["t2", "t3"],
+    });
+    const reordered = edited({
+      repos: ["acme/api", "acme/auth-web"],
+      labels: ["urgent", "frontend"],
+      dependsOn: ["t3", "t2"],
+    });
+    expect(changedFields(many, reordered)).toEqual([]);
+    expect(editedWrite(many, reordered)).toEqual({});
+  });
+
+  it("still sees a swap of one member for another as a change", () => {
+    const many = edited({ labels: ["frontend", "urgent"], dependsOn: ["t2", "t3"] });
+    expect(changedFields(many, edited({ labels: ["frontend", "backend"], dependsOn: ["t3", "t4"] }))).toEqual([
+      "labels",
+      "dependsOn",
+    ]);
   });
 
   it("counts clearing the due date as a change", () => {

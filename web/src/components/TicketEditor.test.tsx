@@ -773,6 +773,28 @@ describe("a ticket that changed elsewhere", () => {
     expect((screen.getByLabelText("Title") as HTMLInputElement).value).toBe("Edited title");
   });
 
+  it("says nothing when the server lists the same repos, labels and dependencies in another order", async () => {
+    const label = (id: string, name: string) => ({ id, name, color: "#3b82f6", ticketCount: 0 });
+    const dep = (id: string, key: string) => ({ id, key, title: key, status: "todo" });
+    const ticket = makeTicket({
+      repos: ["acme/auth-web", "acme/api"],
+      labels: [label("l1", "frontend"), label("l2", "urgent")],
+      dependsOn: [dep("t2", "AUTH-2"), dep("t3", "AUTH-3")],
+    });
+    mockApi.tickets.get.mockResolvedValue(ticket);
+    const { rerenderWith } = renderEditor(ticket);
+    await settled();
+    editTitle();
+
+    await changeTo(rerenderWith, {
+      repos: ["acme/api", "acme/auth-web"],
+      labels: [label("l2", "urgent"), label("l1", "frontend")],
+      dependsOn: [dep("t3", "AUTH-3"), dep("t2", "AUTH-2")],
+    });
+    expect(notice()).toBeNull();
+    expect((screen.getByLabelText("Title") as HTMLInputElement).value).toBe("Edited title");
+  });
+
   it("asks before the reload discards the edits, and keeps them when cancelled", async () => {
     const { rerenderWith } = renderEditor();
     await settled();
