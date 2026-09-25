@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  ARROW_SIZE,
   BACK_EDGE_GUTTER,
   CORNER_RADIUS,
+  CURVE_CLEARANCE,
+  CURVE_ROOM,
+  EDGE_WIDTH,
   GUTTER_OFFSET,
   GUTTER_STEP,
   MIN_COLUMN_GAP,
@@ -16,6 +20,7 @@ import {
   planGutters,
   routeEdges,
   selfLoopPath,
+  slotOffset,
 } from "./graphEdges";
 import {
   computeGraphTopology,
@@ -166,6 +171,16 @@ describe("segmentHitsRect (test helper)", () => {
   });
 });
 
+describe("GUTTER_OFFSET", () => {
+  it("keeps the nearest vertical run clear of the grey arrowheads landing beside it", () => {
+    // An arrowhead's base sits ARROW_SIZE stroke widths left of the card it
+    // points into; the run's own stroke reaches half its width towards it.
+    const arrowBase = ARROW_SIZE * EDGE_WIDTH;
+    const runEdge = slotOffset(0) - EDGE_WIDTH / 2;
+    expect(runEdge - arrowBase).toBeGreaterThanOrEqual(2);
+  });
+});
+
 describe("forwardEdgePath", () => {
   it("draws one horizontal-tangent cubic with control points half way across", () => {
     expect(forwardEdgePath({ x: 100, y: 40 }, { x: 300, y: 120 })).toBe("M 100 40 C 200 40, 200 120, 300 120");
@@ -186,6 +201,24 @@ describe("forwardEdgePath", () => {
     ];
     expect(forwardEdgePath({ x: 100, y: 40 }, { x: 800, y: 120 }, via)).toBe(
       "M 100 40 C 150 40, 150 60, 200 60 L 400 60 C 450 60, 450 90, 500 90 L 700 90 C 750 90, 750 120, 800 120",
+    );
+  });
+});
+
+describe("forwardEdgePath with leads", () => {
+  it("runs straight to and from a shortened curve in each gap that has leads", () => {
+    const via = [
+      { x: 200, y: 60 },
+      { x: 400, y: 60 },
+    ];
+    expect(forwardEdgePath({ x: 100, y: 40 }, { x: 500, y: 120 }, via, [{ left: 20, right: 10 }, { left: 0, right: 30 }])).toBe(
+      "M 100 40 L 120 40 C 155 40, 155 60, 190 60 L 200 60 L 400 60 C 435 60, 435 120, 470 120 L 500 120",
+    );
+  });
+
+  it("draws a gap without leads, or leads of zero, as before", () => {
+    expect(forwardEdgePath({ x: 100, y: 40 }, { x: 300, y: 120 }, [], [{ left: 0, right: 0 }])).toBe(
+      forwardEdgePath({ x: 100, y: 40 }, { x: 300, y: 120 }),
     );
   });
 });
@@ -326,8 +359,23 @@ describe("routeEdges", () => {
       expect(firstPoint(e.d)).toEqual(edge.start);
       expect(lastPoint(e.d)).toEqual(edge.end);
       expect(arrivalDirection(e.d).x).toBeGreaterThan(0);
-      if (e.lane === null) expect(e.d).toBe(forwardEdgePath(edge.start, edge.end, edge.via));
+      if (e.lane === null) expect(arrivalDirection(e.d).y).toBe(0);
     });
+  });
+
+  it("keeps every forward curve clear of the gaps' vertical runs", () => {
+    expect(curvesGrazingRuns(routed)).toEqual([]);
+    // The gap between columns 1 and 2 has runs, so its curves start and end
+    // with straight leads.
+    const a2 = routed.find((e) => e.from === "A-2" && e.to === "A-3")!;
+    expect(parse(a2.d).map((c) => c.op).join("")).toMatch(/^MLC/);
+  });
+
+  it("draws a curve across a gap with no runs as before, straight from card to card", () => {
+    // Nothing climbs or drops through the gap between columns 2 and 3.
+    const l3 = routed.find((e) => e.from === "L-3" && e.to === "L-4")!;
+    const edge = layout.edges.find((e) => e.from === "L-3" && e.to === "L-4")!;
+    expect(l3.d).toBe(forwardEdgePath(edge.start, edge.end));
   });
 });
 
@@ -383,10 +431,17 @@ describe("routeEdges with long forward edges", () => {
     for (const [i, e] of routed.entries()) {
       const edge = layout.edges[i];
       if (edge.back) continue;
-      expect(e.d).toBe(forwardEdgePath(edge.start, edge.end, edge.via));
-      const straight = parse(e.d).filter((c) => c.op === "L");
-      expect(straight).toHaveLength(edge.via.length / 2);
+      const commands = parse(e.d);
+      for (let j = 0; j < edge.via.length; j += 2) {
+        const k = commands.findIndex((c) => c.op === "L" && c.points[0].x === edge.via[j + 1].x && c.points[0].y === edge.via[j + 1].y);
+        expect(k, `${e.from}->${e.to} crosses column at ${edge.via[j].x}`).toBeGreaterThan(0);
+        expect(commands[k - 1].points.slice(-1)[0]).toEqual(edge.via[j]);
+      }
     }
+  });
+
+  it("keeps every curve clear of the vertical runs, long edges' too", () => {
+    expect(curvesGrazingRuns(routed)).toEqual([]);
   });
 
   it("still keeps every back edge's lane above the cards and the long edges' runs", () => {
@@ -414,6 +469,28 @@ function verticalRuns(d: string): { x: number; top: number; bottom: number }[] {
   return runs;
 }
 
+// Forward curves whose horizontal extent reaches within 2px of a back edge's
+// vertical run, where the two would run alongside each other. Leads, the
+// straight parts, may cross a run: they do so at a right angle.
+function curvesGrazingRuns(routed: readonly { from: string; to: string; d: string; lane: number | null }[]): string[] {
+  const runs = routed.filter((e) => e.lane !== null).flatMap((e) => verticalRuns(e.d));
+  const found: string[] = [];
+  for (const e of routed) {
+    if (e.lane !== null || e.from === e.to) continue;
+    let at: Point = { x: 0, y: 0 };
+    for (const { op, points } of parse(e.d)) {
+      const to = points[points.length - 1];
+      if (op === "C") {
+        for (const run of runs) {
+          if (run.x > at.x - 2 && run.x < to.x + 2) found.push(`${e.from}->${e.to} curve ${at.x}..${to.x} by run at ${run.x}`);
+        }
+      }
+      at = to;
+    }
+  }
+  return found;
+}
+
 describe("routeEdges with crowded gaps", () => {
   // Seven 2-cycles W: back edges from column 1 into Ready, so seven runs left
   // of Ready and seven on the right side of column 1. Seven cycles Q entered
@@ -435,9 +512,11 @@ describe("routeEdges with crowded gaps", () => {
   const topology = computeGraphTopology(tickets);
   const sizes = new Map<string, Size>(tickets.map((t, i) => [t.id, { width: 256, height: 60 + ((i * 29) % 70) }]));
   const gutters = planGutters(topology);
+  // Each gap as wide as its own runs need, as the page lays it out.
   const layout = positionGraph(topology, {
     sizes,
-    columnGap: Math.max(MIN_COLUMN_GAP, ...gutters.gaps),
+    columnGap: MIN_COLUMN_GAP,
+    columnGaps: gutters.gaps,
     origin: { x: gutters.left, y: 40 + LANE_CLEARANCE + lanesHeight(laneCount(topology)) },
   });
   const back = routeEdges(layout).filter((e) => e.lane !== null);
@@ -458,12 +537,18 @@ describe("routeEdges with crowded gaps", () => {
   it("widens the room a side needs past its six slots instead of reusing one", () => {
     const seven = GUTTER_OFFSET + 6 * GUTTER_STEP;
     expect(gutters.left).toBe(seven + GUTTER_OFFSET / 2);
+    // A gap with runs on both sides also leaves its curves CURVE_ROOM between them.
+    const lead = seven + CURVE_CLEARANCE;
     expect(gutters.gaps).toEqual([
-      Math.max(MIN_COLUMN_GAP, seven + GUTTER_OFFSET),
-      2 * seven + GUTTER_OFFSET,
-      Math.max(MIN_COLUMN_GAP, seven + GUTTER_OFFSET),
+      Math.max(MIN_COLUMN_GAP, lead + CURVE_ROOM),
+      2 * lead + CURVE_ROOM,
+      Math.max(MIN_COLUMN_GAP, lead + CURVE_ROOM),
     ]);
     expect(gutters.gaps[1]).toBeGreaterThan(MIN_COLUMN_GAP);
+    // Laid out per gap, only the crowded gap is wider than the narrowest.
+    const widths = layout.columns.slice(1).map((c, i) => c.x - layout.columns[i].x - layout.columns[i].width);
+    expect(widths).toEqual(gutters.gaps);
+    expect(widths.filter((w) => w > MIN_COLUMN_GAP)).toEqual([gutters.gaps[1]]);
     // The R cycles' back edges leave the last column, so its right side grows too.
     expect(gutters.right).toBe(seven + GUTTER_OFFSET / 2);
   });
@@ -490,6 +575,19 @@ describe("routeEdges with crowded gaps", () => {
       const outgoing = outOf(c).sort((a, b) => a.lane! - b.lane!).map(outX);
       expect(outgoing).toEqual([...outgoing].sort((a, b) => a - b));
     }
+  });
+
+  it("keeps every forward curve out of the crowded gaps' runs, with CURVE_ROOM to turn in", () => {
+    const routed = routeEdges(layout);
+    expect(curvesGrazingRuns(routed)).toEqual([]);
+    const curves = routed
+      .filter((e) => e.lane === null && e.from !== e.to)
+      .flatMap((e) => {
+        const commands = parse(e.d);
+        return commands.flatMap((c, i) => (c.op === "C" ? [c.points[2].x - commands[i - 1].points.slice(-1)[0].x] : []));
+      });
+    expect(curves.length).toBeGreaterThan(0);
+    expect(Math.min(...curves)).toBeGreaterThanOrEqual(CURVE_ROOM);
   });
 
   it("still never draws a back edge through a card", () => {

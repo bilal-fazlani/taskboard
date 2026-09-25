@@ -181,6 +181,11 @@ export interface PositionOptions {
   defaultSize?: Size;
   /** Horizontal space between columns. */
   columnGap?: number;
+  /**
+   * Horizontal space between column i and i + 1, per gap, so one gap can be
+   * wider than the rest. A gap it has no entry for is columnGap.
+   */
+  columnGaps?: readonly number[];
   /** Vertical space between cards in a column, and between a card and a long edge passing it. */
   rowGap?: number;
   /** Top-left corner of the graph: where Ready starts and the highest card or long edge sits. */
@@ -716,6 +721,7 @@ export function positionGraph<T extends GraphTicket>(
   const origin = options.origin ?? { x: 0, y: 0 };
   const gridGap = options.gridGap ?? DEFAULT_GRID_GAP;
   const sizeOf = (id: string) => options.sizes?.get(id) ?? defaultSize;
+  const gapAfter = (column: number) => options.columnGaps?.[column] ?? columnGap;
 
   const columns: PositionedColumn[] = [];
   let x = origin.x;
@@ -724,7 +730,7 @@ export function positionGraph<T extends GraphTicket>(
     let width = ids.length === 0 ? defaultSize.width : 0;
     for (const id of ids) width = Math.max(width, sizeOf(id).width);
     columns.push({ index, x, width, count: topology.columnCounts[index] });
-    x += width + columnGap;
+    x += width + gapAfter(index);
   });
 
   // Number the layers' entries column by column and join them along the
@@ -816,7 +822,7 @@ export function positionGraph<T extends GraphTicket>(
   if (topology.grid.length > 0) {
     const slots: number[] = [];
     for (let i = 0; i < GRID_COLUMNS; i++) {
-      const previous = i === 0 ? origin.x : slots[i - 1] + (columns[i - 1]?.width ?? defaultSize.width) + columnGap;
+      const previous = i === 0 ? origin.x : slots[i - 1] + (columns[i - 1]?.width ?? defaultSize.width) + gapAfter(i - 1);
       slots.push(columns[i]?.x ?? previous);
     }
     const gridTop = (bottom === -Infinity ? origin.y : bottom) + gridGap;

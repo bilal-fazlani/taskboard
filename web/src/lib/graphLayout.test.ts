@@ -953,6 +953,49 @@ describe("positionGraph", () => {
     expect(layout.nodes[0]).toMatchObject({ id: "A-1", column: 0, row: 0, inGrid: false });
   });
 
+  it("gives each gap its own width when columnGaps says so, and columnGap to the rest", () => {
+    const topology = computeGraphTopology(
+      tickets([
+        ["A-1", "todo"],
+        ["A-2", "todo", ["A-1"]],
+        ["A-3", "todo", ["A-2"]],
+        ["A-4", "todo", ["A-3"]],
+      ]),
+    );
+    const layout = positionGraph(topology, {
+      defaultSize: { width: 100, height: 40 },
+      columnGap: 60,
+      columnGaps: [60, 150],
+      origin: { x: 5, y: 0 },
+    });
+    // Only the middle gap is wide; the last one has no entry and takes columnGap.
+    expect(layout.columns.map((c) => c.x)).toEqual([5, 165, 415, 575]);
+    expect(layout.width).toBe(675);
+    const edge = layout.edges.find((e) => e.from === "A-2")!;
+    expect([edge.start.x, edge.end.x]).toEqual([265, 415]);
+  });
+
+  it("slots the grid under the columns a per-gap layout would have, where there are none", () => {
+    // One linked pair makes two columns; the grid's third slot is where a
+    // third column would start, past the second gap's own width.
+    const topology = computeGraphTopology(
+      tickets([
+        ["A-1", "todo"],
+        ["A-2", "todo", ["A-1"]],
+        ["A-3", "todo"],
+        ["A-4", "todo"],
+        ["A-5", "todo"],
+      ]),
+    );
+    const layout = positionGraph(topology, {
+      defaultSize: { width: 100, height: 40 },
+      columnGap: 60,
+      columnGaps: [70, 90],
+    });
+    const xs = layout.nodes.filter((n) => n.inGrid).map((n) => n.x);
+    expect(xs).toEqual([0, 170, 360]);
+  });
+
   it("puts a card at the median of the cards linked to it, and packs those around it", () => {
     const layout = layoutGraph(
       tickets([

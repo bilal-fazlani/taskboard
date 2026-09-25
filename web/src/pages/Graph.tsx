@@ -35,7 +35,16 @@ import {
   type HighlightEvent,
   type HighlightState,
 } from "../lib/graphHighlight";
-import { MIN_COLUMN_GAP, laneCount, lanesHeight, planGutters, routeEdges } from "../lib/graphEdges";
+import {
+  ARROW_SIZE,
+  EDGE_WIDTH,
+  LIT_EDGE_WIDTH,
+  MIN_COLUMN_GAP,
+  laneCount,
+  lanesHeight,
+  planGutters,
+  routeEdges,
+} from "../lib/graphEdges";
 import { mergeSizes } from "../lib/graphSizes";
 import { columnHeading, gridHeading } from "../lib/graphText";
 import { isDone } from "../lib/status";
@@ -163,7 +172,7 @@ function Heading({
 
 function Arrowhead({ id, className }: { id: string; className: string }) {
   return (
-    <marker id={id} viewBox="0 0 10 10" refX="10" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+    <marker id={id} viewBox="0 0 10 10" refX="10" refY="5" markerWidth={ARROW_SIZE} markerHeight={ARROW_SIZE} orient="auto">
       <path d="M0 0L10 5L0 10z" className={className} />
     </marker>
   );
@@ -281,23 +290,24 @@ export default function Graph() {
   // Once per fetched ticket set or project; measuring only repositions.
   const topology = useMemo(() => computeGraphTopology(shownTickets), [shownTickets]);
   // Back edges' vertical runs need room in the gaps and beside the outer
-  // columns, which depends only on the topology. positionGraph takes one gap
-  // for every column, so every gap gets the widest one any gap needs.
+  // columns, which depends only on the topology. Each gap gets the width its
+  // own runs need, so one crowded gap doesn't widen the others.
   const gutters = useMemo(() => {
     const plan = planGutters(topology);
     return {
-      columnGap: Math.max(MIN_COLUMN_GAP, ...plan.gaps),
+      columnGaps: plan.gaps,
       right: plan.right,
       origin: { x: plan.left, y: CARDS_TOP + lanesHeight(laneCount(topology)) },
     };
   }, [topology]);
-  const { origin, columnGap } = gutters;
+  const { origin } = gutters;
   const layout = useMemo(
     () =>
       positionGraph(topology, {
         sizes,
         defaultSize: CARD_SIZE,
-        columnGap: gutters.columnGap,
+        columnGap: MIN_COLUMN_GAP,
+        columnGaps: gutters.columnGaps,
         rowGap: ROW_GAP,
         origin: gutters.origin,
         gridGap: GRID_GAP,
@@ -704,11 +714,12 @@ export default function Graph() {
                 width={layout.grid.width}
               />
             )}
-            {layout.columns.slice(1).map((column) => (
+            {/* A separator down the middle of each gap. */}
+            {layout.columns.slice(1).map((column, i) => (
               <div
                 key={column.index}
                 className="absolute top-0 border-l border-dashed border-slate-800"
-                style={{ left: column.x - columnGap / 2, height: canvasHeight }}
+                style={{ left: (layout.columns[i].x + layout.columns[i].width + column.x) / 2, height: canvasHeight }}
               />
             ))}
             {ready && ready.count === 0 && (
@@ -755,7 +766,7 @@ export default function Graph() {
                     className={`fill-none transition-opacity duration-150 ${stroke} ${
                       faded ? (chains ? "opacity-12" : FILTERED_OUT) : ""
                     }`}
-                    strokeWidth={lit ? 2 : 1.5}
+                    strokeWidth={lit ? LIT_EDGE_WIDTH : EDGE_WIDTH}
                     markerEnd={`url(#${marker})`}
                   />
                 );

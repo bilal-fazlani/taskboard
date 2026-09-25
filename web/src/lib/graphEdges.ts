@@ -10,7 +10,11 @@
 //   each gap between columns, leaving and entering horizontally with both
 //   control points half way across, and a straight run across each column
 //   in between, at the height the layout kept clear for it. Gaps hold no
-//   cards, so no part of it passes behind one.
+//   cards, so no part of it passes behind one. Where a gap holds the vertical
+//   runs of right-to-left edges, the curve keeps to the room between the two
+//   groups of runs and reaches it by straight horizontal leads, so it only
+//   ever crosses a run at a right angle, never alongside it where the curve
+//   is steep.
 // - Right to left (a back edge between two cards, which always points to an
 //   earlier column): anything drawn across the columns would cut through the
 //   cards in between. It runs in straight lines with small rounded corners
@@ -38,16 +42,34 @@ import type { GraphEdge, GraphLayout, GraphTicket, Point } from "./graphLayout";
 export const LANE_CLEARANCE = 12;
 /** Vertical distance between neighbouring back-edge lanes. */
 export const LANE_SPACING = 8;
-/** How far into a gap the nearest vertical run sits from the column edge. */
-export const GUTTER_OFFSET = 12;
+/**
+ * How far into a gap the nearest vertical run sits from the column edge. It
+ * clears the grey arrowheads landing on that column's cards, which reach
+ * ARROW_SIZE * EDGE_WIDTH into the gap, by more than half a run's stroke.
+ */
+export const GUTTER_OFFSET = 14;
 /** Horizontal distance between neighbouring vertical runs on one side of a gap. */
 export const GUTTER_STEP = 6;
-/** Vertical runs each side of a gap holds before the gap has to widen. */
+/** Vertical runs per side that the narrowest gaps are sized from. */
 export const BASE_SIDE_SLOTS = 6;
-/** Narrowest gap between two columns: room for BASE_SIDE_SLOTS runs on each side. */
+/**
+ * Narrowest gap between two columns, sized from BASE_SIDE_SLOTS runs on each
+ * side. A gap whose runs, and the room its curves keep between them, need
+ * more is widened on its own; planGutters() says how wide.
+ */
 export const MIN_COLUMN_GAP = 2 * sideRoom(BASE_SIDE_SLOTS) + GUTTER_OFFSET;
 /** Narrowest room left of Ready and right of the last column. */
 export const BACK_EDGE_GUTTER = sideRoom(BASE_SIDE_SLOTS) + GUTTER_OFFSET / 2;
+/** Stroke width of an edge that isn't lit. */
+export const EDGE_WIDTH = 1.5;
+/** Stroke width of an edge on a lit chain. */
+export const LIT_EDGE_WIDTH = 2;
+/** An arrowhead's length and width, in stroke widths, as the page's markers draw it. */
+export const ARROW_SIZE = 7;
+/** Room between a forward edge's curve and the farthest vertical run it passes. */
+export const CURVE_CLEARANCE = GUTTER_STEP / 2;
+/** Narrowest room a gap leaves its forward curves between the runs on either side. */
+export const CURVE_ROOM = 32;
 /** Radius of a right-to-left edge's corners. */
 export const CORNER_RADIUS = 6;
 /** How far a self-loop reaches past the card's right edge. */
@@ -70,6 +92,15 @@ export function sideRoom(slots: number): number {
   return slots === 0 ? 0 : GUTTER_OFFSET + (slots - 1) * GUTTER_STEP;
 }
 
+/**
+ * How far from a column edge a forward curve starts or ends in a gap whose
+ * side holds `slots` vertical runs: just past the farthest, or at the column
+ * edge when there are none.
+ */
+export function curveLead(slots: number): number {
+  return slots === 0 ? 0 : sideRoom(slots) + CURVE_CLEARANCE;
+}
+
 /** Distance from a column edge to vertical run `slot`, 0 being the nearest. */
 export function slotOffset(slot: number): number {
   return GUTTER_OFFSET + slot * GUTTER_STEP;
@@ -84,12 +115,26 @@ function pt(x: number, y: number): string {
   return `${num(x)} ${num(y)}`;
 }
 
+/** Straight horizontal leads before and after a forward edge's curve across one gap. */
+export interface Leads {
+  /** Length of the straight run from the gap's left side before the curve starts. */
+  left: number;
+  /** Length of the straight run into the gap's right side after the curve ends. */
+  right: number;
+}
+
 /**
  * Left to right: a horizontal-tangent cubic from start to end, or, with
  * `via` points in entry and exit pairs, a cubic to each entry and a straight
- * line across to its exit.
+ * line across to its exit. `leads[k]`, for the k-th gap the edge crosses,
+ * shortens that gap's curve by a straight run at either end.
  */
-export function forwardEdgePath(start: Point, end: Point, via: readonly Point[] = []): string {
+export function forwardEdgePath(
+  start: Point,
+  end: Point,
+  via: readonly Point[] = [],
+  leads: readonly (Leads | undefined)[] = [],
+): string {
   const points = [start, ...via, end];
   let d = `M ${pt(start.x, start.y)}`;
   for (let i = 1; i < points.length; i++) {
@@ -99,8 +144,13 @@ export function forwardEdgePath(start: Point, end: Point, via: readonly Point[] 
       d += ` L ${pt(b.x, b.y)}`;
       continue;
     }
-    const reach = (b.x - a.x) / 2;
-    d += ` C ${pt(a.x + reach, a.y)}, ${pt(b.x - reach, b.y)}, ${pt(b.x, b.y)}`;
+    const lead = leads[(i - 1) / 2];
+    const from = a.x + (lead?.left ?? 0);
+    const to = b.x - (lead?.right ?? 0);
+    if (from !== a.x) d += ` L ${pt(from, a.y)}`;
+    const reach = (to - from) / 2;
+    d += ` C ${pt(from + reach, a.y)}, ${pt(to - reach, b.y)}, ${pt(to, b.y)}`;
+    if (to !== b.x) d += ` L ${pt(b.x, b.y)}`;
   }
   return d;
 }
@@ -217,15 +267,16 @@ export interface GutterPlan {
 /**
  * The horizontal room the vertical runs need, from the topology alone, so it
  * is known before the cards are positioned. A gap holds its left column's
- * outgoing runs and its right column's incoming ones with GUTTER_OFFSET
- * between the two groups.
+ * outgoing runs and its right column's incoming ones with at least
+ * CURVE_ROOM between the two groups, past CURVE_CLEARANCE on either side, for
+ * the forward edges' curves.
  */
 export function planGutters(topology: Routable): GutterPlan {
   const { outCount, inCount } = planLanes(topology);
   const last = topology.columns.length - 1;
   const gaps: number[] = [];
   for (let c = 0; c < last; c++) {
-    gaps.push(Math.max(MIN_COLUMN_GAP, sideRoom(outCount[c]) + sideRoom(inCount[c + 1]) + GUTTER_OFFSET));
+    gaps.push(Math.max(MIN_COLUMN_GAP, curveLead(outCount[c]) + curveLead(inCount[c + 1]) + CURVE_ROOM));
   }
   const edgeRoom = (slots: number) => Math.max(BACK_EDGE_GUTTER, sideRoom(slots) + GUTTER_OFFSET / 2);
   return {
@@ -251,12 +302,18 @@ export function routeEdges<T extends GraphTicket>(layout: GraphLayout<T>): Route
   for (const n of layout.nodes) cardsTop = Math.min(cardsTop, n.y);
   for (const e of layout.edges) for (const p of e.via) cardsTop = Math.min(cardsTop, p.y);
   const plan = planLanes(layout);
+  const gapLeads = layout.columns.slice(1).map(
+    (_, c): Leads => ({ left: curveLead(plan.outCount[c]), right: curveLead(plan.inCount[c + 1]) }),
+  );
 
   return layout.edges.map((edge, index): RoutedEdge => {
     const base = { from: edge.from, to: edge.to, back: edge.back };
     if (edge.from === edge.to) return { ...base, d: selfLoopPath(edge.start), lane: null };
     const lane = plan.lane.get(index);
-    if (lane === undefined) return { ...base, d: forwardEdgePath(edge.start, edge.end, edge.via), lane: null };
+    if (lane === undefined) {
+      const leads = gapLeads.slice(nodes.get(edge.from)!.column);
+      return { ...base, d: forwardEdgePath(edge.start, edge.end, edge.via, leads), lane: null };
+    }
 
     const fromColumn = layout.columns[nodes.get(edge.from)!.column];
     const toColumn = layout.columns[nodes.get(edge.to)!.column];
