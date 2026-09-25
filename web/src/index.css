@@ -32,23 +32,27 @@ body {
 }
 
 /* Dependencies-view attention animation (see src/lib/attention.ts).
-   An in-progress card breathes a ring in the in-progress blue (#3b82f6,
-   blue-500, the status dot's own colour) on a ~2s cycle so it can be picked
-   out across a full-screen graph, and its status dot pulses on the same cycle.
-   Both rules share the timing and start from the same mount, so the ring and
-   the dot stay in step. A card in agent review breathes the same cycle in the
-   agent-review violet (#8b5cf6, violet-500) further down. */
+   An in-progress card breathes a ring in the in-progress blue (--color-blue-500,
+   the status dot's own colour token, from Tailwind's theme, see src/lib/status.ts)
+   on a ~2s cycle so it can be picked out across a full-screen graph, and its
+   status dot pulses on the same cycle. Both rules share the timing and start
+   from the same mount, so the ring and the dot stay in step. A card in agent
+   review breathes the same cycle in the agent-review violet (--color-violet-500)
+   further down. The glow's alpha steps are mixed from the token with
+   color-mix(), the same technique Tailwind itself compiles opacity modifiers
+   like ring-blue-500/40 to, so the glow always matches the token, never a
+   separately hand-picked rgb(). */
 @keyframes graph-attention-ring {
   0%,
   100% {
     box-shadow:
-      0 0 0 1px rgb(59 130 246 / 0.5),
-      0 0 12px 1px rgb(59 130 246 / 0.25);
+      0 0 0 1px color-mix(in oklab, var(--color-blue-500) 50%, transparent),
+      0 0 12px 1px color-mix(in oklab, var(--color-blue-500) 25%, transparent);
   }
   50% {
     box-shadow:
-      0 0 0 3px rgb(59 130 246 / 0.95),
-      0 0 28px 7px rgb(59 130 246 / 0.55);
+      0 0 0 3px color-mix(in oklab, var(--color-blue-500) 95%, transparent),
+      0 0 28px 7px color-mix(in oklab, var(--color-blue-500) 55%, transparent);
   }
 }
 
@@ -56,11 +60,11 @@ body {
   0%,
   100% {
     transform: scale(1);
-    box-shadow: 0 0 0 0 rgb(59 130 246 / 0);
+    box-shadow: 0 0 0 0 transparent;
   }
   50% {
     transform: scale(1.45);
-    box-shadow: 0 0 9px 3px rgb(59 130 246 / 0.7);
+    box-shadow: 0 0 9px 3px color-mix(in oklab, var(--color-blue-500) 70%, transparent);
   }
 }
 
@@ -78,14 +82,14 @@ body {
   .graph-attention {
     animation: none;
     box-shadow:
-      0 0 0 2px rgb(59 130 246 / 0.9),
-      0 0 20px 4px rgb(59 130 246 / 0.4);
+      0 0 0 2px color-mix(in oklab, var(--color-blue-500) 90%, transparent),
+      0 0 20px 4px color-mix(in oklab, var(--color-blue-500) 40%, transparent);
   }
 
   .graph-attention-dot {
     animation: none;
     transform: scale(1.35);
-    box-shadow: 0 0 8px 2px rgb(59 130 246 / 0.55);
+    box-shadow: 0 0 8px 2px color-mix(in oklab, var(--color-blue-500) 55%, transparent);
   }
 }
 
@@ -96,13 +100,13 @@ body {
   0%,
   100% {
     box-shadow:
-      0 0 0 1px rgb(139 92 246 / 0.5),
-      0 0 12px 1px rgb(139 92 246 / 0.25);
+      0 0 0 1px color-mix(in oklab, var(--color-violet-500) 50%, transparent),
+      0 0 12px 1px color-mix(in oklab, var(--color-violet-500) 25%, transparent);
   }
   50% {
     box-shadow:
-      0 0 0 3px rgb(139 92 246 / 0.95),
-      0 0 28px 7px rgb(139 92 246 / 0.55);
+      0 0 0 3px color-mix(in oklab, var(--color-violet-500) 95%, transparent),
+      0 0 28px 7px color-mix(in oklab, var(--color-violet-500) 55%, transparent);
   }
 }
 
@@ -110,11 +114,11 @@ body {
   0%,
   100% {
     transform: scale(1);
-    box-shadow: 0 0 0 0 rgb(139 92 246 / 0);
+    box-shadow: 0 0 0 0 transparent;
   }
   50% {
     transform: scale(1.45);
-    box-shadow: 0 0 9px 3px rgb(139 92 246 / 0.7);
+    box-shadow: 0 0 9px 3px color-mix(in oklab, var(--color-violet-500) 70%, transparent);
   }
 }
 
@@ -130,14 +134,14 @@ body {
   .graph-attention-review {
     animation: none;
     box-shadow:
-      0 0 0 2px rgb(139 92 246 / 0.9),
-      0 0 20px 4px rgb(139 92 246 / 0.4);
+      0 0 0 2px color-mix(in oklab, var(--color-violet-500) 90%, transparent),
+      0 0 20px 4px color-mix(in oklab, var(--color-violet-500) 40%, transparent);
   }
 
   .graph-attention-review-dot {
     animation: none;
     transform: scale(1.35);
-    box-shadow: 0 0 8px 2px rgb(139 92 246 / 0.55);
+    box-shadow: 0 0 8px 2px color-mix(in oklab, var(--color-violet-500) 55%, transparent);
   }
 }
 
@@ -266,12 +270,16 @@ body {
 /* Dependencies-view change glow (see src/lib/changeGlow.ts).
    A live refresh that changed a card, or brought a new one, puts
    `graph-changed` on its wrapper for two seconds, so the person sees where
-   the fleet just acted. The glow is drawn on a pseudo-element rather than as
-   a box-shadow on the wrapper itself, so it layers over the in-progress
-   breathing ring on the card inside and over the hover chain's Tailwind ring
-   on the wrapper, instead of replacing either: a card that is both
-   in-progress and just changed keeps its blue ring and gains a white halo
-   around it.
+   the fleet just acted. The glow is drawn on the wrapper's own `::after`
+   pseudo-element rather than as a box-shadow on the wrapper itself, so it
+   layers over the in-progress breathing ring on the card inside and over the
+   hover chain's ring (a `::before` on this same wrapper, see
+   CARD_CHAIN_CLASSES in src/pages/Graph.tsx, ACP-59) instead of replacing
+   either: a card that is both in-progress and just changed keeps its blue
+   ring and gains a white halo around it. The chain ring deliberately uses
+   `::before`, not `::after`, so the two never collide on the same
+   pseudo-element (only one rule can ever win there); keep it that way if
+   either one ever needs a second pseudo-element of its own.
    Only the bloom is animated, and it settles into the steady halo the rule
    below already sets; the glow then simply ends when the page drops the
    class. That keeps a card that changes twice in quick succession lit for

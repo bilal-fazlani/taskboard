@@ -72,11 +72,16 @@ describe("the stylesheet behind the classes", () => {
     });
   }
 
-  it("rings agent review in violet where in progress is blue", () => {
+  it("rings agent review in violet where in progress is blue, both derived from the status colour tokens", () => {
     const ring = (name: string) =>
       css.match(new RegExp(`@keyframes ${name}\\s*\\{[\\s\\S]*?\\n\\}`))![0];
-    expect(ring("graph-attention-ring")).toContain("59 130 246");
-    expect(ring("graph-attention-review-ring")).toContain("139 92 246");
-    expect(ring("graph-attention-review-ring")).not.toContain("59 130 246");
+    expect(ring("graph-attention-ring")).toContain("var(--color-blue-500)");
+    expect(ring("graph-attention-review-ring")).toContain("var(--color-violet-500)");
+    expect(ring("graph-attention-review-ring")).not.toContain("var(--color-blue-500)");
+    // No hardcoded rgb() standing in for the token: the whole file, not just
+    // these two rules, since a stray literal anywhere would drift from
+    // lib/status.ts's STATUS_COLORS if the palette ever changed.
+    expect(css).not.toMatch(/rgb\(\s*59\s+130\s+246/);
+    expect(css).not.toMatch(/rgb\(\s*139\s+92\s+246/);
   });
 });

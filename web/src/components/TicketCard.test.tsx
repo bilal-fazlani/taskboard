@@ -2,6 +2,12 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import type { Ticket } from "../api/client";
+import {
+  ATTENTION_CARD_CLASS,
+  ATTENTION_DOT_CLASS,
+  ATTENTION_REVIEW_CARD_CLASS,
+  ATTENTION_REVIEW_DOT_CLASS,
+} from "../lib/attention";
 import TicketCard, { type GraphCardInfo } from "./TicketCard";
 
 afterEach(cleanup);
@@ -192,5 +198,54 @@ describe("TicketCard's documents", () => {
   it("shows on the graph card too", () => {
     render(<TicketCard ticket={makeTicket({ documentCount: 1 })} graph={GRAPH} />);
     expect(screen.getByTestId("card-documents").getAttribute("title")).toBe("1 document");
+  });
+});
+
+// ACP-59: the breathing glow (attentionClasses, lib/attention.ts) is gated on
+// both the graph prop and an active status. TicketCard is the only place
+// that wires attentionClasses to real DOM classes, so this is the one test
+// that would fail if that wiring ever came loose from the graph prop.
+//
+// Checked as exact class tokens, not substrings: ATTENTION_CARD_CLASS
+// ("graph-attention") is itself a substring of ATTENTION_REVIEW_CARD_CLASS
+// ("graph-attention-review"), so a plain string .toContain would pass even
+// if the wrong one were applied.
+const classTokens = (el: HTMLElement) => el.className.split(/\s+/);
+
+describe("TicketCard's attention glow", () => {
+  it("wears the blue breathing card and dot classes only on the graph, for in_progress", () => {
+    const { container: board } = render(<TicketCard ticket={makeTicket({ status: "in_progress" })} />);
+    const boardCard = board.firstElementChild as HTMLElement;
+    expect(classTokens(boardCard)).not.toContain(ATTENTION_CARD_CLASS);
+
+    const { container: graph } = render(<TicketCard ticket={makeTicket({ status: "in_progress" })} graph={GRAPH} />);
+    const graphCard = graph.firstElementChild as HTMLElement;
+    expect(classTokens(graphCard)).toContain(ATTENTION_CARD_CLASS);
+    expect(classTokens(graphCard)).not.toContain(ATTENTION_REVIEW_CARD_CLASS);
+    const dot = left(graph).firstElementChild as HTMLElement;
+    expect(classTokens(dot)).toContain(ATTENTION_DOT_CLASS);
+  });
+
+  it("wears the violet breathing card and dot classes only on the graph, for agent_review", () => {
+    const { container: board } = render(<TicketCard ticket={makeTicket({ status: "agent_review" })} />);
+    const boardCard = board.firstElementChild as HTMLElement;
+    expect(classTokens(boardCard)).not.toContain(ATTENTION_REVIEW_CARD_CLASS);
+
+    const { container: graph } = render(<TicketCard ticket={makeTicket({ status: "agent_review" })} graph={GRAPH} />);
+    const graphCard = graph.firstElementChild as HTMLElement;
+    expect(classTokens(graphCard)).toContain(ATTENTION_REVIEW_CARD_CLASS);
+    expect(classTokens(graphCard)).not.toContain(ATTENTION_CARD_CLASS);
+    const dot = left(graph).firstElementChild as HTMLElement;
+    expect(classTokens(dot)).toContain(ATTENTION_REVIEW_DOT_CLASS);
+  });
+
+  it("stays still for every other status, even on the graph", () => {
+    for (const status of ["todo", "done"]) {
+      const { container, unmount } = render(<TicketCard ticket={makeTicket({ status })} graph={GRAPH} />);
+      const card = container.firstElementChild as HTMLElement;
+      expect(classTokens(card)).not.toContain(ATTENTION_CARD_CLASS);
+      expect(classTokens(card)).not.toContain(ATTENTION_REVIEW_CARD_CLASS);
+      unmount();
+    }
   });
 });

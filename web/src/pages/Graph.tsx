@@ -99,20 +99,54 @@ const DOWNSTREAM_ARROW = "graph-arrow-downstream";
 // cycle with it, which are on both chains, in red, the colour back edges
 // already use for cycles. The card itself gets a bright border of its own.
 // The `*:` classes recolour the TicketCard's own border, and `!` keeps its
-// hover border from winning. Full literal class strings, so Tailwind emits
-// them.
+// hover border from winning.
+//
+// The ring itself is drawn on a `before:` pseudo-element rather than as a
+// box-shadow on this wrapper directly (ACP-59). TicketCard, the wrapper's
+// child, paints after the wrapper's own box decoration, so a plain
+// box-shadow here would sit *under* an active card's breathing glow
+// (graph-attention / graph-attention-review, index.css) and get overpainted
+// at peak glow — every role read fine by its `*:border` colour alone except
+// focus (slate-200), too close to an unlit card's border under a blue or
+// violet glow. `content-['']` plus `absolute inset-0` makes the pseudo a
+// positioned box, which (like any positioned box) paints after the in-flow,
+// non-positioned TicketCard child, so the ring still paints above the glow
+// even from `before:` — the wrapper's own box decoration (step 1) paints
+// first regardless, then TicketCard (step 3, in-flow), then this pseudo
+// (step 6, positioned) last. `before:`, not `after:`, matters only to keep
+// this ring off the *same* pseudo the live-refresh halo uses: `after:` would
+// collide with `.graph-changed::after` below (both would be `::after` on
+// this wrapper, and only one rule wins), leaving a lit chain card's ring and
+// drop shadow gone for the 2s the halo shows after a live update. Full
+// literal class strings, so Tailwind emits them.
+// No before:transition-shadow: the pseudo only exists once a role's
+// `content-['']` is applied (there's no bare `before:` box under `none`/dim
+// to transition from), so on the common path — an unlit card lighting up —
+// the ring's first paint is never a transition target and the property
+// would do nothing. It would only matter switching directly between two
+// already-lit roles (hovering straight from one chain member to another),
+// not worth the extra utility for.
 const CARD_CHAIN_CLASSES: Record<ChainRole, string> = {
-  focus: "*:border-slate-200! ring-2 ring-slate-200/40 shadow-lg shadow-black/40",
-  upstream: "*:border-amber-500! ring-1 ring-amber-500/40 shadow-lg shadow-black/40",
-  downstream: "*:border-blue-400! ring-1 ring-blue-400/35 shadow-lg shadow-black/40",
-  cycle: "*:border-red-500! ring-1 ring-red-500/40 shadow-lg shadow-black/40",
+  focus:
+    "*:border-slate-200! before:content-[''] before:pointer-events-none before:absolute before:inset-0 before:rounded-lg before:ring-2 before:ring-slate-200/40 before:shadow-lg before:shadow-black/40",
+  upstream:
+    "*:border-amber-500! before:content-[''] before:pointer-events-none before:absolute before:inset-0 before:rounded-lg before:ring-1 before:ring-amber-500/40 before:shadow-lg before:shadow-black/40",
+  downstream:
+    "*:border-blue-400! before:content-[''] before:pointer-events-none before:absolute before:inset-0 before:rounded-lg before:ring-1 before:ring-blue-400/35 before:shadow-lg before:shadow-black/40",
+  cycle:
+    "*:border-red-500! before:content-[''] before:pointer-events-none before:absolute before:inset-0 before:rounded-lg before:ring-1 before:ring-red-500/40 before:shadow-lg before:shadow-black/40",
   none: "opacity-22",
 };
 
 // A red ring alone tells a cycle from the amber upstream chain by hue, which
 // red-green colour blindness loses, so a card lit as part of a cycle also
 // carries a small "cycle" pill on its top edge (showsCyclePill). It is
-// positioned outside the flow, so the card keeps its measured size.
+// positioned outside the flow, so the card keeps its measured size. No
+// z-index needed: the pill is a real DOM child written after the wrapper's
+// `before:` pseudo (which, despite the name, is still the wrapper's first
+// *painted* box among its positioned children — before: precedes the
+// element's other content in the box tree, same as it would in the source),
+// so the pill already paints on top in DOM order.
 const CYCLE_PILL =
   "pointer-events-none absolute -top-2 left-3 inline-flex items-center gap-1 rounded-full bg-red-500 px-2 py-0.5 text-[10.5px] leading-none font-semibold text-slate-950 shadow-sm shadow-black/40";
 
@@ -884,7 +918,11 @@ export default function Graph() {
                 }
                 onBlur={() => onHighlight({ type: "cardBlurred", id: node.id })}
                 aria-describedby={showsCyclePill(chains, node.id) ? `cycle-pill-${node.id}` : undefined}
-                className={`absolute w-64 rounded-lg transition-[opacity,box-shadow] duration-150 ${
+                // Only opacity animates here now (ACP-59 review): the ring's
+                // box-shadow lives on CARD_CHAIN_CLASSES' before: pseudo, not
+                // on this element, so a transition naming box-shadow here
+                // would target a property nothing sets.
+                className={`absolute w-64 rounded-lg transition-opacity duration-150 ${
                   chains ? CARD_CHAIN_CLASSES[chainRole(chains, node.id)] : dimmed(node.id) ? FILTERED_OUT : ""
                 } ${glowing.has(node.id) ? CHANGE_GLOW_CLASS : ""}`}
                 style={{ left: node.x, top: node.y }}
