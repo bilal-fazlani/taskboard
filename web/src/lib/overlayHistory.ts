@@ -5,7 +5,9 @@
 // overlays opened from is kept in the entry's location state, which the
 // browser restores with the entry: Back from depth 2 lands on an entry that
 // still says 1. Closing everything goes back that many entries at once, which
-// leaves history as it was before the first overlay opened.
+// leaves history as it was before the first overlay opened. Entries an HTML
+// document adds inside its frame are not counted; lib/historyTraversal is how
+// closing skips them.
 //
 // `fromLink` records whether the entry under the first push already had an
 // overlay, which is how an editor opened straight from a link looks. Going
@@ -35,6 +37,17 @@ export function pushState(current: unknown, baseHasOverlay: boolean): Record<str
     overlayDepth: below.depth + 1,
     overlayFromLink: below.depth === 0 ? baseHasOverlay : below.fromLink,
   };
+}
+
+/**
+ * The location state for an entry whose overlays were all closed in place:
+ * nothing counts below it any more.
+ */
+export function closedState(current: unknown): Record<string, unknown> {
+  const rest = current !== null && typeof current === "object" ? { ...(current as Record<string, unknown>) } : {};
+  delete rest.overlayDepth;
+  delete rest.overlayFromLink;
+  return rest;
 }
 
 export function hasOverlay(params: URLSearchParams): boolean {

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { latestLocationState, latestSearchParams } from "../lib/latestSearch";
-import { hasOverlay, overlayState, pushState, withoutOverlays } from "../lib/overlayHistory";
+import { boardNavigation, keyBelow, onRefused } from "../lib/historyTraversal";
+import { closedState, hasOverlay, overlayState, pushState, withoutOverlays } from "../lib/overlayHistory";
 
 export interface OverlayHistory {
   /** How many overlay entries sit on top of the view they opened from. */
@@ -12,7 +13,7 @@ export interface OverlayHistory {
   replace: (next: URLSearchParams) => void;
   /**
    * Close the top overlay: one Back when it was pushed, otherwise (it came
-   * from a link) replace the entry with `without`.
+   * from a link, or the entry below is gone) replace the entry with `without`.
    */
   closeOne: (without: URLSearchParams) => void;
   /** Close every overlay and return to the view they opened from. */
@@ -55,10 +56,21 @@ export function useOverlayHistory(): OverlayHistory {
     [setParams, location.state],
   );
 
+  // Going back uses the Navigation API where the browser has it, so entries an
+  // HTML document added inside its frame are skipped (lib/historyTraversal).
+  // When the entry to go back to is gone, the overlays close in place instead.
   const closeOne = useCallback(
     (without: URLSearchParams) => {
-      if (overlayState(latestLocationState(location.state)).depth > 0) navigate(-1);
-      else replace(without);
+      if (overlayState(latestLocationState(location.state)).depth === 0) {
+        replace(without);
+        return;
+      }
+      const navigation = boardNavigation();
+      if (!navigation) {
+        navigate(-1);
+        return;
+      }
+      onRefused(navigation.back(), () => replace(without));
     },
     [navigate, replace, location.state],
   );
@@ -69,9 +81,23 @@ export function useOverlayHistory(): OverlayHistory {
       replace(withoutOverlays(latestSearchParams(params)));
       return;
     }
+    const closeInPlace = () => {
+      stripRef.current = false;
+      setParams(withoutOverlays(latestSearchParams(params)), {
+        replace: true,
+        state: closedState(latestLocationState(location.state)),
+      });
+    };
+    const navigation = boardNavigation();
     stripRef.current = now.fromLink;
-    navigate(-now.depth);
-  }, [navigate, replace, params, location.state]);
+    if (!navigation) {
+      navigate(-now.depth);
+      return;
+    }
+    const key = keyBelow(navigation, now.depth);
+    if (key === null) closeInPlace();
+    else onRefused(navigation.traverseTo(key), closeInPlace);
+  }, [navigate, replace, setParams, params, location.state]);
 
   return useMemo(() => ({ depth, push, replace, closeOne, closeAll }), [depth, push, replace, closeOne, closeAll]);
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { hasOverlay, overlayState, pushState, withoutOverlays } from "./overlayHistory";
+import { closedState, hasOverlay, overlayState, pushState, withoutOverlays } from "./overlayHistory";
 
 describe("overlayState", () => {
   it("reads depth and fromLink from location state", () => {
@@ -29,6 +29,14 @@ describe("pushState", () => {
 
   it("keeps other state fields", () => {
     expect(pushState({ other: 1 }, false)).toEqual({ other: 1, overlayDepth: 1, overlayFromLink: false });
+  });
+});
+
+describe("closedState", () => {
+  it("drops the depth and fromLink and keeps other state fields", () => {
+    expect(closedState({ other: 1, overlayDepth: 2, overlayFromLink: true })).toEqual({ other: 1 });
+    expect(overlayState(closedState({ overlayDepth: 2 }))).toEqual({ depth: 0, fromLink: false });
+    expect(closedState(null)).toEqual({});
   });
 });
 
