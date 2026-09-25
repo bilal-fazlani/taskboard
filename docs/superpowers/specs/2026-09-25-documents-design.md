@@ -21,7 +21,7 @@ The work ships as six tickets, in this order:
 3. **HTML documents.** Shown in an isolated frame, never edited by users.
 4. **Documents on epics.** Everything above, on epics, through a new epic modal.
 5. **Search includes documents.** The web search matches document names and
-   content.
+   their readable text.
 
 ## Purpose
 
@@ -224,10 +224,40 @@ without a name supplies the name and format as above.
 
 - The web search runs in the browser over each ticket's key, title and
   description. A non-empty search now also asks the server which tickets have
-  a document whose name or content contains the text (ignoring case), and
-  those tickets match too.
+  a document whose display name ("Plan.md") or readable text contains the
+  text, and those tickets match too.
+- The readable text is what a person reads, not how the document is written
+  (changed by Bilal 2026-09-25, after the plan was written, so "style" never
+  finds an HTML page just because it has a `<style>` tag):
+  - **HTML:** visible text only. Tags, attribute values, `<style>`,
+    `<script>`, `<noscript>`, `<template>` and comments are ignored (so are
+    `<head>`, `<title>` and `<iframe>` fallback text, which never show). Text
+    a script draws at runtime, such as chart labels, is not searchable.
+  - **Markdown:** the rendered text. Markup (`#`, `**`, `_`, backticks, list
+    and table syntax) is ignored, and so are link and image addresses; link
+    text, image alt text and the contents of code blocks and inline code
+    stay. Raw HTML inside markdown reads as written, since the web shows it
+    as literal text.
+  - Block elements (paragraphs, headings, list items, table cells, line
+    breaks) separate words; inline elements do not, so `<b>sty</b>le` reads
+    "style". Entities are decoded.
+- Matching is the same as the ticket search: the text can appear anywhere,
+  even inside a word ("style" matches "stylesheet"), ignoring case with a
+  Unicode fold done in Go, since SQLite folds ASCII only.
+- The server works out a document's readable text when it is created and
+  whenever its content is saved (a rename leaves it alone), and keeps it with
+  the document, so a search never parses documents that can be 8 MB. Opening
+  the database fills in the text of documents that have none, or whose text
+  is from an older revision, so documents that exist when this ships become
+  searchable, as do any written later by an older build.
+- `GET /api/documents/search?q=&projectId=` returns the matching ticket ids.
+  The browser asks it 250 ms after typing settles and again on each live
+  change, keeping the last answer while the next loads. All three views
+  (Kanban, Table, Dependencies) use it, and the "N of M tickets" count
+  includes document matches.
 - Only tickets' own documents count. Epic documents are not searched.
-- No visible UI change.
+- No visible UI change: a ticket matched through a document shows up like any
+  other result. MCP and the CLI get no search.
 
 ## Error handling
 
