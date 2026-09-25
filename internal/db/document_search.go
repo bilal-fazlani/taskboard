@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/tcarac/taskboard/internal/doctext"
 	"github.com/tcarac/taskboard/internal/models"
@@ -15,11 +17,11 @@ import (
 // never the content. Only tickets' own documents count, not epics'. With
 // projectRef (id or prefix) it looks in that project only. q is trimmed; an
 // empty q, or a project that names nothing, matches no tickets. Case is
-// folded here with strings.ToLower rather than in SQL, whose lower() and
+// folded here with foldCase rather than in SQL, whose lower() and
 // LIKE fold ASCII only. The result is sorted and never nil.
 func (s *Store) SearchDocumentTickets(q, projectRef string) ([]string, error) {
 	ids := []string{}
-	needle := strings.ToLower(strings.TrimSpace(q))
+	needle := foldCase(strings.TrimSpace(q))
 	if needle == "" {
 		return ids, nil
 	}
@@ -53,12 +55,39 @@ func (s *Store) SearchDocumentTickets(q, projectRef string) ([]string, error) {
 		if len(ids) > 0 && ids[len(ids)-1] == ticketID {
 			continue
 		}
-		if strings.Contains(strings.ToLower(models.DocumentDisplayName(name, format)), needle) ||
-			strings.Contains(strings.ToLower(text), needle) {
+		if strings.Contains(foldCase(models.DocumentDisplayName(name, format)), needle) ||
+			strings.Contains(foldCase(text), needle) {
 			ids = append(ids, ticketID)
 		}
 	}
 	return ids, rows.Err()
+}
+
+// foldCase applies Unicode simple case folding: every rune becomes the
+// smallest rune of its unicode.SimpleFold cycle, so two strings fold alike
+// exactly when strings.EqualFold holds rune by rune. Unlike strings.ToLower
+// this puts "Σ", "σ" and the final "ς" together, as the browser's
+// toLowerCase-based ticket search does for a word ending in sigma.
+func foldCase(s string) string {
+	return strings.Map(foldRune, s)
+}
+
+func foldRune(r rune) rune {
+	if r < utf8.RuneSelf {
+		// ASCII fast path. The smallest rune of an ASCII letter's cycle is its
+		// upper case ("k", "K" and the Kelvin sign fold to "K").
+		if 'a' <= r && r <= 'z' {
+			return r - ('a' - 'A')
+		}
+		return r
+	}
+	least := r
+	for f := unicode.SimpleFold(r); f != r; f = unicode.SimpleFold(f) {
+		if f < least {
+			least = f
+		}
+	}
+	return least
 }
 
 // saveDocumentText records a document's readable text as of revision, the

@@ -250,6 +250,51 @@ func TestSearchDocumentTickets(t *testing.T) {
 	}
 }
 
+func TestFoldCase(t *testing.T) {
+	for _, pair := range [][2]string{
+		{"ΟΔΟΣ", "οδος"}, {"ΟΔΟΣ", "οδοσ"}, {"οδος", "οδοσ"},
+		{"ÉTUDE", "étude"}, {"Kelvin \u212a", "kELVIN k"}, {"ſtyle", "STYLE"},
+	} {
+		if foldCase(pair[0]) != foldCase(pair[1]) {
+			t.Errorf("foldCase(%q) = %q, foldCase(%q) = %q; want equal", pair[0], foldCase(pair[0]), pair[1], foldCase(pair[1]))
+		}
+	}
+	if foldCase("style") == foldCase("stylf") {
+		t.Error("foldCase merged different letters")
+	}
+}
+
+// Words ending in sigma match in every one of its forms, capital, medial and
+// final, in document text and names alike, as they do in the browser.
+func TestSearchDocumentTicketsFoldsSigma(t *testing.T) {
+	s := newTestStore(t)
+	p := seedProject(t, s, "Docs", "DOC")
+	upper := seedTicket(t, s, p.ID, "Upper")
+	medial := seedTicket(t, s, p.ID, "Medial")
+	final := seedTicket(t, s, p.ID, "Final")
+	named := seedTicket(t, s, p.ID, "Named")
+	accented := seedTicket(t, s, p.ID, "Accented")
+	seedDocument(t, s, upper.ID, "Upper", "Η ΟΔΟΣ ΤΟΥ ΣΧΕΔΙΟΥ")
+	seedDocument(t, s, medial.ID, "Medial", "η οδοσ του σχεδίου")
+	seedDocument(t, s, final.ID, "Final", "η οδος του σχεδίου")
+	seedDocument(t, s, named.ID, "Χάρτης ΟΔΟΣ", "")
+	seedDocument(t, s, accented.ID, "Notes", "We compared the étude results.")
+
+	all := sortedIDs(upper.ID, medial.ID, final.ID, named.ID)
+	for _, q := range []string{"ΟΔΟΣ", "οδοσ", "οδος", "Οδος", "ΟΔΟς"} {
+		got, err := s.SearchDocumentTickets(q, "DOC")
+		if err != nil || !slices.Equal(got, all) {
+			t.Errorf("search %q = %#v, %v; want %#v", q, got, err, all)
+		}
+	}
+	for _, q := range []string{"ÉTUDE", "étude", "Étude"} {
+		got, err := s.SearchDocumentTickets(q, "DOC")
+		if err != nil || !slices.Equal(got, []string{accented.ID}) {
+			t.Errorf("search %q = %#v, %v; want %#v", q, got, err, []string{accented.ID})
+		}
+	}
+}
+
 func sortedIDs(ids ...string) []string {
 	slices.Sort(ids)
 	return ids
