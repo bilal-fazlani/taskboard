@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"path/filepath"
@@ -1784,4 +1785,122 @@ func TestGetBoardHasAColumnPerStatusInOrder(t *testing.T) {
 	if len(review.Tickets) != 1 || review.Tickets[0].ID != tk.ID {
 		t.Fatalf("agent_review column holds %d tickets, want just the moved one", len(review.Tickets))
 	}
+}
+
+// SetSubtaskState must tick, untick, and tolerate a repeated call to the same
+// state without error, unlike ToggleSubtask which would undo itself.
+func TestSetSubtaskStateTicksAndUnticks(t *testing.T) {
+	s := newTestStore(t)
+	p := seedProject(t, s, "Billing", "BILL")
+	tk := seedTicket(t, s, p.ID, "Invoice")
+	st, err := s.AddSubtask(tk.ID, models.CreateSubtaskRequest{Title: "Step one"})
+	if err != nil {
+		t.Fatalf("AddSubtask: %v", err)
+	}
+	if st.Completed {
+		t.Fatalf("new subtask started completed")
+	}
+
+	got, err := s.SetSubtaskState(st.ID, true)
+	if err != nil {
+		t.Fatalf("SetSubtaskState(true): %v", err)
+	}
+	if !got.Completed {
+		t.Fatalf("completed = false after SetSubtaskState(true)")
+	}
+
+	// Repeating the same state is not an error.
+	got, err = s.SetSubtaskState(st.ID, true)
+	if err != nil {
+		t.Fatalf("SetSubtaskState(true) repeated: %v", err)
+	}
+	if !got.Completed {
+		t.Fatalf("completed = false after repeating SetSubtaskState(true)")
+	}
+
+	got, err = s.SetSubtaskState(st.ID, false)
+	if err != nil {
+		t.Fatalf("SetSubtaskState(false): %v", err)
+	}
+	if got.Completed {
+		t.Fatalf("completed = true after SetSubtaskState(false)")
+	}
+
+	// Repeating false is also not an error.
+	got, err = s.SetSubtaskState(st.ID, false)
+	if err != nil {
+		t.Fatalf("SetSubtaskState(false) repeated: %v", err)
+	}
+	if got.Completed {
+		t.Fatalf("completed = true after repeating SetSubtaskState(false)")
+	}
+}
+
+// A call that finds the subtask already at the target state must write
+// nothing at all: PRAGMA data_version, which the live-refresh watcher polls,
+// must not move. A call that actually changes the state must move it.
+func TestSetSubtaskStateNoopMakesNoWrite(t *testing.T) {
+	s, _, w := openWatched(t)
+	ctx := context.Background()
+	p := seedProject(t, s, "Billing", "BILL")
+	tk := seedTicket(t, s, p.ID, "Invoice")
+	st, err := s.AddSubtask(tk.ID, models.CreateSubtaskRequest{Title: "Step one"})
+	if err != nil {
+		t.Fatalf("AddSubtask: %v", err)
+	}
+
+	v0, err := w.dataVersion(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Already false: setting it false again must not write.
+	if _, err := s.SetSubtaskState(st.ID, false); err != nil {
+		t.Fatalf("SetSubtaskState(false) no-op: %v", err)
+	}
+	if v, _ := w.dataVersion(ctx); v != v0 {
+		t.Fatalf("data_version moved on a no-op SetSubtaskState(false): %d -> %d", v0, v)
+	}
+
+	// An actual change must write.
+	if _, err := s.SetSubtaskState(st.ID, true); err != nil {
+		t.Fatalf("SetSubtaskState(true): %v", err)
+	}
+	v1, err := w.dataVersion(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v1 == v0 {
+		t.Fatalf("data_version did not move when SetSubtaskState(true) actually changed the row")
+	}
+
+	// Already true: setting it true again must not write.
+	if _, err := s.SetSubtaskState(st.ID, true); err != nil {
+		t.Fatalf("SetSubtaskState(true) no-op: %v", err)
+	}
+	if v, _ := w.dataVersion(ctx); v != v1 {
+		t.Fatalf("data_version moved on a no-op SetSubtaskState(true): %d -> %d", v1, v)
+	}
+}
+
+// An unknown subtask id is a caller mistake, reported as an ErrInvalidInput
+// rather than a bare sql.ErrNoRows, so any caller that checks the error type
+// can tell it apart from an unexpected failure. POST /api/subtasks/{id}/toggle
+// does not check the error type today (toggleSubtask in server.go answers
+// every error with a 500 via writeError, unlike writeStoreError elsewhere),
+// so this does not itself change what that route returns.
+func TestSetSubtaskStateUnknownIDIsInvalidInput(t *testing.T) {
+	s := newTestStore(t)
+	_, err := s.SetSubtaskState("nope", true)
+	assertInvalidInput(t, err, "")
+}
+
+// ToggleSubtask picked up the same clear-error treatment as SetSubtaskState
+// when it was changed to share the "look the row up after writing" shape;
+// an unknown id must report ErrInvalidInput here too, not a bare
+// sql.ErrNoRows.
+func TestToggleSubtaskUnknownIDIsInvalidInput(t *testing.T) {
+	s := newTestStore(t)
+	_, err := s.ToggleSubtask("nope")
+	assertInvalidInput(t, err, "")
 }

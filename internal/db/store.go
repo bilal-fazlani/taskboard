@@ -1370,6 +1370,30 @@ func (s *Store) ToggleSubtask(id string) (*models.Subtask, error) {
 	var st models.Subtask
 	err = s.db.QueryRow("SELECT id, ticket_id, title, completed, position FROM subtasks WHERE id = ?", id).
 		Scan(&st.ID, &st.TicketID, &st.Title, &st.Completed, &st.Position)
+	if err == sql.ErrNoRows {
+		return nil, invalidInput("subtask not found: %q", id)
+	}
+	return &st, err
+}
+
+// SetSubtaskState sets a subtask directly to completed, rather than flipping
+// it, so a caller with a stale read or a repeated call cannot toggle it the
+// wrong way. The WHERE clause only matches a row that is not already at the
+// target state, so a call that finds the subtask already there writes
+// nothing: no row changes, so PRAGMA data_version (and with it, any
+// live-refresh event a watcher drives from it) is untouched, exactly as if
+// the call had never been made. An unknown id is reported clearly rather than
+// as a bare sql.ErrNoRows.
+func (s *Store) SetSubtaskState(id string, completed bool) (*models.Subtask, error) {
+	if _, err := s.db.Exec("UPDATE subtasks SET completed = ? WHERE id = ? AND completed != ?", completed, id, completed); err != nil {
+		return nil, err
+	}
+	var st models.Subtask
+	err := s.db.QueryRow("SELECT id, ticket_id, title, completed, position FROM subtasks WHERE id = ?", id).
+		Scan(&st.ID, &st.TicketID, &st.Title, &st.Completed, &st.Position)
+	if err == sql.ErrNoRows {
+		return nil, invalidInput("subtask not found: %q", id)
+	}
 	return &st, err
 }
 

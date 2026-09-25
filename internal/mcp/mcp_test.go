@@ -318,6 +318,138 @@ func TestGetTicketToolStillReportsNotFound(t *testing.T) {
 	}
 }
 
+// toggle_subtask omitting `completed` must keep flipping the current state,
+// exactly as it always has, so existing callers keep working.
+func TestToggleSubtaskToolOmittingCompletedStillFlips(t *testing.T) {
+	s := newTestServer(t)
+	p, err := s.store.CreateProject(models.CreateProjectRequest{Name: "Billing", Prefix: "BILL"})
+	if err != nil {
+		t.Fatalf("CreateProject: %v", err)
+	}
+	ticket, err := s.store.CreateTicket(models.CreateTicketRequest{ProjectID: p.ID, Title: "Invoice"})
+	if err != nil {
+		t.Fatalf("CreateTicket: %v", err)
+	}
+	st, err := s.store.AddSubtask(ticket.ID, models.CreateSubtaskRequest{Title: "Step one"})
+	if err != nil {
+		t.Fatalf("AddSubtask: %v", err)
+	}
+	if st.Completed {
+		t.Fatalf("new subtask started completed")
+	}
+
+	result, err := s.callTool("toggle_subtask", mustJSON(t, map[string]any{"id": st.ID}))
+	if err != nil {
+		t.Fatalf("toggle_subtask (no completed): %v", err)
+	}
+	if !result.(*models.Subtask).Completed {
+		t.Fatalf("first flip left completed = false, want true")
+	}
+
+	result, err = s.callTool("toggle_subtask", mustJSON(t, map[string]any{"id": st.ID}))
+	if err != nil {
+		t.Fatalf("toggle_subtask (no completed), second call: %v", err)
+	}
+	if result.(*models.Subtask).Completed {
+		t.Fatalf("second flip left completed = true, want false")
+	}
+}
+
+// Passing `completed` sets the subtask to that exact state, whichever way it
+// currently sits, and a repeated call with the same value is a harmless no-op
+// that still succeeds.
+func TestToggleSubtaskToolWithCompletedSetsState(t *testing.T) {
+	s := newTestServer(t)
+	p, err := s.store.CreateProject(models.CreateProjectRequest{Name: "Billing", Prefix: "BILL"})
+	if err != nil {
+		t.Fatalf("CreateProject: %v", err)
+	}
+	ticket, err := s.store.CreateTicket(models.CreateTicketRequest{ProjectID: p.ID, Title: "Invoice"})
+	if err != nil {
+		t.Fatalf("CreateTicket: %v", err)
+	}
+	st, err := s.store.AddSubtask(ticket.ID, models.CreateSubtaskRequest{Title: "Step one"})
+	if err != nil {
+		t.Fatalf("AddSubtask: %v", err)
+	}
+
+	// Setting it true from an already-false state.
+	result, err := s.callTool("toggle_subtask", mustJSON(t, map[string]any{"id": st.ID, "completed": true}))
+	if err != nil {
+		t.Fatalf("toggle_subtask completed=true: %v", err)
+	}
+	if !result.(*models.Subtask).Completed {
+		t.Fatalf("completed = false after setting true")
+	}
+
+	// Setting it true again is a no-op that still succeeds.
+	result, err = s.callTool("toggle_subtask", mustJSON(t, map[string]any{"id": st.ID, "completed": true}))
+	if err != nil {
+		t.Fatalf("toggle_subtask completed=true (repeat): %v", err)
+	}
+	if !result.(*models.Subtask).Completed {
+		t.Fatalf("completed = false after repeating true")
+	}
+
+	// Setting it false.
+	result, err = s.callTool("toggle_subtask", mustJSON(t, map[string]any{"id": st.ID, "completed": false}))
+	if err != nil {
+		t.Fatalf("toggle_subtask completed=false: %v", err)
+	}
+	if result.(*models.Subtask).Completed {
+		t.Fatalf("completed = true after setting false")
+	}
+
+	// Setting it false again is a no-op that still succeeds.
+	if _, err := s.callTool("toggle_subtask", mustJSON(t, map[string]any{"id": st.ID, "completed": false})); err != nil {
+		t.Fatalf("toggle_subtask completed=false (repeat): %v", err)
+	}
+}
+
+// An unknown subtask id must fail clearly, not with a bare sql.ErrNoRows,
+// when completed is given.
+func TestToggleSubtaskToolWithCompletedReportsUnknownID(t *testing.T) {
+	s := newTestServer(t)
+	if _, err := s.callTool("toggle_subtask", mustJSON(t, map[string]any{"id": "nope", "completed": true})); err == nil {
+		t.Fatal("expected an error for a subtask that does not exist")
+	} else if strings.Contains(err.Error(), "no rows") {
+		t.Fatalf("error leaked the raw sql.ErrNoRows: %v", err)
+	}
+}
+
+// A `completed` that is not a JSON boolean (e.g. the string "true") must be
+// rejected as a tool error, not silently ignored: decoding it into *bool
+// fails, and a dropped decode error would leave Completed nil, which falls
+// through to a flip and reports success for a call that was actually
+// malformed.
+func TestToggleSubtaskToolRejectsNonBooleanCompleted(t *testing.T) {
+	s := newTestServer(t)
+	p, err := s.store.CreateProject(models.CreateProjectRequest{Name: "Billing", Prefix: "BILL"})
+	if err != nil {
+		t.Fatalf("CreateProject: %v", err)
+	}
+	ticket, err := s.store.CreateTicket(models.CreateTicketRequest{ProjectID: p.ID, Title: "Invoice"})
+	if err != nil {
+		t.Fatalf("CreateTicket: %v", err)
+	}
+	st, err := s.store.AddSubtask(ticket.ID, models.CreateSubtaskRequest{Title: "Step one"})
+	if err != nil {
+		t.Fatalf("AddSubtask: %v", err)
+	}
+
+	if _, err := s.callTool("toggle_subtask", mustJSON(t, map[string]any{"id": st.ID, "completed": "true"})); err == nil {
+		t.Fatal("expected an error for a non-boolean completed value")
+	}
+
+	final, err := s.store.GetTicket(ticket.ID)
+	if err != nil {
+		t.Fatalf("GetTicket: %v", err)
+	}
+	if len(final.Subtasks) != 1 || final.Subtasks[0].Completed {
+		t.Fatalf("subtask changed after a rejected call: %+v", final.Subtasks)
+	}
+}
+
 // get_ticket, update_ticket, move_ticket and delete_ticket must accept a
 // display key (case-insensitive), the same as their ULID id, and
 // create_ticket/list_tickets/get_board must accept a project prefix.

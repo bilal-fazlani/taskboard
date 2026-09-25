@@ -490,9 +490,15 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 
 	case "toggle_subtask":
 		var a struct {
-			ID string `json:"id"`
+			ID        string `json:"id"`
+			Completed *bool  `json:"completed"`
 		}
-		json.Unmarshal(args, &a)
+		if err := json.Unmarshal(args, &a); err != nil {
+			return nil, fmt.Errorf("invalid arguments: %w", err)
+		}
+		if a.Completed != nil {
+			return s.store.SetSubtaskState(a.ID, *a.Completed)
+		}
 		return s.store.ToggleSubtask(a.ID)
 
 	default:
@@ -911,12 +917,18 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 			},
 		},
 		{
-			Name:        "toggle_subtask",
-			Description: "Toggle subtask completion status",
+			Name: "toggle_subtask",
+			Description: "Set a subtask's completion status. Prefer passing `completed` to set it to a known state: " +
+				"a call that finds the subtask already at that state changes nothing and still succeeds, so it is safe " +
+				"to repeat and safe against a stale read. Omitting `completed` instead flips the current state, which " +
+				"is unsafe to repeat since a second call undoes the first.",
 			InputSchema: jsonSchema{
-				Type:       "object",
-				Properties: map[string]schemaProp{"id": {Type: "string", Description: "Subtask ID"}},
-				Required:   []string{"id"},
+				Type: "object",
+				Properties: map[string]schemaProp{
+					"id":        {Type: "string", Description: "Subtask ID"},
+					"completed": {Type: "boolean", Description: "Target completion state. Omit to flip the current state instead."},
+				},
+				Required: []string{"id"},
 			},
 		},
 		{

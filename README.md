@@ -224,7 +224,7 @@ The reverse direction is derived, not stored. When `BILL-5` depends on `BILL-2`,
 | **Subtasks**            |                                                  |
 | `create_subtask`        | Add a subtask to a ticket                        |
 | `batch_create_subtasks` | Add multiple subtasks to a ticket at once        |
-| `toggle_subtask`        | Toggle subtask completion                        |
+| `toggle_subtask`        | Set subtask completion (or toggle it)            |
 | `delete_subtask`        | Remove a subtask from a ticket                   |
 
 #### Status notes
