@@ -130,8 +130,10 @@ func TestRawRefusesAnImage(t *testing.T) {
 
 // TestReferencedImageRouteExposesOnlyTheOwnersImages: the route an HTML
 // page's relative image names land on answers with nothing but images of
-// the page's own owner, and gives the sandboxed page no way to read or
-// write anything else on the board.
+// the owner of the HTML document whose id it is given (whoever asks: the
+// accepted boundary, see getReferencedImage), never their bytes to a reader
+// on another origin, and gives the sandboxed page no way to read or write
+// anything else on the board.
 func TestReferencedImageRouteExposesOnlyTheOwnersImages(t *testing.T) {
 	r := serve(t)
 	tk := seedImageTicket(t, r)
@@ -171,6 +173,8 @@ func TestReferencedImageRouteExposesOnlyTheOwnersImages(t *testing.T) {
 		base + "Report.html/Login%20screen.png?ticket=DOC-1",
 		base + tk.ID + "/Login%20screen.png",
 		base + "nope/Login%20screen.png",
+		// A name is decoded once, as the browser encoded it, never twice.
+		base + page.ID + "/Login%2520screen.png",
 		// Escapes that would step out of the name.
 		base + page.ID + "/..%2F" + login.ID + "%2Fimage",
 		base + page.ID + "/%2e%2e",
@@ -192,6 +196,44 @@ func TestReferencedImageRouteExposesOnlyTheOwnersImages(t *testing.T) {
 	}
 	if resp, _ := fromPage(t, r, otherPage, "Login screen.png", sandboxedImageRequest); resp.StatusCode != http.StatusNotFound {
 		t.Errorf("their page, this ticket's image: %d, want 404", resp.StatusCode)
+	}
+
+	// The accepted boundary: the route is keyed by the HTML document's id,
+	// not by the page asking. Knowing another owner's HTML document id lets
+	// this page (../<id>/name) or any site display that owner's images, and
+	// learn their size, but not read them: cross-origin CORP, no CORS.
+	theirImage, err := r.srv.store.GetDocumentImage(theirs.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, get := range []func() (*http.Response, []byte){
+		func() (*http.Response, []byte) {
+			return sendBytes(t, http.MethodGet, base+otherPage.ID+"/Their%20shot.png", nil,
+				map[string]string{"Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "no-cors", "Sec-Fetch-Dest": "image", "Origin": "https://evil.example"})
+		},
+		func() (*http.Response, []byte) {
+			return fromPage(t, r, page, "../"+otherPage.ID+"/Their shot.png", sandboxedImageRequest)
+		},
+	} {
+		resp, body := get()
+		if resp.StatusCode != http.StatusOK || resp.Header.Get("Content-Type") != "image/png" || !bytes.Equal(body, theirImage.Data) {
+			t.Errorf("their image by their page's id: %d %q", resp.StatusCode, resp.Header.Get("Content-Type"))
+		}
+		if got := resp.Header.Get("Cross-Origin-Resource-Policy"); got != "cross-origin" {
+			t.Errorf("their image by their page's id: CORP = %q, want cross-origin", got)
+		}
+		for _, h := range []string{"Access-Control-Allow-Origin", "Access-Control-Allow-Credentials"} {
+			if got := resp.Header.Get(h); got != "" {
+				t.Errorf("their image by their page's id: %s = %q, want none", h, got)
+			}
+		}
+	}
+	// Still nothing but images: their page's id reaches none of their other
+	// documents, and never this ticket's.
+	for _, name := range []string{"Theirs.html", "Login%20screen.png"} {
+		if resp, _ := sendBytes(t, http.MethodGet, base+otherPage.ID+"/"+name, nil, sandboxedImageRequest); resp.StatusCode != http.StatusNotFound {
+			t.Errorf("their page's id, %s: %d, want 404", name, resp.StatusCode)
+		}
 	}
 
 	// The route only reads: other methods, from the page or anywhere, change

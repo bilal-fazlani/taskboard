@@ -7,10 +7,12 @@ import (
 )
 
 // ReferencedImage returns the image an HTML document refers to by name
-// (models.IsImageRef): one of the same owner's images, never another
-// owner's, and never a document that is not an image. It returns (nil, nil)
-// when fromID is not an HTML document or ref names none of its owner's
-// images, so a caller cannot tell those apart.
+// (models.IsImageRef): one of the images of the HTML document's own owner,
+// never another owner's, and never a document that is not an image. It
+// returns (nil, nil) when fromID is not an HTML document or ref names none of
+// its owner's images, so a caller cannot tell those apart. Whoever presents
+// fromID gets that owner's images; see getReferencedImage for the boundary
+// that sets.
 func (s *Store) ReferencedImage(fromID, ref string) (*ImageFile, error) {
 	from, err := scanDocumentMeta(s.db.QueryRow("SELECT "+documentMetaColumns+" FROM documents WHERE id = ?", fromID))
 	if err == sql.ErrNoRows {
