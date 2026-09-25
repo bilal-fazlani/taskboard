@@ -85,7 +85,7 @@ import type { Ticket, TicketRef } from "../api/client";
 import { isActive, isDone } from "./status";
 
 // Upstream and downstream chains through a node, for hover highlighting.
-export { chainFinder, chainRole, edgeChainRole, edgeKey, graphChains } from "./graphChains";
+export { chainFinder, chainRole, edgeChainRole, edgeKey, graphChains, showsCyclePill } from "./graphChains";
 export type { ChainRole, EdgeChainRole, GraphChains } from "./graphChains";
 
 /** The part of a TicketRef the layout reads. */

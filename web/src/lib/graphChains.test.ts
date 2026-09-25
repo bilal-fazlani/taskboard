@@ -7,6 +7,7 @@ import {
   edgeChainRole,
   edgeKey,
   graphChains,
+  showsCyclePill,
   type GraphChains,
   type GraphTicket,
   type GraphTopology,
@@ -384,5 +385,49 @@ describe("graphChains", () => {
     expect(c.upstreamEdges.size).toBe(count);
     expect(chainRole(c, "A-1")).toBe("cycle");
     expect(edgeChainRole(c, { from: `A-${count}`, to: "A-1" })).toBe("cycle");
+  });
+});
+
+describe("showsCyclePill", () => {
+  // The page's seeded example: A-1 -> A-2 -> A-3 <-> A-4 -> A-5 -> A-8, A-3
+  // blocks A-6, and A-7 blocks A-4.
+  const topology = topologyOf([
+    ["A-1"],
+    ["A-2", ["A-1"]],
+    ["A-3", ["A-2", "A-4"]],
+    ["A-4", ["A-3", "A-7"]],
+    ["A-5", ["A-4"]],
+    ["A-6", ["A-3"]],
+    ["A-7"],
+    ["A-8", ["A-5"]],
+  ]);
+  const pills = (c: GraphChains | null) => topology.nodes.filter((n) => showsCyclePill(c, n.id)).map((n) => n.id).sort();
+
+  it("marks the cards in a cycle with the lit card, and no upstream card", () => {
+    const c = chains(topology, "A-3");
+    expect(pills(c)).toEqual(["A-4"]);
+    // The amber cards it sits beside get none: that's the difference the pill carries.
+    expect(nodeRoles(topology, c).upstream).toEqual(["A-1", "A-2", "A-7"]);
+    expect(pills(chains(topology, "A-4"))).toEqual(["A-3"]);
+  });
+
+  it("leaves the lit card itself without one, though it is on the cycle", () => {
+    expect(showsCyclePill(chains(topology, "A-3"), "A-3")).toBe(false);
+  });
+
+  it("marks nothing when the lit card is outside every cycle, even beside one", () => {
+    // From A-1 the cycle is plain downstream; from A-5, plain upstream.
+    expect(pills(chains(topology, "A-1"))).toEqual([]);
+    expect(pills(chains(topology, "A-5"))).toEqual([]);
+  });
+
+  it("marks nothing while no card is lit", () => {
+    expect(pills(null)).toEqual([]);
+  });
+
+  it("marks every other card of a longer cycle", () => {
+    const ring = topologyOf([["R-1", ["R-3"]], ["R-2", ["R-1"]], ["R-3", ["R-2"]], ["R-4", ["R-3"]]]);
+    const c = chains(ring, "R-2");
+    expect(ring.nodes.filter((n) => showsCyclePill(c, n.id)).map((n) => n.id).sort()).toEqual(["R-1", "R-3"]);
   });
 });

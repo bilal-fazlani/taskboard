@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import { Maximize, ZoomIn, ZoomOut } from "lucide-react";
+import { Maximize, RefreshCw, ZoomIn, ZoomOut } from "lucide-react";
 import { api, type Ticket, type Project, type TicketWrite } from "../api/client";
 import TicketEditor from "../components/TicketEditor";
 import TicketCard from "../components/TicketCard";
@@ -23,6 +23,7 @@ import {
   edgeChainRole,
   matchingBounds,
   positionGraph,
+  showsCyclePill,
   type ChainRole,
   type EdgeChainRole,
   type Size,
@@ -107,6 +108,13 @@ const CARD_CHAIN_CLASSES: Record<ChainRole, string> = {
   cycle: "*:border-red-500! ring-1 ring-red-500/40 shadow-lg shadow-black/40",
   none: "opacity-22",
 };
+
+// A red ring alone tells a cycle from the amber upstream chain by hue, which
+// red-green colour blindness loses, so a card lit as part of a cycle also
+// carries a small "cycle" pill on its top edge (showsCyclePill). It is
+// positioned outside the flow, so the card keeps its measured size.
+const CYCLE_PILL =
+  "pointer-events-none absolute -top-2 left-3 inline-flex items-center gap-1 rounded-full bg-red-500 px-2 py-0.5 text-[10.5px] leading-none font-semibold text-slate-950 shadow-sm shadow-black/40";
 
 // In dim mode, the default, a card or edge the filters don't match dims
 // rather than leaving the graph, so the arrows stay whole. A lit chain
@@ -875,6 +883,7 @@ export default function Graph() {
                   })
                 }
                 onBlur={() => onHighlight({ type: "cardBlurred", id: node.id })}
+                aria-describedby={showsCyclePill(chains, node.id) ? `cycle-pill-${node.id}` : undefined}
                 className={`absolute w-64 rounded-lg transition-[opacity,box-shadow] duration-150 ${
                   chains ? CARD_CHAIN_CLASSES[chainRole(chains, node.id)] : dimmed(node.id) ? FILTERED_OUT : ""
                 } ${glowing.has(node.id) ? CHANGE_GLOW_CLASS : ""}`}
@@ -885,6 +894,12 @@ export default function Graph() {
                   graph={node}
                   onClick={() => openTicket(node.ticket)}
                 />
+                {showsCyclePill(chains, node.id) && (
+                  <span id={`cycle-pill-${node.id}`} className={CYCLE_PILL}>
+                    <RefreshCw aria-hidden="true" className="h-3 w-3" strokeWidth={2.5} />
+                    cycle
+                  </span>
+                )}
               </div>
             ))}
           </div>

@@ -65,6 +65,16 @@ export function chainRole(chains: GraphChains, id: string): ChainRole {
   return role(chains.upstream.has(id), chains.downstream.has(id));
 }
 
+/**
+ * Whether a card carries the "cycle" pill: it is lit as part of a cycle with
+ * the hovered card. The pill is what tells that apart from the upstream chain
+ * without relying on hue. The hovered card itself never carries one, and no
+ * card does while nothing is lit.
+ */
+export function showsCyclePill(chains: GraphChains | null, id: string): boolean {
+  return chains !== null && chainRole(chains, id) === "cycle";
+}
+
 export function edgeChainRole(chains: GraphChains, edge: Pick<GraphEdge, "from" | "to">): EdgeChainRole {
   const key = edgeKey(edge);
   return role(chains.upstreamEdges.has(key), chains.downstreamEdges.has(key));
