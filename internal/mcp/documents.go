@@ -177,7 +177,10 @@ func (s *MCPServer) callDocumentTool(name string, args json.RawMessage) (result 
 			if err != nil {
 				return nil, true, err
 			}
-			name, format := imageNameAndFormat(a.Name, a.Format)
+			name, format, err := imageNameAndFormat(a.Name, a.Format)
+			if err != nil {
+				return nil, true, err
+			}
 			d, err := s.store.CreateImageDocument(models.CreateImageRequest{
 				TicketID: owner.TicketID, EpicID: owner.EpicID, Name: name, Format: format, Data: data,
 			})
@@ -435,20 +438,24 @@ func decodeImageData(raw string) ([]byte, error) {
 }
 
 // imageNameAndFormat lets an image's name carry its extension, as agents
-// naturally write it ("Login screen.png"): a known image extension that
-// agrees with format (or stands in for a missing one) is taken off the name
-// and sets the format. "jpg" is taken for jpeg, and a .svg name is an SVG.
-func imageNameAndFormat(name, format string) (string, string) {
+// naturally write it ("Login screen.png"): a known image extension is taken
+// off the name and sets the format, and must agree with format when both are
+// given. "jpg" is taken for jpeg, and a .svg name is an SVG.
+func imageNameAndFormat(name, format string) (string, string, error) {
 	format = strings.ToLower(strings.TrimSpace(format))
 	if format == "jpg" {
 		format = models.DocumentFormatJPEG
 	}
 	trimmed := strings.TrimSpace(name)
-	if f, ok := db.DocumentFormatFromFilename(trimmed); ok && models.IsImageFormat(f) && (format == "" || format == f) {
-		return strings.TrimSuffix(trimmed, filepath.Ext(trimmed)), f
+	ext := filepath.Ext(trimmed)
+	if f, ok := db.DocumentFormatFromFilename(trimmed); ok && models.IsImageFormat(f) {
+		if format != "" && format != f {
+			return "", "", fmt.Errorf("the name ends in %s but format is %q; pass one or make them agree", ext, format)
+		}
+		return strings.TrimSuffix(trimmed, ext), f, nil
 	}
-	if format == "" && strings.EqualFold(filepath.Ext(trimmed), ".svg") {
-		return name, "svg" // refused in the store's words
+	if format == "" && strings.EqualFold(ext, ".svg") {
+		return name, "svg", nil // refused in the store's words
 	}
-	return name, format
+	return name, format, nil
 }

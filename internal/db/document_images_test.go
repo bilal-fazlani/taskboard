@@ -71,6 +71,19 @@ func TestMigrationAddsImageDocuments(t *testing.T) {
 	}
 	insert("d1", "t1", nil, "Plan", "markdown", "# Plan\n\nÉtape une", 3)
 	insert("d2", nil, "e1", "Report", "html", "<p>Report</p>", 1)
+	// A search row whose document is gone, as a database once written with
+	// foreign keys off could hold, is dropped rather than failing the
+	// migration.
+	database.SetMaxOpenConns(1)
+	for _, q := range []string{
+		"PRAGMA foreign_keys = OFF",
+		"INSERT INTO document_search (document_id, revision, text) VALUES ('gone', 1, 'orphan')",
+		"PRAGMA foreign_keys = ON",
+	} {
+		if _, err := database.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
 
 	if err := runMigrations(database); err != nil {
 		t.Fatalf("migrating: %v", err)
@@ -87,6 +100,9 @@ func TestMigrationAddsImageDocuments(t *testing.T) {
 	}
 	wantStoredText(t, s, "d1", "text of Plan", 3)
 	wantStoredText(t, s, "d2", "text of Report", 1)
+	if _, _, ok := storedText(t, s, "gone"); ok {
+		t.Error("the orphan search row survived")
+	}
 	if ids, err := s.SearchDocumentTickets("text of plan", ""); err != nil || len(ids) != 1 {
 		t.Errorf("search after migrating = %v, %v", ids, err)
 	}

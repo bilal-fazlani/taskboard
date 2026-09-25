@@ -64,6 +64,8 @@ func TestCreateImageDocumentTool(t *testing.T) {
 			"SVG images can't be attached. Use PNG, JPEG, GIF or WebP."},
 		{map[string]any{"ticket": "DOC-1", "name": "Logo.svg", "data": b64([]byte("<svg/>"))},
 			"SVG images can't be attached. Use PNG, JPEG, GIF or WebP."},
+		{map[string]any{"ticket": "DOC-1", "name": "Shot.png", "format": "gif", "data": b64(imagedoctest.PNG(8, 8))},
+			`the name ends in .png but format is "gif"; pass one or make them agree`},
 		{map[string]any{"ticket": "DOC-1", "name": "Shot", "data": b64(imagedoctest.PNG(8, 8))},
 			`Format must be "png", "jpeg", "gif" or "webp" for an image.`},
 		{map[string]any{"ticket": "DOC-1", "name": "Shot", "format": "png", "data": "not base64!"},

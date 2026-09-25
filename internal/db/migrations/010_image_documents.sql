@@ -9,7 +9,10 @@
 -- documents would cascade into document_search, so the search text is set
 -- aside first and put back after. The rebuilt table puts content last, so
 -- reading any other column never walks a long text's overflow pages.
-CREATE TABLE document_search_saved AS SELECT document_id, revision, text FROM document_search;
+-- Rows whose document is gone (possible only if foreign keys were ever off)
+-- are left behind, since the rebuilt table's foreign key would refuse them.
+CREATE TABLE document_search_saved AS SELECT document_id, revision, text FROM document_search
+    WHERE document_id IN (SELECT id FROM documents);
 DROP TABLE document_search;
 
 CREATE TABLE documents_new (

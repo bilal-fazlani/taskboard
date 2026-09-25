@@ -171,6 +171,14 @@ func writeImageFile(w http.ResponseWriter, r *http.Request, f *db.ImageFile, thu
 	h.Set("Cache-Control", "no-cache")
 	h.Set("ETag", fmt.Sprintf(`"%s-%s-%d-%d"`, f.Document.ID, kind, f.Document.Revision, f.Document.UpdatedAt.UnixNano()))
 	filename := models.DocumentDisplayName(f.Document.Name, f.Document.Format)
+	if thumbnail {
+		// Named for what it is: "Login screen thumbnail.jpg".
+		ext := ".png"
+		if contentType == "image/jpeg" {
+			ext = ".jpg"
+		}
+		filename = f.Document.Name + " thumbnail" + ext
+	}
 	h.Set("Content-Disposition", mime.FormatMediaType(disposition, map[string]string{"filename": filename}))
 	http.ServeContent(w, r, "", f.Document.UpdatedAt, bytes.NewReader(f.Data))
 }

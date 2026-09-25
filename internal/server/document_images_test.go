@@ -155,6 +155,11 @@ func TestUploadAndServeImages(t *testing.T) {
 			t.Fatalf("thumbnail: %d", resp.StatusCode)
 		}
 		wantImageHeaders(t, resp, resp.Header.Get("Content-Type"))
+		thumbName := strings.TrimSuffix(c.display, c.display[strings.LastIndex(c.display, "."):]) + " thumbnail." +
+			map[string]string{"image/jpeg": "jpg", "image/png": "png"}[resp.Header.Get("Content-Type")]
+		if _, params, _ := mime.ParseMediaType(resp.Header.Get("Content-Disposition")); params["filename"] != thumbName {
+			t.Errorf("thumbnail Content-Disposition %q, want the name %q", resp.Header.Get("Content-Disposition"), thumbName)
+		}
 		cfg, format, err := image.DecodeConfig(bytes.NewReader(body))
 		if err != nil || "image/"+format != resp.Header.Get("Content-Type") || cfg.Width != c.width || cfg.Height != c.height {
 			t.Errorf("%s: thumbnail %s %d×%d (%s), %v", c.filename, format, cfg.Width, cfg.Height, resp.Header.Get("Content-Type"), err)
