@@ -77,6 +77,12 @@ func EpicDocument(base, projectPrefix, epicName, displayName string) string {
 	return Epic(base, projectPrefix, epicName) + "&doc=" + url.QueryEscape(displayName)
 }
 
+// DocumentDownload is the URL that downloads a document's file from the
+// board's HTTP API, an image at full size and without its metadata.
+func DocumentDownload(base, documentID string) string {
+	return base + "/api/documents/" + url.PathEscape(documentID) + "/download"
+}
+
 // Ref is how a ticket names itself in a URL: its display key, or its id when
 // its project has no prefix, since the bare number a prefixless DisplayKey
 // gives back matches no ticket in the web UI. This mirrors ticketRefFor in

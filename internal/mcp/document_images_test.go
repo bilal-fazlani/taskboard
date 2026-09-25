@@ -4,6 +4,9 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"image"
+	_ "image/jpeg"
+	_ "image/png"
 	"strings"
 	"testing"
 
@@ -127,6 +130,12 @@ func TestGetDocumentToolReturnsThePicture(t *testing.T) {
 	if _, has := meta["content"]; has {
 		t.Error("the details carry an empty content field")
 	}
+	if _, has := meta["preview"]; has {
+		t.Error("a small image came as a preview")
+	}
+	if meta["downloadUrl"] != "http://board.test/api/documents/"+meta["id"].(string)+"/download" {
+		t.Errorf("downloadUrl = %v", meta["downloadUrl"])
+	}
 	picture, err := base64.StdEncoding.DecodeString(c[1].Data)
 	if err != nil {
 		t.Fatal(err)
@@ -227,5 +236,67 @@ func TestImageToolsOnEpics(t *testing.T) {
 	result, err := s.callTool("get_document", mustJSON(t, map[string]any{"id": "Flow.gif", "epic": "Launch", "project": "DOC"}))
 	if c, ok := result.(contentResult); err != nil || !ok || c[1].(imageContent).MimeType != "image/gif" {
 		t.Errorf("get_document on an epic image: %#v, %v", result, err)
+	}
+}
+
+// callGetDocument calls get_document through the JSON-RPC layer and returns
+// the details and the picture.
+func callGetDocument(t *testing.T, s *MCPServer, args map[string]any) (map[string]any, []byte, string) {
+	t.Helper()
+	resp := s.handleRequest(jsonrpcRequest{JSONRPC: "2.0", ID: 1, Method: "tools/call",
+		Params: mustJSON(t, map[string]any{"name": "get_document", "arguments": args})})
+	raw, _ := json.Marshal(resp)
+	var out struct {
+		Result struct {
+			Content []struct {
+				Type, Text, Data, MimeType string
+			} `json:"content"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(raw, &out); err != nil || len(out.Result.Content) != 2 {
+		t.Fatalf("get_document: %s", raw)
+	}
+	var meta map[string]any
+	if err := json.Unmarshal([]byte(out.Result.Content[0].Text), &meta); err != nil {
+		t.Fatal(err)
+	}
+	picture, err := base64.StdEncoding.DecodeString(out.Result.Content[1].Data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return meta, picture, out.Result.Content[1].MimeType
+}
+
+func TestGetDocumentToolScalesLargeImages(t *testing.T) {
+	t.Setenv(weburl.BaseEnv, "http://board.test")
+	s := newTestServer(t)
+	seedMCPTicket(t, s)
+	stored := imagedoctest.PNG(3000, 1000)
+	got, err := s.callTool("create_document", mustJSON(t, map[string]any{"ticket": "DOC-1", "name": "Wide.png", "data": b64(stored)}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := got.(*models.Document)
+
+	meta, picture, mimeType := callGetDocument(t, s, map[string]any{"id": d.ID})
+	cfg, format, err := image.DecodeConfig(bytes.NewReader(picture))
+	if err != nil || format != "jpeg" || mimeType != "image/jpeg" || cfg.Width != 1568 || cfg.Height != 523 {
+		t.Fatalf("picture %s %d×%d (%s), %v; want a 1568×523 JPEG", format, cfg.Width, cfg.Height, mimeType, err)
+	}
+	if meta["width"] != float64(3000) || meta["height"] != float64(1000) || meta["size"] != float64(len(stored)) {
+		t.Errorf("details should describe the stored image: %v", meta)
+	}
+	preview, ok := meta["preview"].(map[string]any)
+	if !ok || preview["width"] != float64(1568) || preview["height"] != float64(523) || preview["size"] != float64(len(picture)) ||
+		preview["mimeType"] != "image/jpeg" || !strings.Contains(preview["note"].(string), "scaled-down copy") ||
+		!strings.Contains(preview["note"].(string), "3000×1000") {
+		t.Errorf("preview details %v", meta["preview"])
+	}
+	if meta["downloadUrl"] != "http://board.test/api/documents/"+d.ID+"/download" {
+		t.Errorf("downloadUrl %v", meta["downloadUrl"])
+	}
+	// The stored file is untouched.
+	if f, _ := s.store.GetDocumentImage(d.ID); !bytes.Equal(f.Data, stored) {
+		t.Error("making the preview changed the stored file")
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"unicode"
 
 	"github.com/tcarac/taskboard/internal/db"
+	"github.com/tcarac/taskboard/internal/imagedoc"
 	"github.com/tcarac/taskboard/internal/models"
 	"github.com/tcarac/taskboard/internal/weburl"
 )
@@ -47,8 +48,9 @@ func (s *MCPServer) documentToolDefinitions() []toolDef {
 		{
 			Name: "get_document",
 			Description: "Read one document attached to a ticket or an epic, with its full content. For an image " +
-				"(png, jpeg, gif, webp) it returns its details (name, format, size, width, height, link) and the picture " +
-				"itself as image content, so you can look at screenshots and mocks. get_ticket and " +
+				"(png, jpeg, gif, webp) it returns its details (name, format, size, width, height, link, downloadUrl) and the picture " +
+				"itself as image content, so you can look at screenshots and mocks; an image over 1568 px on its long side or " +
+				"over 3.5 MB comes as a scaled-down copy fitting 1568 px, which the details' preview field describes. get_ticket and " +
 				"list_documents list documents (name, format, size, updated time, link) without content.",
 			InputSchema: jsonSchema{
 				Type: "object",
@@ -350,8 +352,28 @@ func (s *MCPServer) withDocumentURL(d *models.Document) *models.Document {
 	return d
 }
 
+// imageDetails is the text part of get_document's answer for an image.
+type imageDetails struct {
+	models.DocumentMeta
+	// DownloadURL fetches the file at full size from the board.
+	DownloadURL string `json:"downloadUrl"`
+	// Preview is set when the picture sent is a scaled-down copy.
+	Preview *imagePreview `json:"preview,omitempty"`
+}
+
+type imagePreview struct {
+	Note     string `json:"note"`
+	Width    int    `json:"width"`
+	Height   int    `json:"height"`
+	Size     int    `json:"size"`
+	MimeType string `json:"mimeType"`
+}
+
 // imageResult is get_document's answer for an image: its details as JSON
-// text, with the link that opens it, then the picture as image content.
+// text, with the links that open and download it, then the picture as image
+// content. A large image (imagedoc.NeedsPreview) is sent as a scaled-down
+// copy, which the details say, since model APIs and MCP clients refuse
+// pictures of several megabytes; the stored file is never changed.
 func (s *MCPServer) imageResult(d *models.Document) (contentResult, error) {
 	f, err := s.store.GetDocumentImage(d.ID)
 	if err != nil {
@@ -360,15 +382,30 @@ func (s *MCPServer) imageResult(d *models.Document) (contentResult, error) {
 	if f == nil {
 		return nil, fmt.Errorf("document not found")
 	}
-	meta := f.Document
-	meta.URL = s.documentURL(&meta)
-	details, err := json.MarshalIndent(meta, "", "  ")
+	details := imageDetails{DocumentMeta: f.Document, DownloadURL: weburl.DocumentDownload(weburl.Base(), f.Document.ID)}
+	details.URL = s.documentURL(&details.DocumentMeta)
+	picture, mimeType := f.Data, f.ContentType
+	if imagedoc.NeedsPreview(f.Document.Width, f.Document.Height, f.Document.Size) {
+		p, err := imagedoc.MakePreview(f.Document.Format, f.Data)
+		if err != nil {
+			return nil, fmt.Errorf("making a preview: %w", err)
+		}
+		picture, mimeType = p.Data, p.ContentType
+		details.Preview = &imagePreview{
+			Note: fmt.Sprintf("The picture below is a scaled-down copy (%d×%d %s, %s) of this %d×%d, %s image; "+
+				"the stored file is unchanged. Download it at full size from downloadUrl.",
+				p.Width, p.Height, models.ImageFormatName(strings.TrimPrefix(p.ContentType, "image/")), models.FormatSize(len(p.Data)),
+				f.Document.Width, f.Document.Height, models.FormatSize(f.Document.Size)),
+			Width: p.Width, Height: p.Height, Size: len(p.Data), MimeType: p.ContentType,
+		}
+	}
+	text, err := json.MarshalIndent(details, "", "  ")
 	if err != nil {
 		return nil, err
 	}
 	return contentResult{
-		textContent{Type: "text", Text: string(details)},
-		imageContent{Type: "image", Data: base64.StdEncoding.EncodeToString(f.Data), MimeType: f.ContentType},
+		textContent{Type: "text", Text: string(text)},
+		imageContent{Type: "image", Data: base64.StdEncoding.EncodeToString(picture), MimeType: mimeType},
 	}, nil
 }
 

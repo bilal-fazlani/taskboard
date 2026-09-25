@@ -244,27 +244,7 @@ func onCanvas(frame image.Image, offset image.Point, cfg image.Config) image.Ima
 // thumbnail scales img to fit ThumbnailSize (never up), turns it to its
 // orientation and encodes it.
 func thumbnail(img image.Image, orientation int) ([]byte, string, error) {
-	b := img.Bounds()
-	w, h := b.Dx(), b.Dy()
-	tw, th := w, h
-	if w > ThumbnailSize || h > ThumbnailSize {
-		if w >= h {
-			tw, th = ThumbnailSize, max(1, (h*ThumbnailSize+w/2)/w)
-		} else {
-			tw, th = max(1, (w*ThumbnailSize+h/2)/h), ThumbnailSize
-		}
-	}
-	scaled := image.NewRGBA(image.Rect(0, 0, tw, th))
-	if tw == w && th == h {
-		draw.Draw(scaled, scaled.Bounds(), img, b.Min, draw.Src)
-	} else {
-		// A box pass first, when the picture is much larger, keeps the
-		// resampling below fast; CatmullRom then scales the rest.
-		src := boxShrink(img, tw, th)
-		xdraw.CatmullRom.Scale(scaled, scaled.Bounds(), src, src.Bounds(), xdraw.Src, nil)
-	}
-	oriented := orient(scaled, orientation)
-
+	oriented := orient(scaleToFit(img, ThumbnailSize), orientation)
 	var buf bytes.Buffer
 	if oriented.Opaque() {
 		if err := jpeg.Encode(&buf, oriented, &jpeg.Options{Quality: 85}); err != nil {
@@ -276,6 +256,31 @@ func thumbnail(img image.Image, orientation int) ([]byte, string, error) {
 		return nil, "", err
 	}
 	return buf.Bytes(), "image/png", nil
+}
+
+// scaleToFit scales img to fit a square box of side pixels, never scaling
+// up; being square, the box fits whichever way the picture is turned after.
+func scaleToFit(img image.Image, side int) *image.RGBA {
+	b := img.Bounds()
+	w, h := b.Dx(), b.Dy()
+	tw, th := w, h
+	if w > side || h > side {
+		if w >= h {
+			tw, th = side, max(1, (h*side+w/2)/w)
+		} else {
+			tw, th = max(1, (w*side+h/2)/h), side
+		}
+	}
+	scaled := image.NewRGBA(image.Rect(0, 0, tw, th))
+	if tw == w && th == h {
+		draw.Draw(scaled, scaled.Bounds(), img, b.Min, draw.Src)
+	} else {
+		// A box pass first, when the picture is much larger, keeps the
+		// resampling below fast; CatmullRom then scales the rest.
+		src := boxShrink(img, tw, th)
+		xdraw.CatmullRom.Scale(scaled, scaled.Bounds(), src, src.Bounds(), xdraw.Src, nil)
+	}
+	return scaled
 }
 
 // boxShrink averages img down by a whole factor, to no less than twice the
