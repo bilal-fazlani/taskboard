@@ -3,7 +3,8 @@
 // owner's HTML documents. The name is the image's display name with its
 // extension, ignoring case; a JPEG shows as .jpg and answers to .jpeg too (as
 // the server's lookups do). Renames keep exactly the forms below in step, and
-// nothing else (internal/models/image_ref.go carries the same list).
+// nothing else (internal/models/image_ref.go carries the same list, and
+// internal/imageref does the rewriting, from parse positions).
 //
 // Markdown:
 //   ![alt](Login screen.png)             bare, spaces and all (remarkSpacedImageRefs);
@@ -12,10 +13,14 @@
 //   ![alt](<Login screen.png> "Title")
 //   ![alt](Login%20screen.png)           percent-encoded (any %XX escape of the
 //   ![alt](Login%20screen.png "Title")   name's characters), with or without a title
+//   ![alt](<Login%20screen.png>)         both at once
 //   ![alt][r]  ![r][]  ![r]              reference style, whose definition gives the
 //   [r]: <Login screen.png>              name angle-bracketed or percent-encoded
 //   [r]: Login%20screen.png "Title"      (a name without spaces may also be bare),
 //                                        with or without a title
+// In any of these, whitespace or a line break inside the parentheses,
+// character references (Login&#32;screen.png) and backslash escapes
+// (login\_screen.png) are kept in step too.
 // Absolute http(s) URLs are shown as they are. Anything else, including
 // ./Login screen.png, a path on this server or another owner's image name,
 // is a missing image.
@@ -27,10 +32,19 @@
 //   srcset="… 2x"    each URL in it (spaces must be %20 there)
 //   url(…)           in a style attribute or a <style> element, quoted or not
 // where the URL is the name bare (Login screen.png), with ./ in front
-// (./Login screen.png), or percent-encoded (Login%20screen.png). Other forms
-// that happen to reach the route, such as ../<id>/Login screen.png,
-// /api/documents/<id>/Login screen.png, an absolute URL, an href, or a URL a
-// script builds, are not kept in step.
+// (./Login screen.png), or percent-encoded (Login%20screen.png), and may use
+// character references inside an attribute. Other forms that happen to
+// reach the route, such as ../<id>/Login screen.png,
+// /api/documents/<id>/Login screen.png, an absolute URL, an href, a URL a
+// script builds or a CSS escape (url("Login\20 screen.png")), are not kept
+// in step.
+//
+// A rename writes the new name the way the old one was written (a space as
+// " ", %20 or &#32;, as the reference wrote one; %20 where a literal space
+// would end it) and keeps the extension, ./, brackets and quotes. A
+// reference whose bytes can't be told apart reliably (a %XX escape spelled
+// with a character reference, &#37;20) is left as it is, and the rename
+// says where.
 import { api, type DocumentMeta } from "../api/client";
 import { displayName } from "./documents";
 

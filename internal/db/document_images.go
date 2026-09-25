@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/tcarac/taskboard/internal/imagedoc"
+	"github.com/tcarac/taskboard/internal/imageref"
 	"github.com/tcarac/taskboard/internal/models"
 )
 
@@ -97,7 +98,8 @@ func (s *Store) CreateImageDocument(req models.CreateImageRequest) (*models.Docu
 // format: a content save, so the revision goes up and the thumbnail is made
 // anew, while the name, and every reference by it, stays. With a name it
 // also renames the image in the same transaction, so a refused name leaves
-// the picture as it was, and a refused picture the name. It returns
+// the picture as it was, and a refused picture the name, and rewrites the
+// references to it in its owner's text there too (rewriteImageRefs). It returns
 // (nil, nil) for an unknown id, and refuses a document that is not an image.
 func (s *Store) ReplaceDocumentImage(id string, data []byte, name *string) (*models.Document, error) {
 	// A document's format never changes, so reading it ahead of the
@@ -134,13 +136,19 @@ func (s *Store) ReplaceDocumentImage(id string, data []byte, name *string) (*mod
 	if err != nil {
 		return nil, err
 	}
+	now := time.Now()
+	var rewrite imageRewrite
 	if name != nil {
+		oldName := current
 		if current, err = checkDocumentName(tx, owner, *name, id); err != nil {
+			return nil, err
+		}
+		if rewrite, err = rewriteImageRefs(tx, owner, imageref.Image{Name: oldName, Format: format}, current, now); err != nil {
 			return nil, err
 		}
 	}
 	if _, err := tx.Exec(`UPDATE documents SET name = ?, size = ?, width = ?, height = ?, revision = revision + 1, updated_at = ?
-		WHERE id = ?`, current, len(img.Data), img.Width, img.Height, time.Now(), id); err != nil {
+		WHERE id = ?`, current, len(img.Data), img.Width, img.Height, now, id); err != nil {
 		return nil, err
 	}
 	if _, err := tx.Exec(`UPDATE document_images SET thumbnail_type = ?, thumbnail = ?, data = ? WHERE document_id = ?`,
@@ -150,7 +158,8 @@ func (s *Store) ReplaceDocumentImage(id string, data []byte, name *string) (*mod
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("committing document: %w", err)
 	}
-	return s.GetDocument(id)
+	d, err := s.GetDocument(id)
+	return withRewrite(d, rewrite), err
 }
 
 // ImageFile is an image's file or thumbnail, with the document it belongs to.

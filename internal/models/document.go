@@ -126,6 +126,12 @@ type DocumentMeta struct {
 type Document struct {
 	DocumentMeta
 	Content string `json:"content"`
+
+	// Set only by a rename of an image: the places in its owner's text
+	// whose references were rewritten to the new name, and those where a
+	// reference could not be rewritten and now shows a missing image.
+	ReferencesUpdated []ImagePlace `json:"referencesUpdated,omitempty"`
+	ReferencesLeft    []ImagePlace `json:"referencesLeft,omitempty"`
 }
 
 type CreateDocumentRequest struct {

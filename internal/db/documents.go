@@ -11,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/tcarac/taskboard/internal/doctext"
+	"github.com/tcarac/taskboard/internal/imageref"
 	"github.com/tcarac/taskboard/internal/models"
 )
 
@@ -366,7 +367,9 @@ func (s *Store) CreateDocument(req models.CreateDocumentRequest) (*models.Docume
 
 // UpdateDocument renames a document and/or replaces its content. It returns
 // (nil, nil) for an unknown id. A content save bumps the revision; a rename
-// alone does not. Either bumps updated_at. A content save that names an
+// alone does not. Either bumps updated_at. Renaming an image rewrites the
+// references to it in its owner's text in the same transaction
+// (rewriteImageRefs), and the document returned says where. A content save that names an
 // ExpectedRevision the document has moved past is refused with
 // ErrDocumentConflict and changes nothing, the rename included. A content
 // save also replaces the readable text the search matches, worked out before
@@ -403,10 +406,10 @@ func (s *Store) UpdateDocument(id string, req models.UpdateDocumentRequest) (*mo
 	defer tx.Rollback()
 
 	var owner DocumentOwner
-	var name string
+	var name, format string
 	var revision int
-	err = tx.QueryRow("SELECT COALESCE(ticket_id, ''), COALESCE(epic_id, ''), name, revision FROM documents WHERE id = ?", id).
-		Scan(&owner.TicketID, &owner.EpicID, &name, &revision)
+	err = tx.QueryRow("SELECT COALESCE(ticket_id, ''), COALESCE(epic_id, ''), name, format, revision FROM documents WHERE id = ?", id).
+		Scan(&owner.TicketID, &owner.EpicID, &name, &format, &revision)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -428,14 +431,23 @@ func (s *Store) UpdateDocument(id string, req models.UpdateDocumentRequest) (*mo
 		}
 		return nil, &ErrDocumentConflict{Current: current}
 	}
+	now := time.Now()
+	var rewrite imageRewrite
 	if req.Name != nil {
+		oldName := name
 		if name, err = checkDocumentName(tx, owner, *req.Name, id); err != nil {
 			return nil, err
+		}
+		if models.IsImageFormat(format) {
+			rewrite, err = rewriteImageRefs(tx, owner, imageref.Image{Name: oldName, Format: format}, name, now)
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
 
 	set := "name = ?, updated_at = ?"
-	args := []any{name, time.Now()}
+	args := []any{name, now}
 	if req.Content != nil {
 		set += ", content = ?, revision = revision + 1"
 		args = append(args, *req.Content)
@@ -452,7 +464,8 @@ func (s *Store) UpdateDocument(id string, req models.UpdateDocumentRequest) (*mo
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("committing document: %w", err)
 	}
-	return s.GetDocument(id)
+	d, err := s.GetDocument(id)
+	return withRewrite(d, rewrite), err
 }
 
 // DeleteDocument removes a document for good. It reports false, with no
