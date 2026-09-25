@@ -24,13 +24,30 @@ beforeAll(() => {
   const here = dirname(fileURLToPath(import.meta.url));
   const source = readFileSync(resolve(here, "../../../internal/server/documentguard.js"), "utf8");
   new Function(source)();
-  // Registered after the guard, so it sees what the guard decided; it then
-  // stops jsdom's own navigation, so a link left to the browser goes nowhere.
-  window.addEventListener("click", (event) => {
-    takenOver = event.defaultPrevented;
-    event.preventDefault();
-  });
+  // The guard decides in a bubbling window listener it adds during the
+  // click, so this records the same way from a capture listener added after
+  // the guard's: its own late listener runs after the guard has decided. It
+  // then stops jsdom's own navigation, so a link left to the browser goes
+  // nowhere.
+  let pending: ((event: Event) => void) | null = null;
+  window.addEventListener(
+    "click",
+    (clicked) => {
+      if (pending) window.removeEventListener("click", pending);
+      const record = (event: Event) => {
+        window.removeEventListener("click", record);
+        if (event !== clicked) return;
+        takenOver = event.defaultPrevented;
+        event.preventDefault();
+      };
+      pending = record;
+      window.addEventListener("click", record);
+    },
+    true,
+  );
 });
+
+const nextTask = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 beforeEach(() => {
   window.history.replaceState(null, "", "/api/documents/x/raw");
@@ -103,6 +120,50 @@ describe("the document history guard", () => {
     link.addEventListener("click", (event) => event.preventDefault());
     click("toc");
     expect(window.location.hash).toBe("");
+  });
+
+  it("lets a window listener the page adds after the guard cancel a link click", async () => {
+    await nextTask(); // hashchange events queued by the tests before this one
+    document.getElementById("toc")!.classList.add("spa");
+    const route = (event: Event) => {
+      if ((event.target as Element).closest(".spa")) event.preventDefault();
+    };
+    window.addEventListener("click", route);
+    let hashchanges = 0;
+    const count = () => hashchanges++;
+    window.addEventListener("hashchange", count);
+    try {
+      const length = window.history.length;
+      click("toc");
+      await nextTask();
+      expect(window.location.hash).toBe("");
+      expect(hashchanges).toBe(0);
+      expect(window.history.length).toBe(length);
+
+      // The same listener leaves other links to the guard.
+      expect(click("wrap")).toBe(true);
+      await nextTask();
+      expect(window.location.hash).toBe("#s3");
+      expect(hashchanges).toBe(1);
+      expect(window.history.length).toBe(length);
+    } finally {
+      window.removeEventListener("click", route);
+      window.removeEventListener("hashchange", count);
+    }
+  });
+
+  it("still takes over the next click after the page stopped one short of window", () => {
+    const stop = (event: Event) => event.stopPropagation();
+    const toc = document.getElementById("toc")!;
+    toc.addEventListener("click", stop);
+    toc.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 }));
+    toc.removeEventListener("click", stop);
+    window.history.replaceState(null, "", "/api/documents/x/raw");
+
+    const length = window.history.length;
+    expect(click("wrap")).toBe(true);
+    expect(window.location.hash).toBe("#s3");
+    expect(window.history.length).toBe(length);
   });
 
   it("makes navigation.navigate replace", () => {

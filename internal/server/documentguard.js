@@ -41,7 +41,8 @@
     return target.trim().toLowerCase();
   }
 
-  addEventListener("click", function (event) {
+  // Takes the click over when it would follow a link in this page.
+  function follow(event) {
     if (event.defaultPrevented || event.button !== 0) return;
     if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
     var path = event.composedPath();
@@ -59,5 +60,27 @@
       location.replace(url);
       return;
     }
-  });
+  }
+
+  // The page's own listeners decide first, so a click the page cancels is
+  // left alone. This capture listener runs before them all and adds a
+  // bubbling listener for the same click, which goes last on window, after
+  // every listener the page added, even ones added after this guard. It is
+  // tied to its own event: when the page stops the click before it reaches
+  // window, the next click removes the leftover unused.
+  var pending = null;
+  addEventListener(
+    "click",
+    function (event) {
+      if (pending) removeEventListener("click", pending);
+      var decide = function (e) {
+        removeEventListener("click", decide);
+        if (pending === decide) pending = null;
+        if (e === event) follow(e);
+      };
+      pending = decide;
+      addEventListener("click", decide);
+    },
+    true,
+  );
 })();

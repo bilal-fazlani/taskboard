@@ -12,8 +12,9 @@ import (
 //   - history.pushState replaces the current entry instead of adding one;
 //   - navigation.navigate always replaces;
 //   - a click on a link that would navigate the page is redone with
-//     location.replace. A same-page #anchor still scrolls, matches :target
-//     and fires hashchange as it would have.
+//     location.replace, once the page's own listeners have had it and not
+//     cancelled it. A same-page #anchor still scrolls, matches :target and
+//     fires hashchange as it would have.
 //
 // Links with a target, a download attribute or a modifier key, and links to
 // anything but http(s), are left to the browser. So are location.hash,

@@ -172,6 +172,15 @@ describe("useOverlayHistory with the Navigation API", () => {
     expect(go).not.toHaveBeenCalled();
     expect(url()).toBe("/kanban?ticket=ACP-7");
     expect(window.history.length).toBe(length);
+    // Nothing is left below to go back to, so the editor now closes in place.
+    expect(overlays.depth).toBe(0);
+    await act(async () => {
+      overlays.closeAll();
+      await settle();
+    });
+    expect(nav.traverseTo).not.toHaveBeenCalled();
+    expect(url()).toBe("/kanban");
+    expect(window.history.length).toBe(length);
   });
 
   it("closeAll replaces the URL when the browser refuses the traversal", async () => {

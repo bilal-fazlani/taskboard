@@ -70,9 +70,12 @@ export function useOverlayHistory(): OverlayHistory {
         navigate(-1);
         return;
       }
-      onRefused(navigation.back(), () => replace(without));
+      // The entries below are gone, so nothing counts below this one now.
+      onRefused(navigation.back(), () =>
+        setParams(without, { replace: true, state: closedState(latestLocationState(location.state)) }),
+      );
     },
-    [navigate, replace, location.state],
+    [navigate, replace, setParams, location.state],
   );
 
   const closeAll = useCallback(() => {
