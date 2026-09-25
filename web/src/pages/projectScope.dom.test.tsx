@@ -17,6 +17,7 @@ const mockApi = vi.hoisted(() => ({
   labels: { list: vi.fn() },
   epics: { list: vi.fn() },
   board: { get: vi.fn() },
+  documents: { search: vi.fn() },
 }));
 
 vi.mock("../api/client", () => ({ api: mockApi }));
@@ -167,6 +168,7 @@ beforeEach(() => {
   vi.stubGlobal("localStorage", memoryStorage());
   serves(TICKETS, PROJECTS);
   mockApi.labels.list.mockResolvedValue([]);
+  mockApi.documents.search.mockResolvedValue({ ticketIds: [] });
   mockApi.tickets.get.mockImplementation((id: string) =>
     Promise.resolve(TICKETS.find((t) => t.id === id)),
   );
@@ -235,6 +237,25 @@ describe.each(views)("%s without a project in its URL", (_name, page, path, empt
       status.dispatchEvent(new Event("change", { bubbles: true }));
     });
     expect(count()).toBe("2 of 3 tickets");
+  });
+
+  it("finds a ticket by text only its documents hold, and counts it", async () => {
+    // The server answers with ACP-2, and with LDR-2, which the view's project
+    // leaves out all the same.
+    mockApi.documents.search.mockImplementation((q: string) =>
+      Promise.resolve({ ticketIds: q === "rollout" ? [ACP2.id, LDR2.id] : [] }),
+    );
+    await mount(page(), `${path}?project=ACP&q=rollout`);
+    // Until the server answers, no ticket's own text matches.
+    expect(count()).toBe("0 of 3 tickets");
+    // The document search is debounced; let it run.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    });
+    expect(mockApi.documents.search).toHaveBeenCalledWith("rollout", "ACP");
+    expect(count()).toBe("1 of 3 tickets");
+    expect(shows("ACP ticket 2")).toBe(true);
+    expect(shows("LDR ticket 2")).toBe(false);
   });
 
   it("still opens another project's ticket named in the URL", async () => {

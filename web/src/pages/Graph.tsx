@@ -6,6 +6,7 @@ import TicketEditor from "../components/TicketEditor";
 import TicketCard from "../components/TicketCard";
 import FilterPanel from "../components/FilterPanel";
 import { useChangeGlow } from "../hooks/useChangeGlow";
+import { useDocumentMatches } from "../hooks/useDocumentMatches";
 import { useFilters } from "../hooks/useFilters";
 import { useUnmatched } from "../hooks/useUnmatched";
 import { useLiveRefresh } from "../hooks/useLiveRefresh";
@@ -190,6 +191,7 @@ export default function Graph() {
   const [panning, setPanning] = useState(false);
   const filterState = useFilters();
   const { filters } = filterState;
+  const docMatches = useDocumentMatches(filters.q, filters.project);
   const { mode: unmatched, setMode: setUnmatched } = useUnmatched();
   // Hide mode only changes anything while a filter but the project is set.
   const hiding = unmatched === "hide" && filterState.active;
@@ -260,8 +262,8 @@ export default function Graph() {
   // and the columns may shift left. A dependency on a done ticket still
   // counts as done, from the status its reference carries.
   const shownTickets = useMemo(
-    () => (hiding ? projectTickets.filter((t) => matchesFilters(t, filters)) : projectTickets),
-    [hiding, projectTickets, filters],
+    () => (hiding ? projectTickets.filter((t) => matchesFilters(t, filters, docMatches)) : projectTickets),
+    [hiding, projectTickets, filters, docMatches],
   );
   // The project's open tickets, which the count is out of in either mode.
   const projectOpenCount = useMemo(() => projectTickets.filter((t) => !isDone(t.status)).length, [projectTickets]);
@@ -304,9 +306,9 @@ export default function Graph() {
   const matching = useMemo(
     () =>
       filterState.active && !hiding
-        ? new Set(topology.nodes.filter((node) => matchesFilters(node.ticket, filters)).map((node) => node.id))
+        ? new Set(topology.nodes.filter((node) => matchesFilters(node.ticket, filters, docMatches)).map((node) => node.id))
         : null,
-    [filterState.active, hiding, topology, filters],
+    [filterState.active, hiding, topology, filters, docMatches],
   );
   const dimmed = (id: string) => matching !== null && !matching.has(id);
   // Matching cards per column, for the column headers, and in the grid, whose

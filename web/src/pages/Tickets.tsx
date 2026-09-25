@@ -15,6 +15,7 @@ import { api, type Ticket, type Project, type TicketWrite } from "../api/client"
 import TicketEditor from "../components/TicketEditor";
 import CreateTicketModal from "../components/CreateTicketModal";
 import FilterPanel from "../components/FilterPanel";
+import { useDocumentMatches } from "../hooks/useDocumentMatches";
 import { useFilters } from "../hooks/useFilters";
 import { useLiveRefresh } from "../hooks/useLiveRefresh";
 import { useTicketParam } from "../hooks/useTicketParam";
@@ -88,6 +89,7 @@ export default function Tickets() {
 
   const filterState = useFilters();
   const { filters } = filterState;
+  const docMatches = useDocumentMatches(filters.q, filters.project);
   // The open ticket comes from the URL, so ?ticket=KEY opens it on load.
   const {
     selected: selectedTicket,
@@ -126,7 +128,10 @@ export default function Tickets() {
   // project's tickets; without one (no active project to pick) it has none.
   // Filters apply client-side, so changing one never refetches.
   const projectTickets = useMemo(() => inProject(tickets, filters.project), [tickets, filters.project]);
-  const filtered = useMemo(() => projectTickets.filter((t) => matchesFilters(t, filters)), [projectTickets, filters]);
+  const filtered = useMemo(
+    () => projectTickets.filter((t) => matchesFilters(t, filters, docMatches)),
+    [projectTickets, filters, docMatches],
+  );
   const rows = useMemo(() => sortByEpic(filtered, epicSort), [filtered, epicSort]);
   const projectCount = projectTickets.length;
   // The filter bar picks a project for a URL without one; until it has, the

@@ -19,6 +19,7 @@ import TicketEditor from "../components/TicketEditor";
 import CreateTicketModal from "../components/CreateTicketModal";
 import TicketCard from "../components/TicketCard";
 import FilterPanel from "../components/FilterPanel";
+import { useDocumentMatches } from "../hooks/useDocumentMatches";
 import { useFilters } from "../hooks/useFilters";
 import { useLiveRefresh } from "../hooks/useLiveRefresh";
 import { useTicketParam } from "../hooks/useTicketParam";
@@ -110,6 +111,7 @@ export default function Board() {
   const [loading, setLoading] = useState(true);
   const filterState = useFilters();
   const { filters } = filterState;
+  const docMatches = useDocumentMatches(filters.q, filters.project);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
@@ -205,10 +207,10 @@ export default function Board() {
   // project's tickets; without one (no active project to pick) it has none.
   const projectTickets = useMemo(() => inProject(allTickets, filters.project), [allTickets, filters.project]);
   const isShown = (ticket: Ticket) =>
-    ticket.id === activeTicket?.id || (filters.project !== "" && matchesFilters(ticket, filters));
+    ticket.id === activeTicket?.id || (filters.project !== "" && matchesFilters(ticket, filters, docMatches));
   const getColumnTickets = (status: string) =>
     (columns.find((c) => c.status === status)?.tickets || []).filter(isShown);
-  const shownCount = projectTickets.filter((t) => matchesFilters(t, filters)).length;
+  const shownCount = projectTickets.filter((t) => matchesFilters(t, filters, docMatches)).length;
   const projectCount = projectTickets.length;
   // The filter bar picks a project for a URL without one; until it has, the
   // board waits rather than showing every project's tickets.
