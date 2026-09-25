@@ -5,20 +5,24 @@ import { createRoot, type Root } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import type { DocumentMeta } from "../api/client";
 import { useDocParam, type DocParamState } from "./useDocParam";
+import { useOverlayHistory, type OverlayHistory } from "./useOverlayHistory";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 let root: Root;
 let container: HTMLDivElement;
 let state: DocParamState;
+let overlays: OverlayHistory;
 
 const spec: DocumentMeta = { id: "d1", name: "Design spec", format: "markdown", size: 1, revision: 1, createdAt: "", updatedAt: "" };
 const notes: DocumentMeta = { ...spec, id: "d2", name: "Notes" };
 
 function Harness({ docs }: { docs: DocumentMeta[] | null }) {
   const s = useDocParam(docs);
+  const o = useOverlayHistory();
   useEffect(() => {
     state = s;
+    overlays = o;
   });
   return null;
 }
@@ -309,5 +313,94 @@ describe("useDocParam", () => {
     expect(state.deleted).toBe(false);
     expect(state.notice).toBeNull();
     expect(url()).toBe("/?ticket=ACP-7&doc=Design spec.md");
+  });
+
+  describe("images", () => {
+    const img = (id: string, name: string): DocumentMeta => ({ ...spec, id, name, format: "png", width: 10, height: 10 });
+    const one = img("i1", "One");
+    const two = img("i2", "Two");
+    const three = img("i3", "Three");
+    const images = [one, two, three];
+
+    async function openFromEditor() {
+      await mount("/kanban", images);
+      await act(async () => overlays.push(new URLSearchParams("ticket=ACP-7")));
+      await act(async () => state.open(one));
+      return window.history.length;
+    }
+
+    it("steps in place of the open image, so × closes it in one press and a second returns to the pre-editor entry", async () => {
+      const length = await openFromEditor();
+      await act(async () => state.step(two));
+      await act(async () => state.step(three));
+      expect(url()).toBe("/kanban?ticket=ACP-7&doc=Three.png");
+      expect(state.selected?.id).toBe("i3");
+      expect(window.history.length).toBe(length);
+      expect(overlays.depth).toBe(2);
+
+      await act(async () => {
+        state.close();
+        await settle();
+      });
+      expect(url()).toBe("/kanban?ticket=ACP-7");
+      expect(state.selected).toBeNull();
+      expect(state.notice).toBeNull();
+
+      await act(async () => {
+        overlays.closeAll();
+        await settle();
+      });
+      expect(url()).toBe("/kanban");
+    });
+
+    it("lets one Back close the image after stepping", async () => {
+      await openFromEditor();
+      await act(async () => state.step(two));
+      await act(async () => {
+        window.history.back();
+        await settle();
+      });
+      expect(url()).toBe("/kanban?ticket=ACP-7");
+      expect(state.selected).toBeNull();
+      expect(state.notice).toBeNull();
+    });
+
+    it("clears a notice when stepping", async () => {
+      await mount("/?ticket=ACP-7&doc=Gone.png", images);
+      await act(settle);
+      expect(state.notice).toBe("Couldn't find Gone.png on this ticket.");
+      await act(async () => state.open(one));
+      await act(async () => state.step(two));
+      expect(state.notice).toBeNull();
+      expect(state.selected?.id).toBe("i2");
+    });
+
+    it("keeps an image open through a rename made elsewhere, and moves the URL to its new name", async () => {
+      await openFromEditor();
+      await render([{ ...one, name: "First" }, two, three]);
+      await act(settle);
+      expect(state.selected?.id).toBe("i1");
+      expect(state.selected?.name).toBe("First");
+      expect(url()).toBe("/kanban?ticket=ACP-7&doc=First.png");
+      expect(state.notice).toBeNull();
+    });
+
+    it("follows an agent's replace to the new revision", async () => {
+      await openFromEditor();
+      await render([{ ...one, revision: 2, width: 20 }, two, three]);
+      await act(settle);
+      expect(state.selected?.revision).toBe(2);
+      expect(state.selected?.width).toBe(20);
+      expect(url()).toBe("/kanban?ticket=ACP-7&doc=One.png");
+    });
+
+    it("closes an image deleted elsewhere, and says so", async () => {
+      await openFromEditor();
+      await render([two, three]);
+      await act(settle);
+      expect(state.selected).toBeNull();
+      expect(state.notice).toBe("One.png was deleted.");
+      expect(url()).toBe("/kanban?ticket=ACP-7");
+    });
   });
 });

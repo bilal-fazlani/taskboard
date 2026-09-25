@@ -31,6 +31,8 @@ const mockApi = vi.hoisted(() => ({
     update: vi.fn(),
     delete: vi.fn(),
     downloadUrl: (id: string) => `/api/documents/${id}/download`,
+    imageUrl: (id: string, revision: number) => `/api/documents/${id}/image?rev=${revision}`,
+    thumbnailUrl: (id: string, revision: number) => `/api/documents/${id}/thumbnail?rev=${revision}`,
   },
 }));
 
@@ -1827,5 +1829,117 @@ describe("a ticket parameter that moves to another ticket", () => {
     expect(title()).toBe("Build login UI");
     expect(saveButton()).toBeNull();
     expect(onUpdate).not.toHaveBeenCalled();
+  });
+});
+
+describe("image documents", () => {
+  const img = (id: string, name: string, format: "png" | "jpeg" | "gif" = "png") => ({
+    id, name, format, size: 2048, width: 640, height: 480, revision: 1,
+    createdAt: "2026-09-25T09:00:00Z", updatedAt: "2026-09-25T09:00:00Z",
+  });
+  const one = img("i1", "One");
+  const two = img("i2", "Two", "jpeg");
+  const three = img("i3", "Three", "gif");
+  const docParam = () => new URLSearchParams(window.location.search).get("doc");
+  const picture = () => screen.getByRole("img", { name: /\.(png|jpg|gif)$/ });
+
+  async function openFirst() {
+    mockApi.documents.list.mockResolvedValue([one, two, three]);
+    window.history.replaceState(null, "", "/?ticket=AUTH-7");
+    const utils = renderEditor();
+    fireEvent.click(await screen.findByRole("button", { name: "One.png" }));
+    expect(await screen.findByRole("dialog", { name: "One.png" })).toBeTruthy();
+    return utils;
+  }
+
+  it("steps through the ticket's images with → and ← in place of the open one, and × closes in one press", async () => {
+    const { onClose } = await openFirst();
+    const length = window.history.length;
+    const dialog = screen.getByRole("dialog", { name: "One.png" });
+
+    fireEvent.keyDown(document.body, { key: "ArrowRight" });
+    expect(await screen.findByRole("dialog", { name: "Two.jpg" })).toBe(dialog);
+    fireEvent.keyDown(document.body, { key: "ArrowRight" });
+    expect(await screen.findByRole("dialog", { name: "Three.gif" })).toBe(dialog);
+    expect(docParam()).toBe("Three.gif");
+    expect(screen.getByTestId("image-facts").textContent).toBe("3 of 3 images · 640×480");
+    expect(window.history.length).toBe(length);
+    fireEvent.keyDown(document.body, { key: "ArrowLeft" });
+    expect(await screen.findByRole("dialog", { name: "Two.jpg" })).toBe(dialog);
+
+    fireEvent.click(screen.getByRole("button", { name: "Close document" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Two.jpg" })).toBeNull());
+    expect(docParam()).toBeNull();
+    expect(new URLSearchParams(window.location.search).get("ticket")).toBe("AUTH-7");
+    expect(screen.getByRole("dialog", { name: "AUTH-7" })).toBeTruthy();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("closes on one Back after stepping", async () => {
+    await openFirst();
+    fireEvent.keyDown(document.body, { key: "ArrowRight" });
+    await screen.findByRole("dialog", { name: "Two.jpg" });
+    await act(async () => {
+      window.history.back();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Two.jpg" })).toBeNull());
+    expect(docParam()).toBeNull();
+    expect(screen.getByRole("dialog", { name: "AUTH-7" })).toBeTruthy();
+  });
+
+  it("shows an agent's replaced image in place", async () => {
+    await openFirst();
+    expect(picture().getAttribute("src")).toBe("/api/documents/i1/image?rev=1");
+    mockApi.documents.list.mockResolvedValue([{ ...one, revision: 2, width: 800, height: 600 }, two, three]);
+    await fireLive();
+    await waitFor(() => expect(picture().getAttribute("src")).toBe("/api/documents/i1/image?rev=2"));
+    expect(screen.getByTestId("image-facts").textContent).toBe("1 of 3 images · 800×600");
+    expect(screen.getByRole("dialog", { name: "One.png" })).toBeTruthy();
+    // The row's thumbnail follows the new revision too.
+    expect(screen.getAllByTestId("document-thumbnail")[0].getAttribute("src")).toBe("/api/documents/i1/thumbnail?rev=2");
+  });
+
+  it("keeps the image open through a rename made elsewhere", async () => {
+    await openFirst();
+    mockApi.documents.list.mockResolvedValue([{ ...one, name: "First" }, two, three]);
+    await fireLive();
+    expect(await screen.findByRole("dialog", { name: "First.png" })).toBeTruthy();
+    await waitFor(() => expect(docParam()).toBe("First.png"));
+    expect(picture().getAttribute("src")).toBe("/api/documents/i1/image?rev=1");
+  });
+
+  it("closes an image deleted elsewhere, with the notice", async () => {
+    await openFirst();
+    mockApi.documents.list.mockResolvedValue([two, three]);
+    await fireLive();
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "One.png" })).toBeNull());
+    expect(await screen.findByText("One.png was deleted.")).toBeTruthy();
+    expect(docParam()).toBeNull();
+    expect(screen.getByRole("dialog", { name: "AUTH-7" })).toBeTruthy();
+  });
+
+  it("closes the image after deleting it from the viewer, without a notice", async () => {
+    await openFirst();
+    mockApi.documents.delete.mockResolvedValue(undefined);
+    mockApi.documents.list.mockResolvedValue([two, three]);
+    fireEvent.click(within(screen.getByRole("dialog", { name: "One.png" })).getByRole("button", { name: "Delete One.png" }));
+    fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "One.png" })).toBeNull());
+    expect(mockApi.documents.delete).toHaveBeenCalledWith("i1");
+    await waitFor(() => expect(screen.queryByRole("button", { name: "One.png" })).toBeNull());
+    expect(screen.queryByText("One.png was deleted.")).toBeNull();
+    expect(docParam()).toBeNull();
+  });
+
+  it("renames from the viewer and keeps it open under the new name", async () => {
+    await openFirst();
+    mockApi.documents.update.mockResolvedValue({ ...one, name: "Login" });
+    fireEvent.click(within(screen.getByRole("dialog", { name: "One.png" })).getByRole("button", { name: "Rename One.png" }));
+    const input = screen.getByRole("textbox", { name: "Document name" });
+    fireEvent.change(input, { target: { value: "Login" } });
+    fireEvent.submit(input);
+    expect(await screen.findByRole("dialog", { name: "Login.png" })).toBeTruthy();
+    await waitFor(() => expect(docParam()).toBe("Login.png"));
   });
 });
