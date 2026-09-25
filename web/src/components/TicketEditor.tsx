@@ -178,6 +178,7 @@ export default function TicketEditor({
     },
     textareaRef: descriptionRef,
     onUploaded: reloadDocuments,
+    savedText: () => baseRef.current.description,
   });
 
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -414,7 +415,11 @@ export default function TicketEditor({
     }
   };
 
+  // Counts edits, so a save can tell whether the fields changed while it
+  // was on its way (typing, or a failed image's reference taken out).
+  const editsRef = useRef(0);
   const markDirty = () => {
+    editsRef.current++;
     dirtyRef.current = true;
     setDirty(true);
   };
@@ -434,6 +439,7 @@ export default function TicketEditor({
   // holds the save up.
   const handleSave = async () => {
     const current = currentFields();
+    const editsAtSave = editsRef.current;
     const write = editedWrite(baseRef.current, current);
     if (write.status !== undefined && note.trim()) write.note = note.trim();
     setSaveError(null);
@@ -449,9 +455,11 @@ export default function TicketEditor({
     baseRef.current = current;
     setSavedStatus(current.status);
     setNote("");
+    noteChanged(null);
+    // An edit made while the save was on its way is not saved yet.
+    if (editsRef.current !== editsAtSave) return;
     dirtyRef.current = false;
     setDirty(false);
-    noteChanged(null);
   };
 
   const handleAddSubtask = async (e: React.FormEvent) => {
@@ -662,6 +670,7 @@ export default function TicketEditor({
               <ImageUploadStatus
                 uploads={pasteImages.uploads}
                 problems={pasteImages.problems}
+                added={pasteImages.added}
                 onDismiss={pasteImages.dismissProblems}
               />
             </div>

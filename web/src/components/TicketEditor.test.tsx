@@ -1045,6 +1045,7 @@ describe("images pasted or dropped into the description", () => {
   };
   const description = () => screen.getByLabelText("Description") as HTMLTextAreaElement;
   const png = (name: string) => new File(["x"], name, { type: "image/png" });
+  const uploadLines = () => screen.queryAllByTestId("image-upload").map((e) => e.textContent);
   beforeEach(() => {
     mockApi.tickets.get.mockResolvedValue(makeTicket({ description: "" }));
   });
@@ -1059,17 +1060,40 @@ describe("images pasted or dropped into the description", () => {
     fireEvent.paste(description(), { clipboardData: { types: ["Files"], files: [png("image.png")] } });
     expect(description().value).toBe("![](Pasted image.png)");
     expect(saveButton()).toBeTruthy();
-    expect(screen.getByRole("status").textContent).toBe("Uploading Pasted image.png… it appears in Documents when done");
+    expect(uploadLines()).toEqual(["Uploading Pasted image.png… it appears in Documents when done"]);
     expect(mockApi.documents.createImage.mock.calls[0][0]).toEqual({ ticketId: "t1" });
 
     mockApi.documents.list.mockResolvedValue([pastedImage]);
     await act(async () => finish(pastedImage));
     await waitFor(() => expect(mockApi.documents.list).toHaveBeenCalledTimes(2));
-    expect(screen.queryByRole("status")).toBeNull();
+    expect(uploadLines()).toEqual([]);
     await waitFor(() => expect(screen.getByRole("button", { name: "Pasted image.png" })).toBeTruthy());
     fireEvent.click(screen.getByRole("button", { name: "Preview" }));
     const img = screen.getByTestId("description-preview").querySelector("img");
     expect(img?.getAttribute("src")).toBe("/api/documents/img2/image?rev=1");
+  });
+
+  it("stays unsaved when a failed image's reference comes out while Save is on its way", async () => {
+    let refuse!: (err: Error) => void;
+    let saved!: () => void;
+    mockApi.documents.createImage.mockReturnValue(new Promise((_, reject) => (refuse = reject)));
+    const { onUpdate } = renderEditor(makeTicket({ description: "" }));
+    onUpdate.mockReturnValue(new Promise<void>((resolve) => (saved = resolve)));
+    await waitFor(() => expect(mockApi.tickets.get).toHaveBeenCalled());
+    fireEvent.change(description(), { target: { value: "Steps " } });
+    description().focus();
+    description().setSelectionRange(6, 6);
+    fireEvent.paste(description(), { clipboardData: { types: ["Files"], files: [png("image.png")] } });
+    fireEvent.click(saveButton()!);
+    expect(onUpdate).toHaveBeenCalledWith("t1", { description: "Steps ![](Pasted image.png)" });
+    await act(async () => refuse(new Error("API error 500: boom")));
+    expect(description().value).toBe("Steps ");
+    await act(async () => saved());
+    // The save carried the reference; taking it out is an edit still to save.
+    expect(saveButton()).toBeTruthy();
+    expect(screen.getByRole("alert").textContent).toContain("Pasted image.png wasn't uploaded: boom");
+    fireEvent.click(saveButton()!);
+    expect(onUpdate).toHaveBeenLastCalledWith("t1", { description: "Steps " });
   });
 
   it("takes a refused drop's reference back out, keeps the rest of the unsaved text, and says why", async () => {
