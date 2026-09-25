@@ -200,6 +200,22 @@ describe("editing", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  it("puts the document back in one click when Back comes while × is already asking", async () => {
+    load("old");
+    const { rerender, onClose, onCloseCancelled } = setup();
+    fireEvent.change(await startEditing(), { target: { value: "mine" } });
+    fireEvent.click(screen.getByRole("button", { name: "Close document" }));
+    expect(screen.getByRole("alertdialog", { name: "Discard your changes?" })).toBeTruthy();
+    rerender({ closeRequested: true });
+
+    fireEvent.click(screen.getByRole("button", { name: "Keep editing" }));
+    expect(onCloseCancelled).toHaveBeenCalledTimes(1);
+    rerender({ closeRequested: false });
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(box().value).toBe("mine");
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
   it("shows the notice when someone else saves mid-edit, and can load theirs", async () => {
     load("old");
     const { rerender } = setup();

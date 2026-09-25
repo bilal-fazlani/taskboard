@@ -177,7 +177,9 @@ export default function DocumentModal({
     action?.();
   };
   const cancelDiscard = () => {
-    const undoBack = pending === null && urlAsking;
+    // A Back is undone whenever it is part of the question, even if × or
+    // Escape asked first: otherwise the question would stay up for the Back.
+    const undoBack = urlAsking;
     setPending(null);
     if (undoBack) onCloseCancelled?.();
   };
