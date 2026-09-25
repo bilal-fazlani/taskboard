@@ -64,6 +64,19 @@ func TicketDocument(base, ticketRef, displayName string) string {
 	return Ticket(base, ticketRef) + "&doc=" + url.QueryEscape(displayName)
 }
 
+// Epic is the URL that opens an epic's modal on the Epics view. Epic names
+// are unique within a project, and the view shows one project, so the
+// project's prefix and the epic's name are enough.
+func Epic(base, projectPrefix, epicName string) string {
+	return base + "/epics?project=" + url.QueryEscape(projectPrefix) + "&epic=" + url.QueryEscape(epicName)
+}
+
+// EpicDocument is the URL that opens an epic with one of its documents on
+// top, named by its display name as the web UI's `doc` parameter expects.
+func EpicDocument(base, projectPrefix, epicName, displayName string) string {
+	return Epic(base, projectPrefix, epicName) + "&doc=" + url.QueryEscape(displayName)
+}
+
 // Ref is how a ticket names itself in a URL: its display key, or its id when
 // its project has no prefix, since the bare number a prefixless DisplayKey
 // gives back matches no ticket in the web UI. This mirrors ticketRefFor in

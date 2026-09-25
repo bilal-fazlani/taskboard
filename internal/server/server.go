@@ -216,6 +216,8 @@ func (s *Server) setupRoutes(webFS fs.FS) {
 		r.Route("/epics", func(r chi.Router) {
 			r.Get("/", s.listEpics)
 			r.Post("/", s.createEpic)
+			r.Get("/{id}", s.getEpic)
+			r.Get("/{id}/documents", s.listEpicDocuments)
 			r.Put("/{id}", s.updateEpic)
 			r.Delete("/{id}", s.deleteEpic)
 		})

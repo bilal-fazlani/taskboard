@@ -30,8 +30,55 @@ func writeLookupError(w http.ResponseWriter, err error) {
 	writeError(w, http.StatusInternalServerError, err.Error())
 }
 
-// documentID resolves a document route's {ref}: a document id, or, with
-// ?ticket=<id or key>, the name of one of that ticket's documents.
+// documentOwner reads the owner a document route names by query: ?ticket=
+// (id or display key), or ?epic= (id, or name together with ?project=).
+// Naming both is a 400. ok is false once an error has been written; a zero
+// owner means none was named.
+func (s *Server) documentOwner(w http.ResponseWriter, r *http.Request) (db.DocumentOwner, bool) {
+	q := r.URL.Query()
+	ticket := strings.TrimSpace(q.Get("ticket"))
+	epic := strings.TrimSpace(q.Get("epic"))
+	switch {
+	case ticket != "" && epic != "":
+		writeError(w, http.StatusBadRequest, "pass ticket or epic, not both")
+		return db.DocumentOwner{}, false
+	case ticket != "":
+		id, err := s.store.ResolveTicketID(ticket)
+		if err != nil {
+			writeLookupError(w, err)
+			return db.DocumentOwner{}, false
+		}
+		return db.DocumentOwner{TicketID: id}, true
+	case epic != "":
+		id, err := s.resolveEpic(epic, q.Get("project"))
+		if err != nil {
+			writeLookupError(w, err)
+			return db.DocumentOwner{}, false
+		}
+		return db.DocumentOwner{EpicID: id}, true
+	}
+	return db.DocumentOwner{}, true
+}
+
+// resolveEpic takes an epic id, or a name (ignoring case) within a project
+// given by id or prefix.
+func (s *Server) resolveEpic(ref, project string) (string, error) {
+	if strings.TrimSpace(project) != "" {
+		return s.store.ResolveEpicRef(project, ref)
+	}
+	e, err := s.store.GetEpic(ref)
+	if err != nil {
+		return "", err
+	}
+	if e == nil {
+		return "", &db.ErrInvalidInput{Msg: "epic not found; pass project when naming an epic"}
+	}
+	return e.ID, nil
+}
+
+// documentID resolves a document route's {ref}: a document id, or, with an
+// owner named by query (see documentOwner), the name of one of its
+// documents.
 func (s *Server) documentID(w http.ResponseWriter, r *http.Request) (string, bool) {
 	// chi hands back the escaped segment when the path was sent with an
 	// unusual escaping; names and ids never hold a %, so unescaping is safe.
@@ -39,16 +86,14 @@ func (s *Server) documentID(w http.ResponseWriter, r *http.Request) (string, boo
 	if unescaped, err := url.PathUnescape(ref); err == nil {
 		ref = unescaped
 	}
-	ticket := strings.TrimSpace(r.URL.Query().Get("ticket"))
-	if ticket == "" {
-		return ref, true
-	}
-	ticketID, err := s.store.ResolveTicketID(ticket)
-	if err != nil {
-		writeLookupError(w, err)
+	owner, ok := s.documentOwner(w, r)
+	if !ok {
 		return "", false
 	}
-	id, err := s.store.ResolveDocumentRef(db.DocumentOwner{TicketID: ticketID}, ref)
+	if owner == (db.DocumentOwner{}) {
+		return ref, true
+	}
+	id, err := s.store.ResolveDocumentRef(owner, ref)
 	if err != nil {
 		writeLookupError(w, err)
 		return "", false
@@ -58,6 +103,30 @@ func (s *Server) documentID(w http.ResponseWriter, r *http.Request) (string, boo
 
 func (s *Server) listTicketDocuments(w http.ResponseWriter, r *http.Request) {
 	docs, err := s.store.ListDocuments(db.DocumentOwner{TicketID: chi.URLParam(r, "id")})
+	if err != nil {
+		writeLookupError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, docs)
+}
+
+// getEpic answers with one epic, its progress and its documents (without
+// content).
+func (s *Server) getEpic(w http.ResponseWriter, r *http.Request) {
+	e, err := s.store.GetEpic(chi.URLParam(r, "id"))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if e == nil {
+		writeError(w, http.StatusNotFound, "epic not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, e)
+}
+
+func (s *Server) listEpicDocuments(w http.ResponseWriter, r *http.Request) {
+	docs, err := s.store.ListDocuments(db.DocumentOwner{EpicID: chi.URLParam(r, "id")})
 	if err != nil {
 		writeLookupError(w, err)
 		return
@@ -82,8 +151,9 @@ func (s *Server) getDocument(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, d)
 }
 
-// createDocument adds a document to a ticket (the web's New and Upload).
-// Rule failures and an unknown ticket are 400s with the store's message.
+// createDocument adds a document to a ticket or an epic (ticketId or epicId;
+// the web's New and Upload). Rule failures, an unknown owner and naming both
+// or neither are 400s with the store's message.
 func (s *Server) createDocument(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxDocumentRequestBytes)
 	var req models.CreateDocumentRequest

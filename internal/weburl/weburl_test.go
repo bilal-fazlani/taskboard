@@ -121,3 +121,15 @@ func TestFillSetsDocumentURLs(t *testing.T) {
 		t.Fatalf("document URL = %q", tk.Documents[0].URL)
 	}
 }
+
+func TestEpicDocumentURL(t *testing.T) {
+	if got, want := Epic("http://localhost:3011", "ACP", "M4: Documents"),
+		"http://localhost:3011/epics?project=ACP&epic=M4%3A+Documents"; got != want {
+		t.Fatalf("Epic = %q, want %q", got, want)
+	}
+	got := EpicDocument("http://localhost:3011", "ACP", "M4: Documents", "Rollout plan.md")
+	want := "http://localhost:3011/epics?project=ACP&epic=M4%3A+Documents&doc=Rollout+plan.md"
+	if got != want {
+		t.Fatalf("EpicDocument = %q, want %q", got, want)
+	}
+}

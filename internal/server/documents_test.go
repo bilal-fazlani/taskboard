@@ -373,3 +373,98 @@ func TestWriteFromASandboxedFrameIsRefused(t *testing.T) {
 		t.Fatalf("tickets = %d, want only the seeded one", len(tickets))
 	}
 }
+
+func TestEpicDocumentsOverHTTP(t *testing.T) {
+	r := serve(t)
+	p, err := r.srv.store.CreateProject(models.CreateProjectRequest{Name: "Docs", Prefix: "DOC"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e, err := r.srv.store.CreateEpic(models.CreateEpicRequest{ProjectID: p.ID, Name: "Launch"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tk, err := r.srv.store.CreateTicket(models.CreateTicketRequest{ProjectID: p.ID, Title: "Has docs"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	created, status := doRequest[models.Document](t, http.MethodPost, r.url+"/api/documents",
+		`{"epicId":"`+e.ID+`","name":"Rollout","format":"markdown","content":"# r"}`)
+	if status != http.StatusCreated || created.EpicID != e.ID || created.TicketID != "" {
+		t.Fatalf("create: %d %+v", status, created)
+	}
+	body, status := errorBody(t, http.MethodPost, r.url+"/api/documents",
+		`{"epicId":"`+e.ID+`","name":"rollout","content":""}`)
+	if status != http.StatusBadRequest || body.Error != `This epic already has a document called "Rollout.md".` {
+		t.Fatalf("taken name: %d %q", status, body.Error)
+	}
+	body, status = errorBody(t, http.MethodPost, r.url+"/api/documents",
+		`{"epicId":"`+e.ID+`","ticketId":"`+tk.ID+`","name":"Both","content":""}`)
+	if status != http.StatusBadRequest || body.Error != "A document belongs to one ticket or one epic." {
+		t.Fatalf("both owners on create: %d %q", status, body.Error)
+	}
+
+	docs, status := doRequest[[]models.DocumentMeta](t, http.MethodGet, r.url+"/api/epics/"+e.ID+"/documents", "")
+	if status != http.StatusOK || len(docs) != 1 || docs[0].EpicID != e.ID {
+		t.Fatalf("list: %d %+v", status, docs)
+	}
+	_, status = errorBody(t, http.MethodGet, r.url+"/api/epics/nope/documents", "")
+	if status != http.StatusNotFound {
+		t.Fatalf("unknown epic documents status = %d, want 404", status)
+	}
+	epic, status := doRequest[models.Epic](t, http.MethodGet, r.url+"/api/epics/"+e.ID, "")
+	if status != http.StatusOK || epic.DocumentCount != 1 || len(epic.Documents) != 1 || epic.Name != "Launch" {
+		t.Fatalf("get epic: %d %+v", status, epic)
+	}
+	_, status = errorBody(t, http.MethodGet, r.url+"/api/epics/nope", "")
+	if status != http.StatusNotFound {
+		t.Fatalf("unknown epic status = %d", status)
+	}
+	listed, status := doRequest[struct {
+		Epics []models.Epic `json:"epics"`
+	}](t, http.MethodGet, r.url+"/api/epics?projectId=DOC", "")
+	if status != http.StatusOK || len(listed.Epics) != 1 || listed.Epics[0].DocumentCount != 1 || listed.Epics[0].Documents != nil {
+		t.Fatalf("list epics: %d %+v", status, listed)
+	}
+
+	byName, status := doRequest[models.Document](t, http.MethodGet, r.url+"/api/documents/rollout.md?epic=launch&project=doc", "")
+	if status != http.StatusOK || byName.ID != created.ID {
+		t.Fatalf("by epic name: %d %+v", status, byName)
+	}
+	byEpicID, status := doRequest[models.Document](t, http.MethodGet, r.url+"/api/documents/Rollout?epic="+e.ID, "")
+	if status != http.StatusOK || byEpicID.ID != created.ID {
+		t.Fatalf("by epic id: %d %+v", status, byEpicID)
+	}
+	_, status = errorBody(t, http.MethodGet, r.url+"/api/documents/Rollout?epic=Launch", "")
+	if status != http.StatusNotFound {
+		t.Fatalf("epic name without project status = %d, want 404", status)
+	}
+	body, status = errorBody(t, http.MethodGet, r.url+"/api/documents/Rollout?epic="+e.ID+"&ticket=DOC-1", "")
+	if status != http.StatusBadRequest || body.Error != "pass ticket or epic, not both" {
+		t.Fatalf("both owners: %d %q", status, body.Error)
+	}
+
+	renamed, status := doRequest[models.Document](t, http.MethodPut,
+		r.url+"/api/documents/Rollout?epic=Launch&project=DOC", `{"name":"Go live"}`)
+	if status != http.StatusOK || renamed.Name != "Go live" {
+		t.Fatalf("rename by epic name: %d %+v", status, renamed)
+	}
+	resp, err := http.Get(r.url + "/api/documents/go%20live.md/download?epic=" + e.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || !strings.Contains(resp.Header.Get("Content-Disposition"), `filename="Go live.md"`) {
+		t.Fatalf("download by epic: %d %q", resp.StatusCode, resp.Header.Get("Content-Disposition"))
+	}
+	req, _ := http.NewRequest(http.MethodDelete, r.url+"/api/documents/Go%20live?epic=launch&project=DOC", nil)
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("delete by epic name status = %d", resp.StatusCode)
+	}
+}
