@@ -287,6 +287,17 @@ func TestTicketToolsIncludeTheTicketURL(t *testing.T) {
 		t.Fatalf("update_ticket URL = %q, want %q", url, want)
 	}
 
+	moved, err := s.callTool("move_ticket", mustJSON(t, map[string]any{
+		"id":     ticket.ID,
+		"status": "in_progress",
+	}))
+	if err != nil {
+		t.Fatalf("move_ticket: %v", err)
+	}
+	if url := moved.(*models.Ticket).URL; url != want {
+		t.Fatalf("move_ticket URL = %q, want %q", url, want)
+	}
+
 	listed, err := s.callTool("list_tickets", mustJSON(t, map[string]any{}))
 	if err != nil {
 		t.Fatalf("list_tickets: %v", err)
@@ -315,6 +326,26 @@ func TestGetTicketToolStillReportsNotFound(t *testing.T) {
 	s := newTestServer(t)
 	if _, err := s.callTool("get_ticket", mustJSON(t, map[string]any{"id": "nope"})); err == nil {
 		t.Fatal("expected an error for a ticket that does not exist")
+	}
+}
+
+// move_ticket on an unknown key must report the same clear error
+// update_ticket does for the same key, not a silently empty result.
+func TestMoveTicketToolNotFoundMatchesUpdateTicket(t *testing.T) {
+	s := newTestServer(t)
+
+	_, updateErr := s.callTool("update_ticket", mustJSON(t, map[string]any{"id": "nope", "priority": "high"}))
+	if updateErr == nil {
+		t.Fatal("update_ticket: expected an error for a ticket that does not exist")
+	}
+
+	_, moveErr := s.callTool("move_ticket", mustJSON(t, map[string]any{"id": "nope", "status": "in_progress"}))
+	if moveErr == nil {
+		t.Fatal("move_ticket: expected an error for a ticket that does not exist")
+	}
+
+	if moveErr.Error() != updateErr.Error() {
+		t.Fatalf("move_ticket error = %q, want the same as update_ticket %q", moveErr, updateErr)
 	}
 }
 

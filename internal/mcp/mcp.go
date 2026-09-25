@@ -421,7 +421,14 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 			return nil, err
 		}
 		// Until agents have identities (ACP-4), "agent" means "came through MCP"; the rule should then key off the actor.
-		return s.store.MoveTicket(ticketID, a.MoveTicketRequest, db.RequireNoteLeavingReview())
+		t, err := s.store.MoveTicket(ticketID, a.MoveTicketRequest, db.RequireNoteLeavingReview())
+		if err != nil {
+			return nil, err
+		}
+		if t == nil {
+			return nil, fmt.Errorf("ticket not found")
+		}
+		return weburl.Fill(t), nil
 
 	case "delete_ticket":
 		var a struct {
