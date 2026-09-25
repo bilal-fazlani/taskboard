@@ -198,6 +198,7 @@ func (s *Server) setupRoutes(webFS fs.FS) {
 			r.Get("/{id}/history", s.ticketHistory)
 			r.Delete("/{id}", s.deleteTicket)
 			r.Post("/{id}/subtasks", s.addSubtask)
+			r.Get("/{id}/documents", s.listTicketDocuments)
 		})
 
 		r.Route("/subtasks", func(r chi.Router) {
@@ -217,6 +218,13 @@ func (s *Server) setupRoutes(webFS fs.FS) {
 			r.Post("/", s.createEpic)
 			r.Put("/{id}", s.updateEpic)
 			r.Delete("/{id}", s.deleteEpic)
+		})
+
+		r.Route("/documents", func(r chi.Router) {
+			r.Get("/{ref}", s.getDocument)
+			r.Put("/{ref}", s.updateDocument)
+			r.Delete("/{ref}", s.deleteDocument)
+			r.Get("/{ref}/download", s.downloadDocument)
 		})
 
 		r.Get("/board", s.getBoard)

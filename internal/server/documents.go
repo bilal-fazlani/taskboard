@@ -1,0 +1,156 @@
+package server
+
+import (
+	"errors"
+	"io"
+	"mime"
+	"net/http"
+	"net/url"
+	"strings"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/tcarac/taskboard/internal/db"
+	"github.com/tcarac/taskboard/internal/models"
+)
+
+// maxDocumentRequestBytes bounds a document write's request body. JSON
+// escaping can make content several times its stored size, so this sits well
+// above models.MaxDocumentBytes; the store enforces the real limit on the
+// decoded content.
+const maxDocumentRequestBytes = 64 << 20
+
+// writeLookupError answers a reference that names nothing with 404 and the
+// store's message, and anything else with 500.
+func writeLookupError(w http.ResponseWriter, err error) {
+	var invalid *db.ErrInvalidInput
+	if errors.As(err, &invalid) {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	writeError(w, http.StatusInternalServerError, err.Error())
+}
+
+// documentID resolves a document route's {ref}: a document id, or, with
+// ?ticket=<id or key>, the name of one of that ticket's documents.
+func (s *Server) documentID(w http.ResponseWriter, r *http.Request) (string, bool) {
+	// chi hands back the escaped segment when the path was sent with an
+	// unusual escaping; names and ids never hold a %, so unescaping is safe.
+	ref := chi.URLParam(r, "ref")
+	if unescaped, err := url.PathUnescape(ref); err == nil {
+		ref = unescaped
+	}
+	ticket := strings.TrimSpace(r.URL.Query().Get("ticket"))
+	if ticket == "" {
+		return ref, true
+	}
+	ticketID, err := s.store.ResolveTicketID(ticket)
+	if err != nil {
+		writeLookupError(w, err)
+		return "", false
+	}
+	id, err := s.store.ResolveDocumentRef(db.DocumentOwner{TicketID: ticketID}, ref)
+	if err != nil {
+		writeLookupError(w, err)
+		return "", false
+	}
+	return id, true
+}
+
+func (s *Server) listTicketDocuments(w http.ResponseWriter, r *http.Request) {
+	docs, err := s.store.ListDocuments(db.DocumentOwner{TicketID: chi.URLParam(r, "id")})
+	if err != nil {
+		writeLookupError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, docs)
+}
+
+func (s *Server) getDocument(w http.ResponseWriter, r *http.Request) {
+	id, ok := s.documentID(w, r)
+	if !ok {
+		return
+	}
+	d, err := s.store.GetDocument(id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if d == nil {
+		writeError(w, http.StatusNotFound, "document not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, d)
+}
+
+func (s *Server) updateDocument(w http.ResponseWriter, r *http.Request) {
+	id, ok := s.documentID(w, r)
+	if !ok {
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxDocumentRequestBytes)
+	var req models.UpdateDocumentRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	d, err := s.store.UpdateDocument(id, req)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	if d == nil {
+		writeError(w, http.StatusNotFound, "document not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, d)
+}
+
+func (s *Server) deleteDocument(w http.ResponseWriter, r *http.Request) {
+	id, ok := s.documentID(w, r)
+	if !ok {
+		return
+	}
+	deleted, err := s.store.DeleteDocument(id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if !deleted {
+		writeError(w, http.StatusNotFound, "document not found")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// documentMediaType is the Content-Type a document is served with.
+func documentMediaType(format string) string {
+	if format == models.DocumentFormatHTML {
+		return "text/html; charset=utf-8"
+	}
+	return "text/markdown; charset=utf-8"
+}
+
+// downloadDocument sends the content as a file named with the display name.
+// mime.FormatMediaType quotes the name and switches to the RFC 2231 form for
+// non-ASCII letters, which names may hold.
+func (s *Server) downloadDocument(w http.ResponseWriter, r *http.Request) {
+	id, ok := s.documentID(w, r)
+	if !ok {
+		return
+	}
+	d, err := s.store.GetDocument(id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if d == nil {
+		writeError(w, http.StatusNotFound, "document not found")
+		return
+	}
+	filename := models.DocumentDisplayName(d.Name, d.Format)
+	w.Header().Set("Content-Type", documentMediaType(d.Format))
+	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": filename}))
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.WriteHeader(http.StatusOK)
+	io.WriteString(w, d.Content)
+}
