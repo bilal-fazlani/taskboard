@@ -34,6 +34,7 @@ type dbtx interface {
 func (s *Store) ClearData() error {
 	tables := []string{
 		"document_search",
+		"document_images",
 		"documents",
 		"ticket_status_changes",
 		"ticket_dependencies",

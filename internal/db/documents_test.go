@@ -74,7 +74,7 @@ func TestDocumentNameFromFilename(t *testing.T) {
 			t.Errorf("DocumentNameFromFilename(%q) = %q, %q, %v; want %q, html", tc.file, name, format, err, tc.name)
 		}
 	}
-	if msgDocExtension != "Only .md, .html and .htm files can be attached." {
+	if msgDocExtension != "Only .md, .html, .htm, .png, .jpg, .jpeg, .gif and .webp files can be attached." {
 		t.Errorf("msgDocExtension = %q", msgDocExtension)
 	}
 	// Nothing left once the extension and symbols go.

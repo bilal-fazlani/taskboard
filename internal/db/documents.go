@@ -23,20 +23,36 @@ const (
 	msgDocRefRequired     = "Enter a document name or id."
 	msgDocNothingToUpdate = "nothing to update: provide a name and/or content"
 	msgDocFormat          = `Format must be "markdown" or "html".`
-	msgDocExtension       = "Only .md, .html and .htm files can be attached."
+	msgDocImageFormat     = `Format must be "png", "jpeg", "gif" or "webp" for an image.`
+	msgDocExtension       = "Only .md, .html, .htm, .png, .jpg, .jpeg, .gif and .webp files can be attached."
 	msgDocOwner           = "A document belongs to one ticket or one epic."
+	msgDocSVG             = "SVG images can't be attached. Use PNG, JPEG, GIF or WebP."
+	msgDocImageFromFile   = "An image is made from its file, not from text."
+	msgDocImageText       = "An image's content is replaced with a new image file, not text."
+	msgDocNotImage        = "This document isn't an image."
 )
 
 const maxDocumentNameRunes = 200
 
-// documentFormats are the formats a document may be created with.
-var documentFormats = []string{models.DocumentFormatMarkdown, models.DocumentFormatHTML}
+// textFormats are the formats CreateDocument takes; images go through
+// CreateImageDocument.
+var textFormats = []string{models.DocumentFormatMarkdown, models.DocumentFormatHTML}
 
 // formatByExtension maps a filename's extension, lower-cased, to a format.
 var formatByExtension = map[string]string{
 	".md":   models.DocumentFormatMarkdown,
 	".html": models.DocumentFormatHTML,
 	".htm":  models.DocumentFormatHTML,
+	".png":  models.DocumentFormatPNG,
+	".jpg":  models.DocumentFormatJPEG,
+	".jpeg": models.DocumentFormatJPEG,
+	".gif":  models.DocumentFormatGIF,
+	".webp": models.DocumentFormatWebP,
+}
+
+// isSVGFilename reports a .svg file, which is refused with its own message.
+func isSVGFilename(filename string) bool {
+	return strings.EqualFold(filepath.Ext(filename), ".svg")
 }
 
 // isDocumentNameRune reports whether r may appear in a document name:
@@ -80,6 +96,9 @@ func DocumentNameFromFilename(filename string) (name, format string, err error) 
 	ext := filepath.Ext(base)
 	format, ok := DocumentFormatFromFilename(base)
 	if !ok {
+		if isSVGFilename(base) {
+			return "", "", invalidInput(msgDocSVG)
+		}
 		return "", "", invalidInput(msgDocExtension)
 	}
 	cleaned := strings.Map(func(r rune) rune {
@@ -102,6 +121,12 @@ func msgDocNameTaken(owner DocumentOwner, existing models.DocumentMeta) string {
 
 func msgDocTooLarge(size int) string {
 	return fmt.Sprintf("This document is %s. The limit is 8 MB.", models.FormatSize(size))
+}
+
+// ImageTooLargeMessage is the refusal for an image file of size bytes, over
+// the limit. The HTTP API uses it for an upload too large to read at all.
+func ImageTooLargeMessage(size int) string {
+	return fmt.Sprintf("This image is %s. The limit is 8 MB.", models.FormatSize(size))
 }
 
 // ErrDocumentConflict refuses a content save made from a revision the
@@ -176,13 +201,16 @@ func nullable(id string) any {
 }
 
 // documentMetaColumns reads everything but the content. Size is measured in
-// bytes, which is what the limit counts.
+// bytes, which is what the limit counts: an image's is kept on its row, a
+// text document's is its content's length. Width and height are 0 for text.
 const documentMetaColumns = `id, COALESCE(ticket_id, ''), COALESCE(epic_id, ''), name, format,
-	LENGTH(CAST(content AS BLOB)), revision, created_at, updated_at`
+	COALESCE(size, LENGTH(CAST(content AS BLOB))), COALESCE(width, 0), COALESCE(height, 0),
+	revision, created_at, updated_at`
 
 func scanDocumentMeta(row interface{ Scan(...any) error }, extra ...any) (models.DocumentMeta, error) {
 	var d models.DocumentMeta
-	dest := append([]any{&d.ID, &d.TicketID, &d.EpicID, &d.Name, &d.Format, &d.Size, &d.Revision, &d.CreatedAt, &d.UpdatedAt}, extra...)
+	dest := append([]any{&d.ID, &d.TicketID, &d.EpicID, &d.Name, &d.Format, &d.Size, &d.Width, &d.Height,
+		&d.Revision, &d.CreatedAt, &d.UpdatedAt}, extra...)
 	err := row.Scan(dest...)
 	return d, err
 }
@@ -254,8 +282,9 @@ func (s *Store) GetDocument(id string) (*models.Document, error) {
 }
 
 // ResolveDocumentRef finds one of an owner's documents by id, or by name
-// ignoring case, with or without its format's extension ("Plan", "plan.md").
-// A name with the wrong extension names nothing.
+// ignoring case, with or without its format's extension ("Plan", "plan.md";
+// a JPEG answers to .jpeg as well as .jpg). A name with the wrong extension
+// names nothing.
 func (s *Store) ResolveDocumentRef(owner DocumentOwner, ref string) (string, error) {
 	trimmed := strings.TrimSpace(ref)
 	if trimmed == "" {
@@ -271,7 +300,8 @@ func (s *Store) ResolveDocumentRef(owner DocumentOwner, ref string) (string, err
 		}
 	}
 	for _, d := range docs {
-		if strings.EqualFold(d.Name, trimmed) || strings.EqualFold(models.DocumentDisplayName(d.Name, d.Format), trimmed) {
+		if strings.EqualFold(d.Name, trimmed) || strings.EqualFold(models.DocumentDisplayName(d.Name, d.Format), trimmed) ||
+			(d.Format == models.DocumentFormatJPEG && strings.EqualFold(d.Name+".jpeg", trimmed)) {
 			return d.ID, nil
 		}
 	}
@@ -286,8 +316,11 @@ func (s *Store) CreateDocument(req models.CreateDocumentRequest) (*models.Docume
 	if format == "" {
 		format = models.DocumentFormatMarkdown
 	}
-	if !slices.Contains(documentFormats, format) {
-		return nil, invalidInput(msgDocFormat)
+	if models.IsImageFormat(format) {
+		return nil, invalidInput(msgDocImageFromFile)
+	}
+	if !slices.Contains(textFormats, format) {
+		return nil, invalidInput("%s", msgFormat(format, false))
 	}
 	if len(req.Content) > models.MaxDocumentBytes {
 		return nil, invalidInput("%s", msgDocTooLarge(len(req.Content)))
@@ -351,6 +384,9 @@ func (s *Store) UpdateDocument(id string, req models.UpdateDocumentRequest) (*mo
 		}
 		if err != nil {
 			return nil, err
+		}
+		if models.IsImageFormat(format) {
+			return nil, invalidInput(msgDocImageText)
 		}
 		text = doctext.ReadableText(format, *req.Content)
 	}

@@ -104,7 +104,9 @@ func saveDocumentText(q dbtx, id string, revision int, text string) error {
 
 // fillDocumentSearch works out the readable text of every document that has
 // none, or whose text is from an older revision: documents written before
-// the text was kept, or by an older build since. OpenAt runs it, so they
+// the text was kept, or by an older build since. Images have no readable
+// text and are skipped by format, so their bytes are never read (they live
+// in document_images, which this never touches). OpenAt runs it, so they
 // become searchable the first time a build that keeps the text opens the
 // database; after that it finds nothing to do. Each document is parsed
 // outside any transaction, and its text is stored only if the document is
@@ -113,7 +115,7 @@ func saveDocumentText(q dbtx, id string, revision int, text string) error {
 func fillDocumentSearch(database *sql.DB) error {
 	rows, err := database.Query(`SELECT d.id FROM documents d
 		LEFT JOIN document_search s ON s.document_id = d.id
-		WHERE s.revision IS NOT d.revision`)
+		WHERE d.format IN ('markdown', 'html') AND s.revision IS NOT d.revision`)
 	if err != nil {
 		return fmt.Errorf("finding documents without text: %w", err)
 	}
