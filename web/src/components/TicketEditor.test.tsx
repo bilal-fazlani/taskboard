@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useEffect } from "react";
-import { BrowserRouter } from "react-router-dom";
-import type { Project, StatusChange, Subtask, Ticket } from "../api/client";
+import { BrowserRouter, useNavigate } from "react-router-dom";
+import type { Project, StatusChange, Subtask, Ticket, TicketWrite } from "../api/client";
 
 // The editor and its pickers only talk to the API through this module, so
 // mocking it keeps every test away from a real server.
@@ -1660,5 +1660,172 @@ describe("Back with a document holding unsaved text", () => {
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Design spec.md" })).toBeNull());
     expect(await screen.findByRole("alertdialog", { name: "Discard unsaved changes?" })).toBeTruthy();
     expect(view.selected?.id).toBe("t1");
+  });
+});
+
+// The URL can move the `ticket` parameter to another ticket under an editor
+// with unsaved edits: Back or Forward onto another ticket's entry, or any
+// other change of the parameter the editor did not make. Its edits belong to
+// the ticket it opened on, so it neither saves them against the new one nor
+// drops them unasked: it asks through its own discard question. Keep editing
+// puts its own ticket's parameter back; Discard opens the new ticket clean.
+describe("a ticket parameter that moves to another ticket", () => {
+  const ticketA = makeTicket({ id: "t1", number: 7, title: "Ship login page" });
+  const ticketB = makeTicket({ id: "t2", number: 8, title: "Build login UI", priority: "low" });
+  let view: TicketParamState<Ticket>;
+  let navigate: ReturnType<typeof useNavigate>;
+  let onUpdate: Mock<(id: string, data: TicketWrite) => Promise<void>>;
+
+  function View() {
+    const p = useTicketParam([ticketA, ticketB]);
+    const go = useNavigate();
+    useEffect(() => {
+      view = p;
+      navigate = go;
+    });
+    return p.selected ? (
+      <TicketEditor
+        key={p.selected.id}
+        ticket={p.selected}
+        projects={[project]}
+        closeRequested={p.closeRequested}
+        onCloseCancelled={p.cancelClose}
+        onDirtyChange={p.onDirtyChange}
+        onClose={p.close}
+        onUpdate={onUpdate}
+        onDelete={vi.fn()}
+        onOpenTicket={p.switchTo}
+      />
+    ) : null;
+  }
+
+  const param = () => new URLSearchParams(window.location.search).get("ticket");
+  const title = () => (screen.getByLabelText("Title") as HTMLInputElement).value;
+  const traverse = (go: () => void) =>
+    act(async () => {
+      go();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+  const back = () => traverse(() => window.history.back());
+  const forward = () => traverse(() => window.history.forward());
+
+  beforeEach(() => {
+    window.history.replaceState(null, "", "/?project=AUTH");
+    onUpdate = vi.fn<(id: string, data: TicketWrite) => Promise<void>>().mockResolvedValue(undefined);
+    mockApi.tickets.get.mockImplementation((id: string) => Promise.resolve(id === "t2" ? ticketB : ticketA));
+  });
+
+  async function openEdited(first: Ticket, then?: string) {
+    render(<View />, { wrapper: BrowserRouter });
+    await act(async () => view.open(first));
+    if (then) await act(async () => view.switchTo(then));
+    await act(async () => {});
+    editTitle();
+  }
+
+  it("asks when Back lands on another ticket, keeping the edits on the ticket they belong to", async () => {
+    await openEdited(ticketA, "t2");
+
+    await back();
+    expect(param()).toBe("AUTH-7");
+    expect(confirmDialog()).toBeTruthy();
+    expect(screen.getByText("AUTH-8")).toBeTruthy();
+    expect(title()).toBe("Edited title");
+    expect(onUpdate).not.toHaveBeenCalled();
+  });
+
+  it("puts the previous parameter back on Keep editing, and a second Back asks again", async () => {
+    await openEdited(ticketA, "t2");
+    await back();
+
+    fireEvent.click(screen.getByRole("button", { name: "Keep editing" }));
+    await waitFor(() => expect(param()).toBe("AUTH-8"));
+    expect(confirmDialog()).toBeNull();
+    expect(view.closeRequested).toBe(false);
+    expect(title()).toBe("Edited title");
+
+    await back();
+    expect(param()).toBe("AUTH-7");
+    expect(confirmDialog()).toBeTruthy();
+  });
+
+  it("opens the new ticket clean on Discard, with nothing of the old edits to save", async () => {
+    await openEdited(ticketA, "t2");
+    await back();
+
+    fireEvent.click(screen.getByRole("button", { name: "Discard" }));
+    await waitFor(() => expect(view.selected?.id).toBe("t1"));
+    expect(param()).toBe("AUTH-7");
+    expect(confirmDialog()).toBeNull();
+    expect(title()).toBe("Ship login page");
+    expect(saveButton()).toBeNull();
+
+    // An edit now is ticket A's own, and saves against A alone.
+    fireEvent.change(screen.getByLabelText("Priority"), { target: { value: "urgent" } });
+    await act(async () => fireEvent.click(saveButton()!));
+    expect(onUpdate).toHaveBeenCalledTimes(1);
+    expect(onUpdate).toHaveBeenCalledWith("t1", { priority: "urgent" });
+  });
+
+  it("asks when Forward lands on another ticket, and Keep editing leaves history closable in one step", async () => {
+    render(<View />, { wrapper: BrowserRouter });
+    await act(async () => view.open(ticketA));
+    await act(async () => view.switchTo("t2"));
+    await back();
+    expect(view.selected?.id).toBe("t1");
+    editTitle();
+
+    await forward();
+    expect(param()).toBe("AUTH-8");
+    expect(confirmDialog()).toBeTruthy();
+    expect(title()).toBe("Edited title");
+
+    fireEvent.click(screen.getByRole("button", { name: "Keep editing" }));
+    await waitFor(() => expect(param()).toBe("AUTH-7"));
+    expect(title()).toBe("Edited title");
+
+    // × still goes back past every entry the editor pushed, to the view.
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    fireEvent.click(screen.getByRole("button", { name: "Discard" }));
+    await waitFor(() => expect(view.selected).toBeNull());
+    await waitFor(() => expect(window.location.search).toBe("?project=AUTH"));
+  });
+
+  it("opens the Forward ticket clean on Discard", async () => {
+    render(<View />, { wrapper: BrowserRouter });
+    await act(async () => view.open(ticketA));
+    await act(async () => view.switchTo("t2"));
+    await back();
+    editTitle();
+    await forward();
+
+    fireEvent.click(screen.getByRole("button", { name: "Discard" }));
+    await waitFor(() => expect(view.selected?.id).toBe("t2"));
+    expect(param()).toBe("AUTH-8");
+    expect(title()).toBe("Build login UI");
+    expect(saveButton()).toBeNull();
+  });
+
+  it("asks when the parameter is changed to another ticket some other way", async () => {
+    await openEdited(ticketA);
+
+    await act(async () => navigate("/?project=AUTH&ticket=auth-8"));
+    expect(confirmDialog()).toBeTruthy();
+    expect(title()).toBe("Edited title");
+    expect(screen.getByText("AUTH-7")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Keep editing" }));
+    await waitFor(() => expect(param()).toBe("AUTH-7"));
+    expect(confirmDialog()).toBeNull();
+    expect(title()).toBe("Edited title");
+
+    await act(async () => navigate("/?project=AUTH&ticket=AUTH-8", { replace: true }));
+    expect(confirmDialog()).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Discard" }));
+    await waitFor(() => expect(view.selected?.id).toBe("t2"));
+    expect(param()).toBe("AUTH-8");
+    expect(title()).toBe("Build login UI");
+    expect(saveButton()).toBeNull();
+    expect(onUpdate).not.toHaveBeenCalled();
   });
 });
