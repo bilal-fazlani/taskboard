@@ -93,7 +93,31 @@ func (p positionedLinkParser) CloseBlock(parent ast.Node, block text.Reader, pc 
 // web/src/lib/imageRefs.ts.
 var spacedImageRef = regexp.MustCompile(`(?i)!\[([^\]\n]*)\]\(\s*([^()<>\n]*?\S\.(?:png|jpe?g|gif|webp))\s*\)`)
 
+// bom is the byte order mark CommonMark parsers (the web's micromark among
+// them) drop from the start of a text before reading it.
+const bom = "\uFEFF"
+
+// findMarkdown reads content as the web does: a leading byte order mark is
+// skipped first, as micromark skips it, so both see the same blocks, and the
+// positions found are then moved past it.
 func findMarkdown(content string, img Image) scan {
+	if !strings.HasPrefix(content, bom) {
+		return findMarkdownBody(content, img)
+	}
+	s := findMarkdownBody(content[len(bom):], img)
+	for i := range s.targets {
+		units := make([]unit, len(s.targets[i].units))
+		for j, u := range s.targets[i].units {
+			u.start += len(bom)
+			u.end += len(bom)
+			units[j] = u
+		}
+		s.targets[i].units = units
+	}
+	return s
+}
+
+func findMarkdownBody(content string, img Image) scan {
 	source := []byte(content)
 	pc := parser.NewContext()
 	doc := markdownParser.Parse(text.NewReader(source), parser.WithContext(pc))

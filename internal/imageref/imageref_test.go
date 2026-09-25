@@ -81,6 +81,9 @@ func TestRenameMarkdownForms(t *testing.T) {
 		{name: "spaced form inside emphasis and a link", in: "*![a](Login screen.png)* [see ![b](Login screen.png)](https://example.com)", want: "*![a](Home page.png)* [see ![b](Home page.png)](https://example.com)", uses: 2, rewritten: 2},
 		{name: "an escaped backslash does not escape the image", in: `\\![a](Login screen.png)`, want: `\\![a](Home page.png)`, uses: 1, rewritten: 1},
 		{name: "bare with spaces across a line break", in: "Look: ![shot](\n  Login screen.png\n) here", want: "Look: ![shot](\n  Home page.png\n) here", uses: 1, rewritten: 1},
+		{name: "a leading BOM is skipped, as the web skips it", in: "\uFEFF```\n![a](<Login screen.png>)\n```\n\nShown: ![b](Login%20screen.png)\n", want: "\uFEFF```\n![a](<Login screen.png>)\n```\n\nShown: ![b](Home%20page.png)\n", uses: 1, rewritten: 1},
+		{name: "a BOM before an indented code block and a list", in: "\uFEFF    ![a](Login%20screen.png)\n\n- ![b](<Login screen.png>)\n", want: "\uFEFF    ![a](Login%20screen.png)\n\n- ![b](<Home page.png>)\n", uses: 1, rewritten: 1},
+		{name: "a BOM before a spaced reference", in: "\uFEFF![a](Login screen.png)", want: "\uFEFF![a](Home page.png)", uses: 1, rewritten: 1},
 		{name: "empty text", in: "", want: "", uses: 0},
 	})
 }
