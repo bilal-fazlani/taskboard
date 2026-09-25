@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { DocumentMeta } from "../api/client";
-import { findOwnerImage, ownerImageUrl, resolveImageRef } from "./imageRefs";
+import { findOwnerImage, resolveImageRef } from "./imageRefs";
 
 const at = "2026-09-25T09:00:00Z";
 const login: DocumentMeta = { id: "img1", name: "Login screen", format: "png", size: 10, revision: 2, createdAt: at, updatedAt: at };
@@ -34,7 +34,7 @@ describe("resolveImageRef", () => {
     for (const src of ["Login screen.png", "Login%20screen.png", "login%20SCREEN.png"]) {
       expect(resolveImageRef(src, docs)).toEqual({ kind: "owner", doc: login, src: "/api/documents/img1/image?rev=2" });
     }
-    expect(ownerImageUrl(photo)).toBe("/api/documents/img2/image?rev=1");
+    expect(resolveImageRef("IMG_0042.jpeg", docs)).toEqual({ kind: "owner", doc: photo, src: "/api/documents/img2/image?rev=1" });
   });
 
   it("keeps absolute http(s) URLs as they are", () => {

@@ -11,6 +11,7 @@ const mockApi = vi.hoisted(() => ({
     delete: vi.fn(),
     downloadUrl: (id: string) => `/api/documents/${id}/download`,
     rawUrl: (id: string, revision: number) => `/api/documents/${id}/raw?rev=${revision}`,
+    imageUrl: (id: string, revision: number) => `/api/documents/${id}/image?rev=${revision}`,
   },
 }));
 vi.mock("../api/client", () => ({ api: mockApi }));

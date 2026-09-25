@@ -31,7 +31,7 @@
 // that happen to reach the route, such as ../<id>/Login screen.png,
 // /api/documents/<id>/Login screen.png, an absolute URL, an href, or a URL a
 // script builds, are not kept in step.
-import type { DocumentMeta } from "../api/client";
+import { api, type DocumentMeta } from "../api/client";
 import { displayName } from "./documents";
 
 type ImageDoc = Pick<DocumentMeta, "id" | "name" | "format" | "revision" | "width" | "height">;
@@ -42,11 +42,6 @@ export type ImageTarget =
   | { kind: "missing"; name: string };
 
 const IMAGE_FORMATS = new Set(["png", "jpeg", "gif", "webp"]);
-
-/** The image route for an owner's image; the revision makes a replaced image a new URL. */
-export function ownerImageUrl(doc: Pick<DocumentMeta, "id" | "revision">): string {
-  return `/api/documents/${encodeURIComponent(doc.id)}/image?rev=${doc.revision}`;
-}
 
 function decoded(src: string): string {
   try {
@@ -76,7 +71,7 @@ export function resolveImageRef(src: string | undefined, documents: readonly Ima
   if (/^https?:\/\//i.test(raw) || raw.startsWith("//")) return { kind: "absolute", src: raw };
   const name = decoded(raw).trim();
   const doc = findOwnerImage(documents, name);
-  if (doc) return { kind: "owner", doc, src: ownerImageUrl(doc) };
+  if (doc) return { kind: "owner", doc, src: api.documents.imageUrl(doc.id, doc.revision) };
   return { kind: "missing", name };
 }
 
