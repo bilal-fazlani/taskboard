@@ -216,18 +216,16 @@ func (s *MCPServer) callDocumentTool(name string, args json.RawMessage) (result 
 			if err != nil {
 				return nil, true, err
 			}
-			// The picture first: it is the part most likely refused, and a
-			// refusal then leaves the name alone too.
-			d, err := s.store.ReplaceDocumentImage(id, data)
+			// The picture and the name together: a refusal of either
+			// leaves both as they were.
+			d, err := s.store.ReplaceDocumentImage(id, data, a.Name)
 			if err != nil {
 				return nil, true, err
 			}
 			if d == nil {
 				return nil, true, fmt.Errorf("document not found")
 			}
-			if a.Name == nil {
-				return s.withDocumentURL(d), true, nil
-			}
+			return s.withDocumentURL(d), true, nil
 		}
 		d, err := s.store.UpdateDocument(id, models.UpdateDocumentRequest{Name: a.Name, Content: a.Content})
 		if err != nil {

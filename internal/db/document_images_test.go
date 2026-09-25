@@ -263,14 +263,14 @@ func TestImageRules(t *testing.T) {
 	_, err = s.UpdateDocument(img.ID, models.UpdateDocumentRequest{Content: &text})
 	wantInvalid(t, err, msgDocImageText)
 	doc := seedDocument(t, s, tk.ID, "Plan", "# Plan")
-	_, err = s.ReplaceDocumentImage(doc.ID, imagedoctest.PNG(8, 8))
+	_, err = s.ReplaceDocumentImage(doc.ID, imagedoctest.PNG(8, 8), nil)
 	wantInvalid(t, err, msgDocNotImage)
 	_, err = s.GetDocumentImage(doc.ID)
 	wantInvalid(t, err, msgDocNotImage)
 	if f, err := s.GetDocumentImage("nope"); f != nil || err != nil {
 		t.Errorf("unknown id: %v, %v", f, err)
 	}
-	if d, err := s.ReplaceDocumentImage("nope", imagedoctest.PNG(8, 8)); d != nil || err != nil {
+	if d, err := s.ReplaceDocumentImage("nope", imagedoctest.PNG(8, 8), nil); d != nil || err != nil {
 		t.Errorf("replacing an unknown id: %v, %v", d, err)
 	}
 
@@ -292,7 +292,7 @@ func TestReplaceDocumentImage(t *testing.T) {
 	oldThumb, _ := s.GetDocumentThumbnail(d.ID)
 
 	time.Sleep(5 * time.Millisecond)
-	got, err := s.ReplaceDocumentImage(d.ID, imagedoctest.PNG(20, 50))
+	got, err := s.ReplaceDocumentImage(d.ID, imagedoctest.PNG(20, 50), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -309,10 +309,10 @@ func TestReplaceDocumentImage(t *testing.T) {
 	}
 
 	// The format is fixed: a PNG is replaced by a PNG.
-	_, err = s.ReplaceDocumentImage(d.ID, imagedoctest.AnimatedGIF())
+	_, err = s.ReplaceDocumentImage(d.ID, imagedoctest.AnimatedGIF(), nil)
 	wantInvalid(t, err, "This isn't a PNG image: its content is GIF.")
 	big := append(imagedoctest.PNG(8, 8), make([]byte, models.MaxDocumentBytes)...)
-	_, err = s.ReplaceDocumentImage(d.ID, big)
+	_, err = s.ReplaceDocumentImage(d.ID, big, nil)
 	wantInvalid(t, err, "This image is 8.1 MB. The limit is 8 MB.")
 
 	// A rename keeps the file and the revision.
@@ -320,6 +320,23 @@ func TestReplaceDocumentImage(t *testing.T) {
 	renamed, err := s.UpdateDocument(d.ID, models.UpdateDocumentRequest{Name: &name})
 	if err != nil || renamed.Revision != 2 || renamed.Width != 20 || renamed.Size != f.Document.Size {
 		t.Errorf("rename: %+v, %v", renamed, err)
+	}
+
+	// A picture and a name together: all or nothing.
+	seedDocument(t, s, tk.ID, "Plan", "# Plan")
+	for _, bad := range []string{"Bad/name", "plan"} {
+		_, err = s.ReplaceDocumentImage(d.ID, imagedoctest.PNG(33, 33), &bad)
+		if err == nil {
+			t.Fatalf("rename to %q was taken", bad)
+		}
+		if cur, _ := s.GetDocumentImage(d.ID); cur.Document.Width != 20 || cur.Document.Revision != 2 || cur.Document.Name != "Final shot" {
+			t.Errorf("a refused name %q still changed the image: %+v", bad, cur.Document)
+		}
+	}
+	good := "Home page"
+	both, err := s.ReplaceDocumentImage(d.ID, imagedoctest.PNG(33, 33), &good)
+	if err != nil || both.Name != "Home page" || both.Width != 33 || both.Revision != 3 {
+		t.Errorf("replace and rename: %+v, %v", both, err)
 	}
 }
 

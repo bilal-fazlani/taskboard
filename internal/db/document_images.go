@@ -95,9 +95,11 @@ func (s *Store) CreateImageDocument(req models.CreateImageRequest) (*models.Docu
 
 // ReplaceDocumentImage replaces an image's file with a new one of the same
 // format: a content save, so the revision goes up and the thumbnail is made
-// anew, while the name, and every reference by it, stays. It returns
+// anew, while the name, and every reference by it, stays. With a name it
+// also renames the image in the same transaction, so a refused name leaves
+// the picture as it was, and a refused picture the name. It returns
 // (nil, nil) for an unknown id, and refuses a document that is not an image.
-func (s *Store) ReplaceDocumentImage(id string, data []byte) (*models.Document, error) {
+func (s *Store) ReplaceDocumentImage(id string, data []byte, name *string) (*models.Document, error) {
 	// A document's format never changes, so reading it ahead of the
 	// transaction is safe.
 	var format string
@@ -122,15 +124,24 @@ func (s *Store) ReplaceDocumentImage(id string, data []byte) (*models.Document, 
 	}
 	defer tx.Rollback()
 
-	res, err := tx.Exec(`UPDATE documents SET size = ?, width = ?, height = ?, revision = revision + 1, updated_at = ?
-		WHERE id = ?`, len(img.Data), img.Width, img.Height, time.Now(), id)
+	var owner DocumentOwner
+	var current string
+	err = tx.QueryRow("SELECT COALESCE(ticket_id, ''), COALESCE(epic_id, ''), name FROM documents WHERE id = ?", id).
+		Scan(&owner.TicketID, &owner.EpicID, &current)
+	if err == sql.ErrNoRows {
+		return nil, nil // deleted meanwhile
+	}
 	if err != nil {
 		return nil, err
 	}
-	if n, err := res.RowsAffected(); err != nil {
+	if name != nil {
+		if current, err = checkDocumentName(tx, owner, *name, id); err != nil {
+			return nil, err
+		}
+	}
+	if _, err := tx.Exec(`UPDATE documents SET name = ?, size = ?, width = ?, height = ?, revision = revision + 1, updated_at = ?
+		WHERE id = ?`, current, len(img.Data), img.Width, img.Height, time.Now(), id); err != nil {
 		return nil, err
-	} else if n == 0 {
-		return nil, nil // deleted meanwhile
 	}
 	if _, err := tx.Exec(`UPDATE document_images SET thumbnail_type = ?, thumbnail = ?, data = ? WHERE document_id = ?`,
 		img.ThumbnailType, img.Thumbnail, img.Data, id); err != nil {

@@ -180,7 +180,7 @@ func documentCommands() *cobra.Command {
 			}
 			var d *models.Document
 			if models.IsImageFormat(current.Format) {
-				d, err = store.ReplaceDocumentImage(current.ID, data)
+				d, err = store.ReplaceDocumentImage(current.ID, data, nil)
 			} else {
 				content := string(data)
 				d, err = store.UpdateDocument(current.ID, models.UpdateDocumentRequest{Content: &content})

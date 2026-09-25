@@ -99,7 +99,7 @@ func (s *Server) replaceDocumentImage(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	d, err := s.store.ReplaceDocumentImage(id, data)
+	d, err := s.store.ReplaceDocumentImage(id, data, nil)
 	if err != nil {
 		writeStoreError(w, err)
 		return

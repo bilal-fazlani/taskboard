@@ -190,6 +190,15 @@ func TestUpdateImageDocumentTool(t *testing.T) {
 			t.Errorf("update_document %v: %v, want %q", tc.args, err, tc.want)
 		}
 	}
+	// A refused name leaves the picture alone.
+	if _, err := s.callTool("update_document", mustJSON(t, map[string]any{
+		"id": d.ID, "data": b64(imagedoctest.PNG(33, 33)), "name": "Bad/name",
+	})); err == nil || err.Error() != "Use letters, digits, spaces, _ and - only." {
+		t.Errorf("bad name with data: %v", err)
+	}
+	if cur, _ := s.store.GetDocument(d.ID); cur.Width != 20 || cur.Revision != 2 {
+		t.Errorf("a refused name still replaced the picture: %+v", cur.DocumentMeta)
+	}
 	// A refused picture leaves the name alone too.
 	if _, err := s.callTool("update_document", mustJSON(t, map[string]any{"id": d.ID, "data": "bad!", "name": "Other"})); err == nil {
 		t.Error("bad data was taken")
