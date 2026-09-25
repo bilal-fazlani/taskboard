@@ -173,7 +173,8 @@ func documentCommands() *cobra.Command {
 			if d == nil {
 				return fmt.Errorf("document not found: %s", args[0])
 			}
-			fmt.Printf("Renamed to %s (%s)\n", models.DocumentDisplayName(d.Name, d.Format), d.ID)
+			fmt.Printf("Renamed to %s (%s)\n%s\n",
+				models.DocumentDisplayName(d.Name, d.Format), d.ID, documentURL(store, &d.DocumentMeta))
 			return nil
 		},
 	}

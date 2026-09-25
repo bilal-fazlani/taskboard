@@ -81,7 +81,7 @@ func TestDocCommands(t *testing.T) {
 			t.Fatalf("doc rename: %v", err)
 		}
 	})
-	if !strings.Contains(renamed, "Renamed to Plan.md") {
+	if !strings.Contains(renamed, "Renamed to Plan.md") || !strings.Contains(renamed, "/?ticket=DOC-1&doc=Plan.md") {
 		t.Fatalf("doc rename printed %q", renamed)
 	}
 
