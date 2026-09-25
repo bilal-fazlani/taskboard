@@ -9,7 +9,10 @@ import (
 	"image/gif"
 	"image/jpeg"
 	"image/png"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/tcarac/taskboard/internal/models"
 )
@@ -224,4 +227,36 @@ func jpegWithMetadataOf(t *testing.T, img image.Image, orientation int) []byte {
 	b = append(b, 0xFF, 0xD8)
 	b = append(b, appendSegment(nil, 0xE1, append(append([]byte{}, exifHeader...), gpsEXIF(orientation)...))...)
 	return append(b, plain[2:]...)
+}
+
+func TestDecodesRunAtMostTwoAtATime(t *testing.T) {
+	var running, peak atomic.Int32
+	testHookDecoding = func() {
+		n := running.Add(1)
+		for {
+			p := peak.Load()
+			if n <= p || peak.CompareAndSwap(p, n) {
+				break
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+		running.Add(-1)
+	}
+	t.Cleanup(func() { testHookDecoding = nil })
+
+	file := encodePNG(t, pattern(64, 48))
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, err := Prepare(models.DocumentFormatPNG, file); err != nil {
+				t.Error(err)
+			}
+		}()
+	}
+	wg.Wait()
+	if p := peak.Load(); p != MaxConcurrentDecodes {
+		t.Errorf("%d decodes ran at once, want at most (and, with 8 waiting, exactly) %d", p, MaxConcurrentDecodes)
+	}
 }

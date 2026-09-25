@@ -37,6 +37,28 @@ const MaxPixels = 50_000_000
 // ThumbnailSize is the box a thumbnail fits in, in pixels.
 const ThumbnailSize = 320
 
+// MaxConcurrentDecodes is how many pictures are decoded at once, across
+// every upload path (HTTP, MCP and CLI all come through here). Decoding a
+// picture near MaxPixels can take several hundred megabytes, so more
+// uploads than this wait their turn rather than add up.
+const MaxConcurrentDecodes = 2
+
+var decodeSlots = make(chan struct{}, MaxConcurrentDecodes)
+
+// testHookDecoding, when set, runs while a decode slot is held. Tests use it
+// to watch how many run at once.
+var testHookDecoding func()
+
+// withDecodeSlot runs fn once a decode slot is free.
+func withDecodeSlot[T any](fn func() (T, error)) (T, error) {
+	decodeSlots <- struct{}{}
+	defer func() { <-decodeSlots }()
+	if testHookDecoding != nil {
+		testHookDecoding()
+	}
+	return fn()
+}
+
 // Refusal is a file Prepare will not take. Its message is written for people
 // and is the whole error, like the store's own rule messages.
 type Refusal struct{ Msg string }
@@ -115,20 +137,29 @@ func Prepare(format string, data []byte) (*Prepared, error) {
 	if cfg.Width*cfg.Height > MaxPixels {
 		return nil, refuse("This image is %d×%d pixels. The limit is 50 megapixels.", cfg.Width, cfg.Height)
 	}
-	img, err := decodeFirstFrame(format, stripped, cfg)
-	if err != nil {
-		return nil, damaged
+	type encoded struct {
+		data        []byte
+		contentType string
 	}
-
-	thumb, thumbType, err := thumbnail(img, orientation)
+	thumb, err := withDecodeSlot(func() (encoded, error) {
+		img, err := decodeFirstFrame(format, stripped, cfg)
+		if err != nil {
+			return encoded{}, damaged
+		}
+		data, contentType, err := thumbnail(img, orientation)
+		if err != nil {
+			return encoded{}, fmt.Errorf("making thumbnail: %w", err)
+		}
+		return encoded{data, contentType}, nil
+	})
 	if err != nil {
-		return nil, fmt.Errorf("making thumbnail: %w", err)
+		return nil, err
 	}
 	width, height := cfg.Width, cfg.Height
 	if orientation >= 5 {
 		width, height = height, width
 	}
-	return &Prepared{Data: stripped, Width: width, Height: height, Thumbnail: thumb, ThumbnailType: thumbType}, nil
+	return &Prepared{Data: stripped, Width: width, Height: height, Thumbnail: thumb.data, ThumbnailType: thumb.contentType}, nil
 }
 
 // strip removes a file's metadata; see the package comment. orientation is
