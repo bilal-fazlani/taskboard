@@ -224,12 +224,16 @@ func (s *Server) setupRoutes(webFS fs.FS) {
 
 		r.Route("/documents", func(r chi.Router) {
 			r.Post("/", s.createDocument)
+			r.Post("/images", s.createImageDocument)
 			r.Get("/search", s.searchDocuments)
 			r.Get("/{ref}", s.getDocument)
 			r.Put("/{ref}", s.updateDocument)
 			r.Delete("/{ref}", s.deleteDocument)
 			r.Get("/{ref}/download", s.downloadDocument)
 			r.Get("/{ref}/raw", s.rawDocument)
+			r.Get("/{ref}/image", s.getDocumentImage)
+			r.Put("/{ref}/image", s.replaceDocumentImage)
+			r.Get("/{ref}/thumbnail", s.getDocumentThumbnail)
 		})
 
 		r.Get("/board", s.getBoard)

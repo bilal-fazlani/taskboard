@@ -226,7 +226,8 @@ func documentMediaType(format string) string {
 
 // downloadDocument sends the content as a file named with the display name.
 // mime.FormatMediaType quotes the name and switches to the RFC 2231 form for
-// non-ASCII letters, which names may hold.
+// non-ASCII letters, which names may hold. An image sends its stored file,
+// its metadata already removed.
 func (s *Server) downloadDocument(w http.ResponseWriter, r *http.Request) {
 	id, ok := s.documentID(w, r)
 	if !ok {
@@ -239,6 +240,19 @@ func (s *Server) downloadDocument(w http.ResponseWriter, r *http.Request) {
 	}
 	if d == nil {
 		writeError(w, http.StatusNotFound, "document not found")
+		return
+	}
+	if models.IsImageFormat(d.Format) {
+		f, err := s.store.GetDocumentImage(id)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if f == nil {
+			writeError(w, http.StatusNotFound, "document not found")
+			return
+		}
+		writeImageFile(w, r, f, false, "attachment")
 		return
 	}
 	filename := models.DocumentDisplayName(d.Name, d.Format)
