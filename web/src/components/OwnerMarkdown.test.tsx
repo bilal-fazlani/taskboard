@@ -81,6 +81,30 @@ describe("OwnerMarkdown images", () => {
   });
 });
 
+// Every markdown form lib/imageRefs.ts lists (the forms renames keep in step).
+describe("OwnerMarkdown: every listed reference form", () => {
+  const cafe: DocumentMeta = { id: "img3", name: "Café", format: "png", size: 10, revision: 1, createdAt: at, updatedAt: at };
+  const all = [...docs, cafe];
+  it.each([
+    ["bare with spaces", "![x](Login screen.png)", LOGIN_SRC],
+    ["angle-bracketed", "![x](<Login screen.png>)", LOGIN_SRC],
+    ["angle-bracketed with a title", '![x](<Login screen.png> "Title")', LOGIN_SRC],
+    ["percent-encoded", "![x](Login%20screen.png)", LOGIN_SRC],
+    ["percent-encoded with a title", '![x](Login%20screen.png "Title")', LOGIN_SRC],
+    ["percent-encoded letters", "![x](Caf%C3%A9.png)", "/api/documents/img3/image?rev=1"],
+    ["a full reference to an angle-bracketed definition", "![x][r]\n\n[r]: <Login screen.png>", LOGIN_SRC],
+    ["a full reference to a percent-encoded definition", "![x][r]\n\n[r]: Login%20screen.png", LOGIN_SRC],
+    ["a definition with a title", '![x][r]\n\n[r]: <Login screen.png> "Title"', LOGIN_SRC],
+    ["a collapsed reference", "![r][]\n\n[r]: <Login screen.png>", LOGIN_SRC],
+    ["a shortcut reference", "![r]\n\n[r]: Login%20screen.png", LOGIN_SRC],
+    ["a bare definition of a name without spaces", "![r]\n\n[r]: photo.jpeg", "/api/documents/img2/image?rev=1"],
+  ])("resolves %s", (_, md, src) => {
+    const { container } = render(<OwnerMarkdown documents={all}>{md}</OwnerMarkdown>);
+    expect(images(container).map((i) => i.getAttribute("src"))).toEqual([src]);
+    expect(screen.queryByTestId("missing-image")).toBeNull();
+  });
+});
+
 describe("OwnerMarkdown missing images", () => {
   it.each([
     ["an unknown name", "![x](Nope.png)", "Nope.png"],

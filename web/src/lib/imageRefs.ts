@@ -1,21 +1,36 @@
 // Images inside text: a ticket's description and markdown documents, or an
-// epic's markdown documents, show that owner's images by name. The forms a
-// reference may take (renames rewrite exactly these):
+// epic's markdown documents, show that owner's images by name; so do the
+// owner's HTML documents. The name is the image's display name with its
+// extension, ignoring case; a JPEG shows as .jpg and answers to .jpeg too (as
+// the server's lookups do). Renames keep exactly the forms below in step, and
+// nothing else (internal/models/image_ref.go carries the same list).
 //
-//   ![alt](Login screen.png)       plain, spaces and all (remarkSpacedImageRefs)
-//   ![alt](<Login screen.png>)     angle-bracketed
-//   ![alt](Login%20screen.png)     percent-encoded
+// Markdown:
+//   ![alt](Login screen.png)             bare, spaces and all (remarkSpacedImageRefs);
+//                                        no title in this form
+//   ![alt](<Login screen.png>)           angle-bracketed, with or without a title:
+//   ![alt](<Login screen.png> "Title")
+//   ![alt](Login%20screen.png)           percent-encoded (any %XX escape of the
+//   ![alt](Login%20screen.png "Title")   name's characters), with or without a title
+//   ![alt][r]  ![r][]  ![r]              reference style, whose definition gives the
+//   [r]: <Login screen.png>              name angle-bracketed or percent-encoded
+//   [r]: Login%20screen.png "Title"      (a name without spaces may also be bare),
+//                                        with or without a title
+// Absolute http(s) URLs are shown as they are. Anything else, including
+// ./Login screen.png, a path on this server or another owner's image name,
+// is a missing image.
 //
-// The name is the image's display name with its extension, ignoring case; a
-// JPEG shows as .jpg and answers to .jpeg too (as the server's lookups do).
-// Absolute http(s) URLs are shown as they are. Anything else, including a
-// path on this server or another owner's image name, is a missing image.
-//
-// An HTML document refers to them by relative URL, <img src="Login
-// screen.png"> (or Login%20screen.png, ./Login screen.png, or any other
-// relative URL that lands beside the page), which the browser resolves
-// against the raw page's URL; the server's referenced-image route
-// (internal/server/document_image_refs.go) answers it.
+// HTML (the browser resolves these against the raw page's URL, and the
+// server's referenced-image route, internal/server/document_image_refs.go,
+// answers them):
+//   src="…"          on any element (img, source, …)
+//   srcset="… 2x"    each URL in it (spaces must be %20 there)
+//   url(…)           in a style attribute or a <style> element, quoted or not
+// where the URL is the name bare (Login screen.png), with ./ in front
+// (./Login screen.png), or percent-encoded (Login%20screen.png). Other forms
+// that happen to reach the route, such as ../<id>/Login screen.png,
+// /api/documents/<id>/Login screen.png, an absolute URL, an href, or a URL a
+// script builds, are not kept in step.
 import type { DocumentMeta } from "../api/client";
 import { displayName } from "./documents";
 
