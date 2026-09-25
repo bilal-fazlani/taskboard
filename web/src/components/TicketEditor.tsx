@@ -157,6 +157,12 @@ export default function TicketEditor({
     setSaveError(null);
   }, []);
 
+  // The ticket's documents, loaded here and refreshed on every live change,
+  // and the one the URL has open over the editor.
+  const { documents, failed: documentsFailed, reload: reloadDocuments } = useOwnerDocuments({ ticketId: ticket.id });
+  const docParam = useDocParam(documents);
+  const docOpen = docParam.selected !== null;
+
   const dialogRef = useRef<HTMLDivElement>(null);
   const confirmRef = useRef<HTMLDivElement>(null);
   // "Discard unsaved changes?" is up for one of two reasons: the editor itself
@@ -167,7 +173,10 @@ export default function TicketEditor({
   // question is waiting on, and `focusBeforeConfirmRef` the element to give
   // focus back to when it is cancelled.
   const [asking, setAsking] = useState(false);
-  const urlAsking = closeRequested && dirty;
+  // While the open document holds unsaved text, the document asks first,
+  // whichever Back dropped what: the editor's own question waits until the
+  // document's is answered.
+  const urlAsking = closeRequested && dirty && !docParam.dirty;
   const confirmOpen = asking || urlAsking;
   const pendingActionRef = useRef<(() => void) | null>(null);
   const focusBeforeConfirmRef = useRef<HTMLElement | null>(null);
@@ -216,11 +225,6 @@ export default function TicketEditor({
     };
   }, [ticket.id, ticket.updatedAt]);
 
-  // The ticket's documents, loaded here and refreshed on every live change,
-  // and the one the URL has open over the editor.
-  const { documents, failed: documentsFailed, reload: reloadDocuments } = useOwnerDocuments({ ticketId: ticket.id });
-  const docParam = useDocParam(documents);
-  const docOpen = docParam.selected !== null;
 
   // A document just created with New opens in edit mode. Remembered by id
   // until that document has opened and closed again, so opening it later
@@ -310,10 +314,12 @@ export default function TicketEditor({
 
   // Tell whoever owns the URL about unsaved edits, so a Back that drops the
   // `ticket` parameter keeps the editor mounted long enough to ask about them
-  // rather than unmounting it.
+  // rather than unmounting it. A document's unsaved text counts too: the
+  // editor unmounting would take the document with it.
+  const holding = dirty || docParam.dirty;
   useEffect(() => {
-    onDirtyChange?.(dirty);
-  }, [dirty, onDirtyChange]);
+    onDirtyChange?.(holding);
+  }, [holding, onDirtyChange]);
 
   // A close the URL asked for with nothing left to lose. Normally the owner of
   // the URL has already dropped the editor by the time this could run, since it
@@ -327,8 +333,8 @@ export default function TicketEditor({
     onCloseRef.current = onClose;
   }, [onClose]);
   useEffect(() => {
-    if (closeRequested && !dirty) onCloseRef.current();
-  }, [closeRequested, dirty]);
+    if (closeRequested && !holding) onCloseRef.current();
+  }, [closeRequested, holding]);
 
   const cancelDiscard = useCallback(() => {
     // Cancelling a close the URL asked for has to undo it as well, or the
@@ -905,8 +911,14 @@ export default function TicketEditor({
           ownerLabel={ticketKey}
           startEditing={editOnOpen?.id === docParam.selected.id}
           deleted={docParam.deleted}
-          closeRequested={docParam.closeRequested}
-          onCloseCancelled={docParam.cancelClose}
+          closeRequested={docParam.closeRequested || (docParam.dirty && !!closeRequested)}
+          onCloseCancelled={() => {
+            // Keep editing undoes every Back the question stood for: the
+            // ticket's parameter first (when a Back dropped it too), then the
+            // document's on top, so each is its own entry again.
+            if (closeRequested) onCloseCancelled?.();
+            docParam.cancelClose();
+          }}
           onDirtyChange={docParam.onDirtyChange}
           onClose={docParam.close}
           onRenamed={(doc) => {

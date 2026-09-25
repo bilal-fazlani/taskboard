@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { useEffect } from "react";
 import { BrowserRouter } from "react-router-dom";
 import type { Project, StatusChange, Subtask, Ticket } from "../api/client";
 
@@ -59,6 +60,7 @@ vi.mock("../hooks/useLiveRefresh", async () => {
 const fireLive = () => act(async () => live.listeners.forEach((l) => l()));
 
 import TicketEditor from "./TicketEditor";
+import { useTicketParam, type TicketParamState } from "../hooks/useTicketParam";
 
 const project: Project = {
   id: "p1",
@@ -1504,5 +1506,137 @@ describe("documents", () => {
     const subtasks = headings.indexOf("Subtasks");
     expect(headings.indexOf("Documents")).toBe(subtasks + 1);
     expect(headings.indexOf("Activity")).toBe(subtasks + 2);
+  });
+});
+
+// A view as the pages build it: useTicketParam owns the ticket parameter and
+// mounts the editor on what it selects, so Back acts on both.
+describe("Back with a document holding unsaved text", () => {
+  const spec = {
+    id: "d1",
+    name: "Design spec",
+    format: "markdown" as const,
+    size: 10,
+    revision: 1,
+    createdAt: "2026-09-25T09:00:00Z",
+    updatedAt: "2026-09-25T09:00:00Z",
+  };
+  const ticketA = makeTicket({ id: "t1", number: 7, title: "Ship login page" });
+  const ticketB = makeTicket({ id: "t2", number: 8, title: "Build login UI" });
+  let view: TicketParamState<Ticket>;
+
+  function View() {
+    const p = useTicketParam([ticketA, ticketB]);
+    useEffect(() => {
+      view = p;
+    });
+    return p.selected ? (
+      <TicketEditor
+        key={p.selected.id}
+        ticket={p.selected}
+        projects={[project]}
+        closeRequested={p.closeRequested}
+        onCloseCancelled={p.cancelClose}
+        onDirtyChange={p.onDirtyChange}
+        onClose={p.close}
+        onUpdate={vi.fn()}
+        onDelete={vi.fn()}
+        onOpenTicket={p.switchTo}
+      />
+    ) : null;
+  }
+
+  const params = () => new URLSearchParams(window.location.search);
+  const back = () =>
+    act(async () => {
+      window.history.back();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+  const content = () => screen.getByRole("textbox", { name: "Document content" }) as HTMLTextAreaElement;
+
+  async function editDocumentOn(open: () => void) {
+    await act(async () => open());
+    fireEvent.click(await screen.findByRole("button", { name: "Design spec.md" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    fireEvent.change(await screen.findByRole("textbox", { name: "Document content" }), { target: { value: "mine" } });
+  }
+
+  beforeEach(() => {
+    window.history.replaceState(null, "", "/?project=AUTH");
+    mockApi.documents.list.mockResolvedValue([spec]);
+    mockApi.documents.get.mockResolvedValue({ ...spec, content: "old" });
+  });
+
+  it("keeps the editor and the document through two Backs, asks, and Keep editing restores both", async () => {
+    render(<View />, { wrapper: BrowserRouter });
+    await editDocumentOn(() => view.open(ticketA));
+
+    await back();
+    expect(params().get("doc")).toBeNull();
+    expect(screen.getByRole("alertdialog", { name: "Discard your changes?" })).toBeTruthy();
+
+    await back();
+    expect(window.location.search).toBe("?project=AUTH");
+    expect(screen.getByRole("dialog", { name: "Design spec.md" })).toBeTruthy();
+    expect(screen.getByRole("alertdialog", { name: "Discard your changes?" })).toBeTruthy();
+    expect(content().value).toBe("mine");
+    // Only the document asks: the editor's own question stays down.
+    expect(screen.queryByRole("alertdialog", { name: "Discard unsaved changes?" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Keep editing" }));
+    await waitFor(() => expect(params().get("doc")).toBe("Design spec.md"));
+    expect(params().get("ticket")).toBe("AUTH-7");
+    expect(params().get("project")).toBe("AUTH");
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(content().value).toBe("mine");
+
+    // The restored entries behave like the originals: × on the editor, once
+    // the document is discarded, goes back to the view in one step.
+    await back();
+    await back();
+    fireEvent.click(screen.getByRole("button", { name: "Discard" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Design spec.md" })).toBeNull());
+    await waitFor(() => expect(view.selected).toBeNull());
+    expect(window.location.search).toBe("?project=AUTH");
+  });
+
+  it("keeps them when Back lands on another ticket, and Discard then shows that ticket", async () => {
+    render(<View />, { wrapper: BrowserRouter });
+    await act(async () => view.open(ticketA));
+    await editDocumentOn(() => view.switchTo("t2"));
+    expect(params().get("ticket")).toBe("AUTH-8");
+
+    await back();
+    await back();
+    expect(params().get("ticket")).toBe("AUTH-7");
+    expect(view.selected?.id).toBe("t2");
+    expect(screen.getByRole("dialog", { name: "Design spec.md" })).toBeTruthy();
+    expect(content().value).toBe("mine");
+
+    fireEvent.click(screen.getByRole("button", { name: "Keep editing" }));
+    await waitFor(() => expect(params().get("doc")).toBe("Design spec.md"));
+    expect(params().get("ticket")).toBe("AUTH-8");
+
+    await back();
+    await back();
+    fireEvent.click(screen.getByRole("button", { name: "Discard" }));
+    await waitFor(() => expect(view.selected?.id).toBe("t1"));
+    expect(screen.queryByRole("dialog", { name: "Design spec.md" })).toBeNull();
+    expect(params().get("ticket")).toBe("AUTH-7");
+    expect(params().get("doc")).toBeNull();
+  });
+
+  it("asks about the editor's own edits after the document's are discarded", async () => {
+    render(<View />, { wrapper: BrowserRouter });
+    await act(async () => view.open(ticketA));
+    fireEvent.change(screen.getByRole("textbox", { name: "Title" }), { target: { value: "Changed title" } });
+    await editDocumentOn(() => {});
+
+    await back();
+    await back();
+    fireEvent.click(screen.getByRole("button", { name: "Discard" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Design spec.md" })).toBeNull());
+    expect(await screen.findByRole("alertdialog", { name: "Discard unsaved changes?" })).toBeTruthy();
+    expect(view.selected?.id).toBe("t1");
   });
 });

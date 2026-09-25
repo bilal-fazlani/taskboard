@@ -8,6 +8,8 @@ import { useOverlayHistory } from "./useOverlayHistory";
 export interface DocParamState {
   /** The open document, or null. */
   selected: DocumentMeta | null;
+  /** The modal holds unsaved edits, as it last reported. */
+  dirty: boolean;
   /**
    * The open document left the list while it held unsaved edits: it was
    * deleted. It stays on screen so the modal can offer to save it anew.
@@ -195,6 +197,7 @@ export function useDocParam(documents: readonly DocumentMeta[] | null, ownerNoun
   // setDirty is stable, so the modal's report never re-runs on its own.
   return {
     selected,
+    dirty,
     deleted,
     closeRequested,
     notice,
