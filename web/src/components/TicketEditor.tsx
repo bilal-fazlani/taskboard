@@ -222,6 +222,16 @@ export default function TicketEditor({
   const docParam = useDocParam(documents);
   const docOpen = docParam.selected !== null;
 
+  // A document just created with New opens in edit mode. Remembered by id
+  // until that document has opened and closed again, so opening it later
+  // shows it as usual.
+  const [editOnOpen, setEditOnOpen] = useState<{ id: string; opened: boolean } | null>(null);
+  const openDocId = docParam.selected?.id ?? null;
+  if (editOnOpen) {
+    if (!editOnOpen.opened && openDocId === editOnOpen.id) setEditOnOpen({ ...editOnOpen, opened: true });
+    else if (editOnOpen.opened && openDocId !== editOnOpen.id) setEditOnOpen(null);
+  }
+
   // The full ticket, fetched on open and again whenever the ticket the editor
   // was handed changes — which is how an edit made elsewhere, arriving as a
   // live refresh with a newer `updatedAt`, reaches the editor.
@@ -689,6 +699,15 @@ export default function TicketEditor({
               onDismissNotice={docParam.dismissNotice}
               onOpen={docParam.open}
               onChanged={reloadDocuments}
+              owner={{ ticketId: ticket.id }}
+              onCreated={async (doc, edit) => {
+                // Wait for the list to carry it, so the URL can name it.
+                await reloadDocuments();
+                if (edit) {
+                  setEditOnOpen({ id: doc.id, opened: false });
+                  docParam.open(doc);
+                }
+              }}
             />
 
             {/* Last in this column. Agent requests and comments join this list as more kinds of entry. */}
@@ -878,9 +897,16 @@ export default function TicketEditor({
           sees the document's keys; the editor is inert while it is open. */}
       {docParam.selected && (
         <DocumentModal
+          key={docParam.selected.id}
           doc={docParam.selected}
           documents={documents ?? []}
+          owner={{ ticketId: ticket.id }}
           ownerLabel={ticketKey}
+          startEditing={editOnOpen?.id === docParam.selected.id}
+          deleted={docParam.deleted}
+          closeRequested={docParam.closeRequested}
+          onCloseCancelled={docParam.cancelClose}
+          onDirtyChange={docParam.onDirtyChange}
           onClose={docParam.close}
           onRenamed={(doc) => {
             docParam.renamed(doc);
@@ -889,6 +915,12 @@ export default function TicketEditor({
           onDeleted={() => {
             docParam.close();
             reloadDocuments();
+          }}
+          onRecreated={async (doc) => {
+            // The copy takes the old name: once the list carries it, the URL
+            // names it and the modal shows it.
+            await reloadDocuments();
+            docParam.renamed(doc);
           }}
         />
       )}

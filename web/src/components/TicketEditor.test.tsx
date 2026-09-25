@@ -25,6 +25,7 @@ const mockApi = vi.hoisted(() => ({
   },
   documents: {
     list: vi.fn(),
+    create: vi.fn(),
     get: vi.fn(),
     update: vi.fn(),
     delete: vi.fn(),
@@ -1350,6 +1351,69 @@ describe("documents", () => {
     fireEvent.keyDown(document.body, { key: "Escape" });
     expect(screen.queryByRole("textbox", { name: "Document name" })).toBeNull();
     expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("opens a new document straight into edit mode, and as usual the next time", async () => {
+    const created = { ...spec, id: "d9", name: "Rollout plan" };
+    mockApi.documents.list.mockResolvedValueOnce([]).mockResolvedValue([created]);
+    mockApi.documents.create.mockResolvedValue({ ...created, content: "" });
+    mockApi.documents.get.mockResolvedValue({ ...created, content: "" });
+    renderEditor();
+
+    fireEvent.click(await screen.findByRole("button", { name: "New document" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "Rollout plan" } });
+    fireEvent.submit(screen.getByRole("textbox", { name: "Name" }));
+
+    expect(await screen.findByRole("dialog", { name: "Rollout plan.md" })).toBeTruthy();
+    expect(await screen.findByRole("textbox", { name: "Document content" })).toBeTruthy();
+    expect(new URLSearchParams(window.location.search).get("doc")).toBe("Rollout plan.md");
+
+    fireEvent.click(screen.getByRole("button", { name: "Close document" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Rollout plan.md" })).toBeNull());
+    fireEvent.click(await screen.findByRole("button", { name: "Rollout plan.md" }));
+    expect(await screen.findByRole("button", { name: "Edit" })).toBeTruthy();
+    expect(screen.queryByRole("textbox", { name: "Document content" })).toBeNull();
+  });
+
+  it("uploads a document into the list without opening it", async () => {
+    const created = { ...spec, id: "d9", name: "notes" };
+    mockApi.documents.list.mockResolvedValueOnce([]).mockResolvedValue([created]);
+    mockApi.documents.create.mockResolvedValue({ ...created, content: "# x" });
+    renderEditor();
+    await screen.findByText("No documents yet.");
+    fireEvent.change(screen.getByLabelText("Upload a document"), { target: { files: [new File(["# x"], "notes.md")] } });
+    expect(await screen.findByRole("button", { name: "notes.md" })).toBeTruthy();
+    expect(screen.queryByRole("dialog", { name: "notes.md" })).toBeNull();
+  });
+
+  it("asks before Back drops a document with unsaved text, and Keep editing puts it back", async () => {
+    mockApi.documents.list.mockResolvedValue([spec]);
+    mockApi.documents.get.mockResolvedValue({ ...spec, content: "old" });
+    renderEditor();
+    fireEvent.click(await screen.findByRole("button", { name: "Design spec.md" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    fireEvent.change(await screen.findByRole("textbox", { name: "Document content" }), { target: { value: "mine" } });
+
+    await act(async () => {
+      window.history.back();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    expect(new URLSearchParams(window.location.search).get("doc")).toBeNull();
+    expect(await screen.findByRole("alertdialog", { name: "Discard your changes?" })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Keep editing" }));
+    await waitFor(() => expect(new URLSearchParams(window.location.search).get("doc")).toBe("Design spec.md"));
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect((screen.getByRole("textbox", { name: "Document content" }) as HTMLTextAreaElement).value).toBe("mine");
+
+    await act(async () => {
+      window.history.back();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Discard" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Design spec.md" })).toBeNull());
+    expect(new URLSearchParams(window.location.search).get("doc")).toBeNull();
+    expect(screen.queryByText("Design spec.md was deleted.")).toBeNull();
   });
 
   it("puts the Documents section between Subtasks and Activity", async () => {

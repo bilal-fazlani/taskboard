@@ -5,6 +5,7 @@ import type { DocumentMeta } from "../api/client";
 
 const mockApi = vi.hoisted(() => ({
   documents: {
+    create: vi.fn(),
     update: vi.fn(),
     delete: vi.fn(),
     downloadUrl: (id: string) => `/api/documents/${id}/download`,
@@ -24,6 +25,7 @@ function setup(documents: DocumentMeta[] | null = [spec, notes], extra: Partial<
   const onOpen = vi.fn();
   const onChanged = vi.fn();
   const onDismissNotice = vi.fn();
+  const onCreated = vi.fn();
   render(
     <DocumentsSection
       documents={documents}
@@ -32,10 +34,12 @@ function setup(documents: DocumentMeta[] | null = [spec, notes], extra: Partial<
       onDismissNotice={onDismissNotice}
       onOpen={onOpen}
       onChanged={onChanged}
+      owner={{ ticketId: "t1" }}
+      onCreated={onCreated}
       {...extra}
     />,
   );
-  return { onOpen, onChanged, onDismissNotice };
+  return { onOpen, onChanged, onDismissNotice, onCreated };
 }
 
 afterEach(() => {
@@ -58,9 +62,9 @@ describe("DocumentsSection", () => {
     expect(link.getAttribute("href")).toBe("/api/documents/d1/download");
   });
 
-  it("invites agents when there are none", () => {
+  it("says when there are none", () => {
     setup([]);
-    expect(screen.getByText("No documents yet. Agents can attach them.")).toBeTruthy();
+    expect(screen.getByText("No documents yet.")).toBeTruthy();
   });
 
   it("says when the documents could not be loaded", () => {
@@ -123,5 +127,90 @@ describe("DocumentsSection", () => {
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));
     await waitFor(() => expect(onChanged).toHaveBeenCalled());
     expect(mockApi.documents.delete).toHaveBeenCalledWith("d1");
+  });
+
+  it("creates a new document by name and asks to open it for editing", async () => {
+    const created = { ...spec, id: "d9", name: "Rollout plan", content: "" };
+    mockApi.documents.create.mockResolvedValue(created);
+    const { onCreated } = setup();
+    fireEvent.click(screen.getByRole("button", { name: "New document" }));
+    const dialog = screen.getByRole("dialog", { name: "New document" });
+    expect(dialog.textContent).toContain(".md");
+    const input = screen.getByRole("textbox", { name: "Name" });
+    fireEvent.submit(input);
+    expect(screen.getByRole("alert").textContent).toBe("Enter a name");
+    fireEvent.change(input, { target: { value: "Design spec" } });
+    fireEvent.submit(input);
+    expect(screen.getByRole("alert").textContent).toBe('This ticket already has a document called "Design spec.md".');
+    fireEvent.change(input, { target: { value: "plan.md" } });
+    fireEvent.submit(input);
+    expect(screen.getByRole("alert").textContent).toBe("Use letters, digits, spaces, _ and - only.");
+    expect(mockApi.documents.create).not.toHaveBeenCalled();
+
+    fireEvent.change(input, { target: { value: " Rollout plan " } });
+    fireEvent.submit(input);
+    await waitFor(() => expect(onCreated).toHaveBeenCalledWith(created, true));
+    expect(mockApi.documents.create).toHaveBeenCalledWith({ ticketId: "t1", name: "Rollout plan", format: "markdown", content: "" });
+    expect(screen.queryByRole("dialog", { name: "New document" })).toBeNull();
+  });
+
+  it("shows the server's reason when a new name was taken meanwhile", async () => {
+    mockApi.documents.create.mockRejectedValue(
+      new Error('API error 400: {"error":"This ticket already has a document called \\"Rollout plan.md\\"."}'),
+    );
+    const { onCreated } = setup();
+    fireEvent.click(screen.getByRole("button", { name: "New document" }));
+    const input = screen.getByRole("textbox", { name: "Name" });
+    fireEvent.change(input, { target: { value: "Rollout plan" } });
+    fireEvent.submit(input);
+    await waitFor(() =>
+      expect(screen.getByRole("alert").textContent).toBe('This ticket already has a document called "Rollout plan.md".'),
+    );
+    expect(onCreated).not.toHaveBeenCalled();
+  });
+
+  it("closes the new-document dialog on Cancel or Escape without creating anything", () => {
+    setup();
+    fireEvent.click(screen.getByRole("button", { name: "New document" }));
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "New document" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "New document" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog", { name: "New document" })).toBeNull();
+    expect(mockApi.documents.create).not.toHaveBeenCalled();
+  });
+
+  it("uploads a .md file under a name made from its filename", async () => {
+    const created = { ...spec, id: "d9", name: "api-design_v1 2", content: "# x" };
+    mockApi.documents.create.mockResolvedValue(created);
+    const { onCreated } = setup();
+    const file = new File(["# x"], "api-design_v1.2.md", { type: "text/markdown" });
+    fireEvent.change(screen.getByLabelText("Upload a document"), { target: { files: [file] } });
+    await waitFor(() => expect(onCreated).toHaveBeenCalledWith(created, false));
+    expect(mockApi.documents.create).toHaveBeenCalledWith({ ticketId: "t1", name: "api-design_v1 2", format: "markdown", content: "# x" });
+  });
+
+  it("refuses an upload of another type, or over 8 MB, without reading it or asking the server", async () => {
+    setup();
+    const txt = new File(["x"], "notes.txt");
+    const readTxt = vi.spyOn(txt, "text");
+    fireEvent.change(screen.getByLabelText("Upload a document"), { target: { files: [txt] } });
+    expect(await screen.findByText("Only .md files can be attached.")).toBeTruthy();
+
+    const big = new File(["x"], "big.md");
+    Object.defineProperty(big, "size", { value: 8 * 1024 * 1024 + 1 });
+    const readBig = vi.spyOn(big, "text");
+    fireEvent.change(screen.getByLabelText("Upload a document"), { target: { files: [big] } });
+    expect(await screen.findByText("This document is 8.1 MB. The limit is 8 MB.")).toBeTruthy();
+    expect(readTxt).not.toHaveBeenCalled();
+    expect(readBig).not.toHaveBeenCalled();
+    expect(mockApi.documents.create).not.toHaveBeenCalled();
+  });
+
+  it("shows the server's reason when an upload is refused", async () => {
+    mockApi.documents.create.mockRejectedValue(new Error('API error 400: {"error":"This ticket already has a document called \\"Notes.md\\"."}'));
+    setup();
+    fireEvent.change(screen.getByLabelText("Upload a document"), { target: { files: [new File(["x"], "notes.md")] } });
+    expect(await screen.findByText('This ticket already has a document called "Notes.md".')).toBeTruthy();
   });
 });
