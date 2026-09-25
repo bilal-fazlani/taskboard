@@ -102,7 +102,11 @@ export interface StatusChange {
   createdAt: string;
 }
 
-export type DocumentFormat = "markdown" | "html";
+/** The formats a document holding text may have. */
+export type TextDocumentFormat = "markdown" | "html";
+/** The image formats (internal/models/document.go); images are uploaded as files. */
+export type ImageDocumentFormat = "png" | "jpeg" | "gif" | "webp";
+export type DocumentFormat = TextDocumentFormat | ImageDocumentFormat;
 
 /** A document without its content, as lists carry it. size is in bytes. */
 export interface DocumentMeta {
@@ -113,6 +117,9 @@ export interface DocumentMeta {
   name: string;
   format: DocumentFormat;
   size: number;
+  /** An image's size in pixels, as shown; absent for text documents. */
+  width?: number;
+  height?: number;
   /** Counts content saves; a rename leaves it alone. */
   revision: number;
   createdAt: string;
@@ -275,7 +282,7 @@ export const api = {
       ),
     get: (id: string) => request<DocumentWithContent>(`/api/documents/${encodeURIComponent(id)}`),
     /** Add a document; a refused name or an unknown owner is a 400 with the store's message. */
-    create: (data: DocumentOwnerRef & { name: string; format: DocumentFormat; content: string }) =>
+    create: (data: DocumentOwnerRef & { name: string; format: TextDocumentFormat; content: string }) =>
       request<DocumentWithContent>("/api/documents", { method: "POST", body: JSON.stringify(data) }),
     /**
      * Rename and/or replace the content. With `expectedRevision`, a content

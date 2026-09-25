@@ -62,6 +62,16 @@ describe("DocumentsSection", () => {
     expect(link.getAttribute("href")).toBe("/api/documents/d1/download");
   });
 
+  it("names an image with its extension and downloads it under that name", () => {
+    const photo: DocumentMeta = { ...spec, id: "d3", name: "Holiday photo", format: "jpeg", size: 45 * 1024, width: 800, height: 1200 };
+    const { onOpen } = setup([spec, photo]);
+    fireEvent.click(screen.getByRole("button", { name: "Holiday photo.jpg" }));
+    expect(onOpen).toHaveBeenCalledWith(photo);
+    const link = screen.getByRole("link", { name: "Download Holiday photo.jpg" });
+    expect(link.getAttribute("href")).toBe("/api/documents/d3/download");
+    expect(link.getAttribute("download")).toBe("Holiday photo.jpg");
+  });
+
   it("says when there are none", () => {
     setup([]);
     expect(screen.getByText("No documents yet.")).toBeTruthy();

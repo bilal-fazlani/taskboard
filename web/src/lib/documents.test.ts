@@ -9,6 +9,7 @@ import {
   findDocument,
   formatSize,
   isNotFound,
+  isTextFormat,
   nameFromFilename,
   ownerKey,
   withDoc,
@@ -23,6 +24,40 @@ describe("displayName", () => {
   it("adds the format's extension", () => {
     expect(displayName(doc("1", "Design spec"))).toBe("Design spec.md");
     expect(displayName(doc("2", "Report", "html"))).toBe("Report.html");
+  });
+
+  it("names images as the server does, a JPEG as .jpg", () => {
+    expect(displayName(doc("3", "Login screen", "png"))).toBe("Login screen.png");
+    expect(displayName(doc("4", "Holiday photo", "jpeg"))).toBe("Holiday photo.jpg");
+    expect(displayName(doc("5", "Spinner", "gif"))).toBe("Spinner.gif");
+    expect(displayName(doc("6", "Mock", "webp"))).toBe("Mock.webp");
+  });
+});
+
+describe("images and the doc parameter", () => {
+  const docs = [doc("1", "Plan"), doc("2", "Login screen", "png"), doc("3", "Holiday photo", "jpeg")];
+
+  it("finds an image by the name the server's links carry", () => {
+    // weburl.TicketDocument puts the display name in `doc`, e.g. doc=Holiday+photo.jpg.
+    const params = new URLSearchParams("ticket=ACP-1&doc=Holiday+photo.jpg");
+    expect(findDocument(docs, params.get("doc")!)?.id).toBe("3");
+    expect(findDocument(docs, "login screen.PNG")?.id).toBe("2");
+    expect(findDocument(docs, "Login screen.md")).toBeUndefined();
+  });
+
+  it("links to an image by its display name", () => {
+    expect(withDoc(new URLSearchParams("ticket=ACP-1"), docs[1]).get("doc")).toBe("Login screen.png");
+  });
+
+  it("tells text formats from images", () => {
+    expect(["markdown", "html", "png", "jpeg", "gif", "webp"].map((f) => isTextFormat(f as DocumentMeta["format"]))).toEqual([
+      true,
+      true,
+      false,
+      false,
+      false,
+      false,
+    ]);
   });
 });
 

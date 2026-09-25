@@ -3,7 +3,15 @@ import { Download, Eye, Pencil, Trash2, X } from "lucide-react";
 import Markdown from "react-markdown";
 import { api, type DocumentMeta, type DocumentOwnerRef, type DocumentWithContent } from "../api/client";
 import { activityTime } from "../lib/activity";
-import { conflictDocument, contentTooLarge, displayName, DOCUMENT_SANDBOX, formatSize, isNotFound } from "../lib/documents";
+import {
+  conflictDocument,
+  contentTooLarge,
+  displayName,
+  DOCUMENT_SANDBOX,
+  formatSize,
+  isNotFound,
+  isTextFormat,
+} from "../lib/documents";
 import { serverMessage } from "../lib/epics";
 import { useEscape } from "../lib/escapeStack";
 import DeleteDocumentConfirm from "./DeleteDocumentConfirm";
@@ -241,7 +249,8 @@ export default function DocumentModal({
     stopEditing();
   };
   const saveAsNew = async () => {
-    if (saving) return;
+    // Only a text document is edited, so only one is saved again.
+    if (saving || !isTextFormat(doc.format)) return;
     const tooLarge = contentTooLarge(draft);
     if (tooLarge) {
       setSaveError(tooLarge);

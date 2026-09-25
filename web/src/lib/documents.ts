@@ -1,7 +1,7 @@
 // The document rules the web UI checks before it asks the server, worded
 // exactly as the server words them (internal/db/documents.go), plus the `doc`
 // query parameter that names the open document.
-import type { DocumentFormat, DocumentMeta, DocumentOwnerRef, DocumentWithContent } from "../api/client";
+import type { DocumentFormat, DocumentMeta, DocumentOwnerRef, DocumentWithContent, TextDocumentFormat } from "../api/client";
 
 /** The query parameter naming the open document by its display name. */
 export const DOC_PARAM = "doc";
@@ -13,8 +13,23 @@ const MAX_NAME_LENGTH = 200;
 // underscore and hyphen: Go's unicode.IsLetter/IsMark/IsDigit.
 const NAME_CHAR = /^[\p{L}\p{M}\p{Nd} _-]$/u;
 
+const EXTENSIONS: Record<DocumentFormat, string> = {
+  markdown: ".md",
+  html: ".html",
+  png: ".png",
+  jpeg: ".jpg",
+  gif: ".gif",
+  webp: ".webp",
+};
+
+/** The extension a format shows with, as the server has it (models.DocumentExtension): a JPEG is ".jpg". */
 export function extensionFor(format: DocumentFormat): string {
-  return format === "html" ? ".html" : ".md";
+  return EXTENSIONS[format] ?? ".md";
+}
+
+/** Whether a format holds text (markdown or HTML) rather than an image. */
+export function isTextFormat(format: DocumentFormat): format is TextDocumentFormat {
+  return format === "markdown" || format === "html";
 }
 
 /** How a document is shown, linked and downloaded: "Design spec.md". */
@@ -77,7 +92,7 @@ export function ownerKey(owner: DocumentOwnerRef): string {
   return "ticketId" in owner ? `ticket:${owner.ticketId}` : `epic:${owner.epicId}`;
 }
 
-const FORMAT_BY_EXTENSION: Record<string, DocumentFormat> = { ".md": "markdown", ".html": "html", ".htm": "html" };
+const FORMAT_BY_EXTENSION: Record<string, TextDocumentFormat> = { ".md": "markdown", ".html": "html", ".htm": "html" };
 const EXTENSION_MESSAGE = "Only .md, .html and .htm files can be attached.";
 
 /** What the upload's file picker offers. */
@@ -97,7 +112,7 @@ export const DOCUMENT_SANDBOX = "allow-scripts";
  * (DocumentNameFromFilename): the extension picks the format and goes, and
  * every character the name rules refuse becomes a space.
  */
-export function nameFromFilename(filename: string): { name: string; format: DocumentFormat } | { error: string } {
+export function nameFromFilename(filename: string): { name: string; format: TextDocumentFormat } | { error: string } {
   const base = filename.split(/[\\/]/).pop() ?? "";
   const dot = base.lastIndexOf(".");
   const format = dot >= 0 ? FORMAT_BY_EXTENSION[base.slice(dot).toLowerCase()] : undefined;
