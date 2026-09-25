@@ -20,7 +20,7 @@ import { useImageStepping } from "../hooks/useImageStepping";
 import DeleteDocumentConfirm from "./DeleteDocumentConfirm";
 import DiscardChangesConfirm from "./DiscardChangesConfirm";
 import DocumentRenameField from "./DocumentRenameField";
-import ImageView, { ImageViewerControls, type ImageZoom } from "./ImageViewer";
+import ImageView, { ImageViewerControls, ImageViewerFooter, type ImageZoom } from "./ImageViewer";
 
 // The HTML document's frame is in the Tab order, so the keyboard can reach
 // and scroll the page.
@@ -134,7 +134,8 @@ export default function DocumentModal({
   const images = useMemo(() => imagesOf(documents), [documents]);
   const [zoomed, setZoomed] = useState<{ id: string; zoom: ImageZoom } | null>(null);
   const zoom: ImageZoom = zoomed?.id === doc.id ? zoomed.zoom : "fit";
-  useImageStepping(image ? doc : null, images, onStep, renaming || deleting || asking);
+  const stepPaused = renaming || deleting || asking;
+  useImageStepping(image ? doc : null, images, onStep, stepPaused);
 
   // The fetch reads these without re-running on each keystroke.
   const editingRef = useRef(editing);
@@ -315,7 +316,7 @@ export default function DocumentModal({
   const writing = editing && base !== null && mode === "write";
   let body: React.ReactNode;
   if (image) {
-    body = <ImageView doc={doc} zoom={zoom} />;
+    body = <ImageView doc={doc} zoom={zoom} images={images} onStep={onStep} paused={stepPaused} />;
   } else if (!editable) {
     body = (
       <iframe
@@ -505,6 +506,7 @@ export default function DocumentModal({
         >
           {body}
         </div>
+        {image && <ImageViewerFooter images={images} ownerNoun={ownerNoun} />}
         {doc.format === "html" && (
           // Tab inside the frame never reaches trapTab (its keys stay in the
           // page), so leaving the page's last control lands here and wraps

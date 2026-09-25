@@ -1875,6 +1875,26 @@ describe("image documents", () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
+  it("steps with the previous and next buttons in place of the open one, and × closes in one press", async () => {
+    await openFirst();
+    const length = window.history.length;
+    const viewer = screen.getByRole("dialog", { name: "One.png" });
+    fireEvent.click(within(viewer).getByRole("button", { name: "Next image" }));
+    expect(await screen.findByRole("dialog", { name: "Two.jpg" })).toBe(viewer);
+    fireEvent.click(within(viewer).getByRole("button", { name: "Next image" }));
+    expect(await screen.findByRole("dialog", { name: "Three.gif" })).toBe(viewer);
+    expect(within(viewer).getByRole("button", { name: "Next image" }).getAttribute("aria-disabled")).toBe("true");
+    fireEvent.click(within(viewer).getByRole("button", { name: "Previous image" }));
+    expect(await screen.findByRole("dialog", { name: "Two.jpg" })).toBe(viewer);
+    expect(docParam()).toBe("Two.jpg");
+    expect(window.history.length).toBe(length);
+    expect(within(viewer).getByTestId("image-hint").textContent).toBe("← → move between this ticket's images · Esc closes · Back closes");
+
+    fireEvent.click(within(viewer).getByRole("button", { name: "Close document" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Two.jpg" })).toBeNull());
+    expect(docParam()).toBeNull();
+  });
+
   it("closes on one Back after stepping", async () => {
     await openFirst();
     fireEvent.keyDown(document.body, { key: "ArrowRight" });

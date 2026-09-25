@@ -220,3 +220,82 @@ describe("stepping with ← and →", () => {
     expect(onStep).not.toHaveBeenCalled();
   });
 });
+
+describe("previous and next buttons, and the hint", () => {
+  const button = (name: string) => screen.getByRole("button", { name }) as HTMLButtonElement;
+
+  it("step to the previous and next image, in the Tab order", () => {
+    const { onStep } = setup(photo);
+    for (const name of ["Previous image", "Next image"]) {
+      expect(button(name).disabled).toBe(false);
+      expect(button(name).tabIndex).toBe(0);
+      expect(button(name).getAttribute("aria-disabled")).toBeNull();
+    }
+    fireEvent.click(button("Next image"));
+    expect(onStep).toHaveBeenLastCalledWith(spinner);
+    fireEvent.click(button("Previous image"));
+    expect(onStep).toHaveBeenLastCalledWith(login);
+    expect(onStep).toHaveBeenCalledTimes(2);
+  });
+
+  it("are disabled, but keep their place and focus, at the first and last image", () => {
+    const first = setup(login);
+    expect(button("Previous image").getAttribute("aria-disabled")).toBe("true");
+    expect(button("Next image").getAttribute("aria-disabled")).toBeNull();
+    button("Previous image").focus();
+    fireEvent.click(button("Previous image"));
+    expect(first.onStep).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(button("Previous image"));
+    cleanup();
+
+    const last = setup(spinner);
+    expect(button("Next image").getAttribute("aria-disabled")).toBe("true");
+    fireEvent.click(button("Next image"));
+    expect(last.onStep).not.toHaveBeenCalled();
+  });
+
+  it("keep focus on the button when a step lands on the last image", () => {
+    const { rerender, onStep } = setup(photo);
+    button("Next image").focus();
+    fireEvent.click(button("Next image"));
+    rerender({ doc: onStep.mock.calls[0][0] });
+    expect(screen.getByRole("dialog", { name: "Spinner.gif" })).toBeTruthy();
+    expect(document.activeElement).toBe(button("Next image"));
+    expect(button("Next image").getAttribute("aria-disabled")).toBe("true");
+  });
+
+  it("do nothing while the rename field is open", () => {
+    const { onStep } = setup(photo);
+    fireEvent.click(screen.getByRole("button", { name: "Rename Holiday photo.jpg" }));
+    expect(button("Next image").getAttribute("aria-disabled")).toBe("true");
+    fireEvent.click(button("Next image"));
+    expect(onStep).not.toHaveBeenCalled();
+  });
+
+  it("are not there for a lone image, or without a way to step", () => {
+    render(
+      <DocumentModal doc={login} documents={[spec, login]} owner={{ ticketId: "t1" }} ownerLabel="ACP-84"
+        onClose={vi.fn()} onRenamed={vi.fn()} onDeleted={vi.fn()} onRecreated={vi.fn()} onStep={vi.fn()} />,
+    );
+    expect(screen.queryByRole("button", { name: "Next image" })).toBeNull();
+    expect(screen.getByTestId("image-hint").textContent).toBe("Esc closes · Back closes");
+    cleanup();
+    setup(photo, { onStep: undefined });
+    expect(screen.queryByRole("button", { name: "Previous image" })).toBeNull();
+  });
+
+  it("says how to move between the ticket's images, or the epic's", () => {
+    setup(photo);
+    expect(screen.getByTestId("image-hint").textContent).toBe("← → move between this ticket's images · Esc closes · Back closes");
+    cleanup();
+    setup(photo, { owner: { epicId: "e1" }, ownerNoun: "epic" });
+    expect(screen.getByTestId("image-hint").textContent).toBe("← → move between this epic's images · Esc closes · Back closes");
+  });
+
+  it("is not shown for a text document", () => {
+    mockApi.documents.get.mockResolvedValue({ ...spec, content: "x" });
+    setup(spec);
+    expect(screen.queryByTestId("image-hint")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Next image" })).toBeNull();
+  });
+});

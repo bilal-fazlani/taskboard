@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import type { DocumentMeta } from "../api/client";
+import { adjacentImage } from "../lib/documents";
 
 function typingIn(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
@@ -23,9 +24,7 @@ export function useImageStepping(
       if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
       if (e.defaultPrevented || e.isComposing || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
       if (typingIn(e.target)) return;
-      const index = images.findIndex((d) => d.id === current.id);
-      if (index < 0) return;
-      const next = images[index + (e.key === "ArrowRight" ? 1 : -1)];
+      const next = adjacentImage(current, images, e.key === "ArrowRight" ? 1 : -1);
       if (!next) return;
       e.preventDefault();
       onStep(next);

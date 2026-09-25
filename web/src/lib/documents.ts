@@ -61,6 +61,13 @@ export function imagePosition(doc: Pick<DocumentMeta, "id">, images: readonly Pi
   return `${index + 1} of ${images.length} ${images.length === 1 ? "image" : "images"}`;
 }
 
+/** The image `offset` places from `doc` among the owner's (-1 before, 1 after), or null past either end. */
+export function adjacentImage<T extends Pick<DocumentMeta, "id">>(doc: Pick<DocumentMeta, "id">, images: readonly T[], offset: number): T | null {
+  const index = images.findIndex((d) => d.id === doc.id);
+  if (index < 0) return null;
+  return images[index + offset] ?? null;
+}
+
 /**
  * The key the document window is mounted under. Every image shares one, so
  * stepping from image to image with ← and → keeps the window (and its focus)
