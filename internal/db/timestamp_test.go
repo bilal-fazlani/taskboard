@@ -11,12 +11,13 @@ import (
 )
 
 // rawColumn reads a created_at/updated_at column's stored bytes directly.
-// "|| ''" turns the result into a plain expression with no declared column
-// type, so modernc.org/sqlite returns the stored bytes as they are instead
-// of parsing them into a time.Time and reformatting that with Go's
-// trailing-zero-trimming RFC3339Nano (what a bare "SELECT col" would do for
-// a DATETIME column scanned into a *string): see conn.go's parseTime and
-// convertAssign in the driver.
+// Concatenating an empty string onto the column turns the result into a
+// plain expression with no declared column type, so modernc.org/sqlite
+// returns the stored bytes as they are instead of parsing them into a
+// time.Time and reformatting that with Go's trailing-zero-trimming
+// RFC3339Nano (what a bare "SELECT col" would do for a DATETIME column
+// scanned into a *string): see conn.go's parseTime and convertAssign in the
+// driver.
 func rawColumn(t *testing.T, database *sql.DB, table, col, id string) string {
 	t.Helper()
 	var raw string
