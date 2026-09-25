@@ -7,6 +7,7 @@ import type {
   DocumentOwnerRef,
   DocumentWithContent,
   ImageDocumentFormat,
+  ImagePlace,
   TextDocumentFormat,
 } from "../api/client";
 
@@ -214,4 +215,22 @@ export function contentTooLarge(content: string): string | null {
 export function tooLargeMessage(bytes: number, format?: DocumentFormat): string {
   const what = format && isImageFormat(format) ? "image" : "document";
   return `This ${what} is ${formatSize(bytes)}. The limit is 8 MB.`;
+}
+
+/** How a place that uses an image is named: "the description" or "Plan.md". */
+export function placeLabel(place: ImagePlace): string {
+  return place.kind === "description" ? "the description" : place.name;
+}
+
+/**
+ * What deleting an image in use does, for its delete confirm: "It's used in
+ * 2 places: the description and Plan.md. They'll show a missing image."
+ * Null when nothing uses it.
+ */
+export function imageUsageWarning(places: readonly ImagePlace[]): string | null {
+  if (places.length === 0) return null;
+  const labels = places.map(placeLabel);
+  const list = labels.length === 1 ? labels[0] : `${labels.slice(0, -1).join(", ")} and ${labels[labels.length - 1]}`;
+  const one = places.length === 1;
+  return `It's used in ${places.length} ${one ? "place" : "places"}: ${list}. ${one ? "It'll" : "They'll"} show a missing image.`;
 }

@@ -11,11 +11,13 @@ import {
   formatSize,
   imageDimensions,
   imagesOf,
+  imageUsageWarning,
   isImageFormat,
   isNotFound,
   isTextFormat,
   nameFromFilename,
   ownerKey,
+  placeLabel,
   tooLargeMessage,
   withDoc,
   withoutDoc,
@@ -225,5 +227,23 @@ describe("contentTooLarge", () => {
     expect(contentTooLarge("x".repeat(8 * 1024 * 1024 + 1))).toBe("This document is 8.1 MB. The limit is 8 MB.");
     // Four bytes each in UTF-8, though two UTF-16 units.
     expect(contentTooLarge("😀".repeat(2 * 1024 * 1024 + 1))).toBe("This document is 8.1 MB. The limit is 8 MB.");
+  });
+});
+
+describe("imageUsageWarning", () => {
+  const description = { kind: "description" } as const;
+  const plan = { kind: "document", documentId: "d1", name: "Plan.md" } as const;
+  const page = { kind: "document", documentId: "d2", name: "Page.html" } as const;
+
+  it("names the places, as the delete confirm says them", () => {
+    expect(imageUsageWarning([])).toBeNull();
+    expect(imageUsageWarning([plan])).toBe("It's used in 1 place: Plan.md. It'll show a missing image.");
+    expect(imageUsageWarning([description, plan])).toBe(
+      "It's used in 2 places: the description and Plan.md. They'll show a missing image.",
+    );
+    expect(imageUsageWarning([description, plan, page])).toBe(
+      "It's used in 3 places: the description, Plan.md and Page.html. They'll show a missing image.",
+    );
+    expect(placeLabel(description)).toBe("the description");
   });
 });

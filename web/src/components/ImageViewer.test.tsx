@@ -9,6 +9,7 @@ const mockApi = vi.hoisted(() => ({
     get: vi.fn(),
     update: vi.fn(),
     delete: vi.fn(),
+    usage: vi.fn(),
     downloadUrl: (id: string) => `/api/documents/${id}/download`,
     rawUrl: (id: string, revision: number) => `/api/documents/${id}/raw?rev=${revision}`,
     imageUrl: (id: string, revision: number) => `/api/documents/${id}/image?rev=${revision}`,
@@ -126,14 +127,37 @@ describe("image viewer", () => {
 
   it("deletes from the header after asking", async () => {
     mockApi.documents.delete.mockResolvedValue(undefined);
+    mockApi.documents.usage.mockResolvedValue({ places: [] });
     const { onDeleted, onClose } = setup();
     fireEvent.click(screen.getByRole("button", { name: "Delete Holiday photo.jpg" }));
     const confirm = screen.getByRole("alertdialog");
     expect(within(confirm).getByText("Delete Holiday photo.jpg?")).toBeTruthy();
-    fireEvent.click(within(confirm).getByRole("button", { name: "Delete" }));
+    const del = within(confirm).getByRole("button", { name: "Delete" }) as HTMLButtonElement;
+    await waitFor(() => expect(del.disabled).toBe(false));
+    expect(confirm.textContent).not.toContain("used in");
+    fireEvent.click(del);
     await waitFor(() => expect(onDeleted).toHaveBeenCalledTimes(1));
     expect(mockApi.documents.delete).toHaveBeenCalledWith("i2");
     expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("names the places that use the image before deleting it", async () => {
+    mockApi.documents.delete.mockResolvedValue(undefined);
+    mockApi.documents.usage.mockResolvedValue({
+      places: [{ kind: "description" }, { kind: "document", documentId: "d1", name: "Design spec.md" }],
+    });
+    const { onDeleted } = setup(login);
+    fireEvent.click(screen.getByRole("button", { name: "Delete Login screen.png" }));
+    const confirm = screen.getByRole("alertdialog");
+    await waitFor(() =>
+      expect(confirm.textContent).toBe(
+        "Delete Login screen.png?It's used in 2 places: the description and Design spec.md. They'll show a missing image. This can't be undone.CancelDelete",
+      ),
+    );
+    expect(mockApi.documents.usage).toHaveBeenCalledWith("i1");
+    fireEvent.click(within(confirm).getByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(onDeleted).toHaveBeenCalledTimes(1));
+    expect(mockApi.documents.delete).toHaveBeenCalledWith("i1");
   });
 
   it("closes on ×, Escape and the scrim", () => {

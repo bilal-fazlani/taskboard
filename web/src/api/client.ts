@@ -130,6 +130,13 @@ export interface DocumentWithContent extends DocumentMeta {
   content: string;
 }
 
+/**
+ * A place in an owner's text that uses one of its images: the ticket's
+ * description, or one of the owner's markdown or HTML documents (by id and
+ * display name, "Plan.md").
+ */
+export type ImagePlace = { kind: "description" } | { kind: "document"; documentId: string; name: string };
+
 /** What a document belongs to: one ticket or one epic. */
 export type DocumentOwnerRef = { ticketId: string } | { epicId: string };
 
@@ -315,6 +322,11 @@ export const api = {
     },
     /** An image's file; a new revision is a new URL, so an agent's replace shows at once. */
     imageUrl: (id: string, revision: number) => `/api/documents/${encodeURIComponent(id)}/image?rev=${revision}`,
+    /**
+     * Where an image is used in its owner's text, worked out from the text
+     * now: the description and the documents whose references name it.
+     */
+    usage: (id: string) => request<{ places: ImagePlace[] }>(`/api/documents/${encodeURIComponent(id)}/usage`),
     /** An image's small thumbnail, by revision as imageUrl is. */
     thumbnailUrl: (id: string, revision: number) => `/api/documents/${encodeURIComponent(id)}/thumbnail?rev=${revision}`,
     /**

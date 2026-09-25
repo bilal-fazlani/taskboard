@@ -31,6 +31,7 @@ const mockApi = vi.hoisted(() => ({
     update: vi.fn(),
     delete: vi.fn(),
     createImage: vi.fn(),
+    usage: vi.fn(),
     downloadUrl: (id: string) => `/api/documents/${id}/download`,
     imageUrl: (id: string, revision: number) => `/api/documents/${id}/image?rev=${revision}`,
     thumbnailUrl: (id: string, revision: number) => `/api/documents/${id}/thumbnail?rev=${revision}`,
@@ -1035,6 +1036,55 @@ describe("description", () => {
     fireEvent.click(screen.getByRole("button", { name: "Preview" }));
     await waitFor(() => expect(srcs()).toEqual([shotSrc, "https://example.com/logo.png"]));
     expect(screen.getByTestId("missing-image").textContent).toBe("Missing image: Elsewhere.png");
+  });
+
+  // Renaming an image rewrites the description on the server and moves the
+  // ticket's updatedAt; the live refresh brings both the renamed image and
+  // the rewritten ticket.
+  async function renameShotElsewhere(rerenderWith: (props: { ticket?: Ticket }) => void) {
+    const renamed = { ...shot, name: "Home page" };
+    const rewritten = makeTicket({ description: "![a](Home page.png)", updatedAt: "2026-09-25T10:00:00Z" });
+    mockApi.documents.list.mockResolvedValue([renamed]);
+    mockApi.tickets.get.mockResolvedValue(rewritten);
+    await fireLive();
+    await act(async () => rerenderWith({ ticket: rewritten }));
+  }
+
+  it("shows a description an image rename rewrote, quietly when nothing is unsaved", async () => {
+    mockApi.documents.list.mockResolvedValue([shot]);
+    const described = makeTicket({ description: "![a](Login screen.png)", updatedAt: "2026-09-25T09:00:00Z" });
+    mockApi.tickets.get.mockResolvedValue(described);
+    const { rerenderWith } = renderEditor(described);
+    await waitFor(() => expect(srcs()).toEqual([shotSrc]));
+
+    await renameShotElsewhere(rerenderWith);
+    await waitFor(() => expect(srcs()).toEqual([shotSrc]));
+    expect(screen.queryByTestId("missing-image")).toBeNull();
+    expect(screen.queryByTestId("ticket-changed-notice")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Write" }));
+    expect((screen.getByLabelText("Description") as HTMLTextAreaElement).value).toBe("![a](Home page.png)");
+  });
+
+  it("says the ticket changed when an image rename rewrote the description under unsaved edits", async () => {
+    mockApi.documents.list.mockResolvedValue([shot]);
+    const described = makeTicket({ description: "![a](Login screen.png)", updatedAt: "2026-09-25T09:00:00Z" });
+    mockApi.tickets.get.mockResolvedValue(described);
+    const { rerenderWith } = renderEditor(described);
+    await waitFor(() => expect(srcs()).toEqual([shotSrc]));
+    fireEvent.click(screen.getByRole("button", { name: "Write" }));
+    fireEvent.change(screen.getByLabelText("Description"), { target: { value: "![a](Login screen.png) and more" } });
+
+    await renameShotElsewhere(rerenderWith);
+    await waitFor(() => expect(screen.getByTestId("ticket-changed-notice").textContent).toContain("This ticket changed"));
+    // The edits stay; their old name no longer finds the image.
+    expect((screen.getByLabelText("Description") as HTMLTextAreaElement).value).toBe("![a](Login screen.png) and more");
+    fireEvent.click(screen.getByRole("button", { name: "Preview" }));
+    await waitFor(() => expect(screen.getByTestId("missing-image").textContent).toBe("Missing image: Login screen.png"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Reload" }));
+    fireEvent.click(within(confirmDialog()!).getByRole("button", { name: "Discard" }));
+    await waitFor(() => expect(srcs()).toEqual([shotSrc]));
+    expect(screen.queryByTestId("ticket-changed-notice")).toBeNull();
   });
 });
 
@@ -2070,8 +2120,11 @@ describe("image documents", () => {
     await openFirst();
     mockApi.documents.delete.mockResolvedValue(undefined);
     mockApi.documents.list.mockResolvedValue([two, three]);
+    mockApi.documents.usage.mockResolvedValue({ places: [] });
     fireEvent.click(within(screen.getByRole("dialog", { name: "One.png" })).getByRole("button", { name: "Delete One.png" }));
-    fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Delete" }));
+    const del = within(screen.getByRole("alertdialog")).getByRole("button", { name: "Delete" }) as HTMLButtonElement;
+    await waitFor(() => expect(del.disabled).toBe(false));
+    fireEvent.click(del);
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "One.png" })).toBeNull());
     expect(mockApi.documents.delete).toHaveBeenCalledWith("i1");
     await waitFor(() => expect(screen.queryByRole("button", { name: "One.png" })).toBeNull());

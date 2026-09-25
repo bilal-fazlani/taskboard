@@ -9,6 +9,7 @@ const mockApi = vi.hoisted(() => ({
     createImage: vi.fn(),
     update: vi.fn(),
     delete: vi.fn(),
+    usage: vi.fn(),
     downloadUrl: (id: string) => `/api/documents/${id}/download`,
     thumbnailUrl: (id: string, revision: number) => `/api/documents/${id}/thumbnail?rev=${revision}`,
   },
@@ -139,6 +140,8 @@ describe("DocumentsSection", () => {
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));
     await waitFor(() => expect(onChanged).toHaveBeenCalled());
     expect(mockApi.documents.delete).toHaveBeenCalledWith("d1");
+    // Only an image is looked for in the owner's text.
+    expect(mockApi.documents.usage).not.toHaveBeenCalled();
   });
 
   it("creates a new document by name and asks to open it for editing", async () => {
@@ -282,10 +285,51 @@ describe("DocumentsSection", () => {
       await waitFor(() => expect(mockApi.documents.update).toHaveBeenCalledWith("d5", { name: "Sign in" }));
       await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1));
 
+      mockApi.documents.usage.mockResolvedValue({ places: [] });
       fireEvent.click(screen.getByRole("button", { name: "Delete Login screen.png" }));
-      fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Delete" }));
+      const del = within(screen.getByRole("alertdialog")).getByRole("button", { name: "Delete" }) as HTMLButtonElement;
+      await waitFor(() => expect(del.disabled).toBe(false));
+      fireEvent.click(del);
       await waitFor(() => expect(mockApi.documents.delete).toHaveBeenCalledWith("d5"));
       await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(2));
+    });
+
+    it("warns, before deleting an image, where its owner's text uses it", async () => {
+      let answer: (value: unknown) => void = () => {};
+      mockApi.documents.usage.mockReturnValue(new Promise((resolve) => (answer = resolve)));
+      mockApi.documents.delete.mockResolvedValue(undefined);
+      const { onChanged } = setup([spec, shot]);
+      fireEvent.click(screen.getByRole("button", { name: "Delete Login screen.png" }));
+      const dialog = screen.getByRole("alertdialog");
+      const del = within(dialog).getByRole("button", { name: "Delete" }) as HTMLButtonElement;
+      // Delete waits for the answer.
+      expect(del.disabled).toBe(true);
+      await waitFor(() => expect(mockApi.documents.usage).toHaveBeenCalledWith("d5"));
+      expect(del.disabled).toBe(true);
+      answer({ places: [{ kind: "description" }, { kind: "document", documentId: "d9", name: "Plan.md" }] });
+      await waitFor(() => expect(del.disabled).toBe(false));
+      expect(within(dialog).getByRole("heading").textContent).toBe("Delete Login screen.png?");
+      const desc = document.getElementById(dialog.getAttribute("aria-describedby") ?? "");
+      expect(desc?.textContent).toBe(
+        "It's used in 2 places: the description and Plan.md. They'll show a missing image. This can't be undone.",
+      );
+      fireEvent.click(del);
+      await waitFor(() => expect(mockApi.documents.delete).toHaveBeenCalledWith("d5"));
+      await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1));
+    });
+
+    it("still deletes an image when where it's used can't be told", async () => {
+      mockApi.documents.usage.mockRejectedValue(new Error("offline"));
+      mockApi.documents.delete.mockResolvedValue(undefined);
+      setup([shot]);
+      fireEvent.click(screen.getByRole("button", { name: "Delete Login screen.png" }));
+      const dialog = screen.getByRole("alertdialog");
+      const del = within(dialog).getByRole("button", { name: "Delete" }) as HTMLButtonElement;
+      await waitFor(() => expect(del.disabled).toBe(false));
+      expect(dialog.textContent).toContain("This can't be undone.");
+      expect(within(dialog).queryByTestId("image-usage")).toBeNull();
+      fireEvent.click(del);
+      await waitFor(() => expect(mockApi.documents.delete).toHaveBeenCalledWith("d5"));
     });
 
     it.each([

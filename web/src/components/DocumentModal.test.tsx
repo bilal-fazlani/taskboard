@@ -351,6 +351,28 @@ describe("editing", () => {
     expect(screen.queryByRole("status")).toBeNull();
   });
 
+  it("shows the notice when an image rename elsewhere rewrote the document mid-edit", async () => {
+    const shot: DocumentMeta = { ...spec, id: "i1", name: "Login screen", format: "png", width: 8, height: 8 };
+    load("![a](<Login screen.png>)");
+    const { rerender } = setup(spec, { documents: [spec, shot] });
+    fireEvent.change(await startEditing(), { target: { value: "![a](<Login screen.png>) and mine" } });
+
+    // The rename rewrote this document (a new revision) and renamed the image.
+    mockApi.documents.get.mockResolvedValue({ ...spec, revision: 2, content: "![a](<Home page.png>)" });
+    const next = { ...spec, revision: 2 };
+    rerender({ doc: next, documents: [next, { ...shot, name: "Home page" }] });
+    const notice = await screen.findByRole("status");
+    expect(notice.textContent).toContain("This document changed while you were editing. Your text isn't saved yet.");
+    expect(box().value).toBe("![a](<Login screen.png>) and mine");
+    // The unsaved text still names the image by its old name.
+    fireEvent.click(screen.getByRole("button", { name: "Preview" }));
+    expect(screen.getByTestId("missing-image").textContent).toBe("Missing image: Login screen.png");
+
+    fireEvent.click(screen.getByRole("button", { name: "Discard mine, load theirs" }));
+    await waitFor(() => expect(screen.getByRole("img", { name: "a" }).getAttribute("src")).toBe("/api/documents/i1/image?rev=1"));
+    expect(screen.queryByTestId("missing-image")).toBeNull();
+  });
+
   it("quietly takes a newer revision while there is nothing unsaved", async () => {
     load("old");
     const { rerender } = setup();

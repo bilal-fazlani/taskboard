@@ -1,11 +1,14 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { api, type DocumentMeta } from "../api/client";
-import { displayName } from "../lib/documents";
+import { displayName, imageUsageWarning, isImageFormat } from "../lib/documents";
 import { serverMessage } from "../lib/epics";
 import { useEscape } from "../lib/escapeStack";
 
 // "Delete Design spec.md?" over everything else. Focus starts on Cancel; a
-// click beside the box or Escape cancels. Deleting is permanent.
+// click beside the box or Escape cancels. Deleting is permanent. For an
+// image, the box first asks the server where the owner's text uses it and
+// names those places, which will show a missing image; Delete waits for
+// that answer, and works without it if it never comes.
 export default function DeleteDocumentConfirm({
   doc,
   onCancel,
@@ -17,13 +20,34 @@ export default function DeleteDocumentConfirm({
 }) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const image = isImageFormat(doc.format);
+  // For an image: undefined while asking, then the warning (null when
+  // nothing uses it, or when the answer never came).
+  const [warning, setWarning] = useState<string | null | undefined>(image ? undefined : null);
   const cancelRef = useRef<HTMLButtonElement>(null);
   const ids = useId();
   useEscape(onCancel);
   useEffect(() => cancelRef.current?.focus(), []);
 
+  useEffect(() => {
+    if (!image) return;
+    let cancelled = false;
+    Promise.resolve()
+      .then(() => api.documents.usage(doc.id))
+      .then((usage) => {
+        if (!cancelled) setWarning(imageUsageWarning(usage?.places ?? []));
+      })
+      .catch(() => {
+        if (!cancelled) setWarning(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [doc.id, image]);
+
+  const checking = warning === undefined;
   const confirm = async () => {
-    if (busy) return;
+    if (busy || checking) return;
     setBusy(true);
     try {
       await api.documents.delete(doc.id);
@@ -42,12 +66,18 @@ export default function DeleteDocumentConfirm({
         aria-modal="true"
         aria-labelledby={`${ids}-title`}
         aria-describedby={`${ids}-desc`}
+        aria-busy={checking || undefined}
         className="relative w-full max-w-sm rounded-xl border border-slate-700 bg-slate-900 p-5 shadow-2xl"
       >
         <h3 id={`${ids}-title`} className="text-base font-semibold text-white">
           Delete {displayName(doc)}?
         </h3>
         <p id={`${ids}-desc`} className="mt-1.5 text-sm text-slate-400">
+          {warning && (
+            <span data-testid="image-usage" className="text-amber-200">
+              {warning}{" "}
+            </span>
+          )}
           This can't be undone.
         </p>
         {error && (
@@ -67,7 +97,7 @@ export default function DeleteDocumentConfirm({
           <button
             type="button"
             onClick={confirm}
-            disabled={busy}
+            disabled={busy || checking}
             className="rounded-lg bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-500 focus:outline-none focus:ring-2 focus:ring-red-400 disabled:opacity-60"
           >
             Delete
