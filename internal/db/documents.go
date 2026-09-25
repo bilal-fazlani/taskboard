@@ -23,6 +23,7 @@ const (
 	msgDocNothingToUpdate = "nothing to update: provide a name and/or content"
 	msgDocFormat          = `Format must be "markdown" or "html".`
 	msgDocExtension       = "Only .md, .html and .htm files can be attached."
+	msgDocOwner           = "A document belongs to one ticket or one epic."
 )
 
 const maxDocumentNameRunes = 200
@@ -113,37 +114,74 @@ func (e *ErrDocumentConflict) Error() string {
 	return "This document changed since you started editing."
 }
 
-// DocumentOwner names what a document belongs to. Callers resolve display
-// keys to ids first (ResolveTicketID).
+// DocumentOwner names what a document belongs to: exactly one of a ticket or
+// an epic, by id. Callers resolve display keys and epic names first
+// (ResolveTicketID, ResolveEpicRef).
 type DocumentOwner struct {
 	TicketID string
+	EpicID   string
+}
+
+// check refuses an owner that names both a ticket and an epic, or neither.
+func (o DocumentOwner) check() error {
+	if (o.TicketID == "") == (o.EpicID == "") {
+		return invalidInput(msgDocOwner)
+	}
+	return nil
 }
 
 // noun is how the owner is named in messages.
-func (o DocumentOwner) noun() string { return "ticket" }
+func (o DocumentOwner) noun() string {
+	if o.EpicID != "" {
+		return "epic"
+	}
+	return "ticket"
+}
 
 // where is the owner's condition on the documents table and its argument.
-func (o DocumentOwner) where() (string, any) { return "ticket_id = ?", o.TicketID }
+func (o DocumentOwner) where() (string, any) {
+	if o.EpicID != "" {
+		return "epic_id = ?", o.EpicID
+	}
+	return "ticket_id = ?", o.TicketID
+}
 
 // checkOwnerExists turns an unknown owner into an ErrInvalidInput rather than
-// a foreign key failure or an empty list.
+// a foreign key failure or an empty list, and refuses an owner that is not
+// exactly one ticket or one epic.
 func checkOwnerExists(q dbtx, owner DocumentOwner) error {
+	if err := owner.check(); err != nil {
+		return err
+	}
+	table, id := "tickets", owner.TicketID
+	if owner.EpicID != "" {
+		table, id = "epics", owner.EpicID
+	}
 	var one int
-	err := q.QueryRow("SELECT 1 FROM tickets WHERE id = ?", owner.TicketID).Scan(&one)
+	err := q.QueryRow("SELECT 1 FROM "+table+" WHERE id = ?", id).Scan(&one)
 	if err == sql.ErrNoRows {
 		return invalidInput("%s not found", owner.noun())
 	}
 	return err
 }
 
+// nullable stores "" as NULL, which the one-owner CHECK and the foreign keys
+// need.
+func nullable(id string) any {
+	if id == "" {
+		return nil
+	}
+	return id
+}
+
 // documentMetaColumns reads everything but the content. Size is measured in
 // bytes, which is what the limit counts.
-const documentMetaColumns = `id, COALESCE(ticket_id, ''), name, format,
+const documentMetaColumns = `id, COALESCE(ticket_id, ''), COALESCE(epic_id, ''), name, format,
 	LENGTH(CAST(content AS BLOB)), revision, created_at, updated_at`
 
 func scanDocumentMeta(row interface{ Scan(...any) error }, extra ...any) (models.DocumentMeta, error) {
 	var d models.DocumentMeta
-	dest := append([]any{&d.ID, &d.TicketID, &d.Name, &d.Format, &d.Size, &d.Revision, &d.CreatedAt, &d.UpdatedAt}, extra...)
+	dest := append([]any{&d.ID, &d.TicketID, &d.EpicID, &d.Name, &d.Format, &d.Size, &d.Revision, &d.CreatedAt, &d.UpdatedAt}, extra...)
 	err := row.Scan(dest...)
 	return d, err
 }
@@ -252,7 +290,7 @@ func (s *Store) CreateDocument(req models.CreateDocumentRequest) (*models.Docume
 	if len(req.Content) > models.MaxDocumentBytes {
 		return nil, invalidInput("%s", msgDocTooLarge(len(req.Content)))
 	}
-	owner := DocumentOwner{TicketID: req.TicketID}
+	owner := DocumentOwner{TicketID: req.TicketID, EpicID: req.EpicID}
 
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -270,9 +308,9 @@ func (s *Store) CreateDocument(req models.CreateDocumentRequest) (*models.Docume
 	now := time.Now()
 	id := newID()
 	if _, err := tx.Exec(
-		`INSERT INTO documents (id, ticket_id, name, format, content, revision, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, 1, ?, ?)`,
-		id, owner.TicketID, name, format, req.Content, now, now,
+		`INSERT INTO documents (id, ticket_id, epic_id, name, format, content, revision, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+		id, nullable(owner.TicketID), nullable(owner.EpicID), name, format, req.Content, now, now,
 	); err != nil {
 		return nil, err
 	}
@@ -304,8 +342,8 @@ func (s *Store) UpdateDocument(id string, req models.UpdateDocumentRequest) (*mo
 	var owner DocumentOwner
 	var name string
 	var revision int
-	err = tx.QueryRow("SELECT COALESCE(ticket_id, ''), name, revision FROM documents WHERE id = ?", id).
-		Scan(&owner.TicketID, &name, &revision)
+	err = tx.QueryRow("SELECT COALESCE(ticket_id, ''), COALESCE(epic_id, ''), name, revision FROM documents WHERE id = ?", id).
+		Scan(&owner.TicketID, &owner.EpicID, &name, &revision)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}

@@ -18,6 +18,11 @@ type Epic struct {
 	CreatedAt   time.Time `json:"createdAt"`
 	UpdatedAt   time.Time `json:"updatedAt"`
 
+	// DocumentCount is how many documents the epic has. Documents lists them,
+	// without content, on a single epic only (GetEpic).
+	DocumentCount int            `json:"documentCount"`
+	Documents     []DocumentMeta `json:"documents,omitempty"`
+
 	// EpicProgress is derived from the epic's tickets on every read; none of
 	// it is stored. Its fields sit at the top level of the epic's JSON.
 	EpicProgress

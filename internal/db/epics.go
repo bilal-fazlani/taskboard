@@ -218,6 +218,10 @@ func (s *Store) GetEpic(id string) (*models.Epic, error) {
 		return nil, err
 	}
 	e.EpicProgress = progressOf(progress, e.ID)
+	if e.Documents, err = loadOwnerDocuments(s.db, DocumentOwner{EpicID: e.ID}); err != nil {
+		return nil, err
+	}
+	e.DocumentCount = len(e.Documents)
 	return &e, nil
 }
 
@@ -256,7 +260,35 @@ func (s *Store) ListEpics(projectRef string) ([]models.Epic, error) {
 	for i := range epics {
 		epics[i].EpicProgress = progressOf(progress, epics[i].ID)
 	}
+	counts, err := loadEpicDocumentCounts(s.db, projectID)
+	if err != nil {
+		return nil, err
+	}
+	for i := range epics {
+		epics[i].DocumentCount = counts[epics[i].ID]
+	}
 	return epics, nil
+}
+
+// loadEpicDocumentCounts counts the documents of every epic in a project in
+// one grouped query, keyed by epic id; an epic with none has no key.
+func loadEpicDocumentCounts(q dbtx, projectID string) (map[string]int, error) {
+	rows, err := q.Query(`SELECT d.epic_id, COUNT(*) FROM documents d
+		JOIN epics e ON e.id = d.epic_id WHERE e.project_id = ? GROUP BY d.epic_id`, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("counting epic documents: %w", err)
+	}
+	defer rows.Close()
+	counts := map[string]int{}
+	for rows.Next() {
+		var id string
+		var n int
+		if err := rows.Scan(&id, &n); err != nil {
+			return nil, fmt.Errorf("scanning epic document count: %w", err)
+		}
+		counts[id] = n
+	}
+	return counts, rows.Err()
 }
 
 // CreateEpic checks the name and inserts in one transaction, so two writers
@@ -328,7 +360,8 @@ func (s *Store) UpdateEpic(id string, req models.UpdateEpicRequest) (*models.Epi
 }
 
 // DeleteEpic removes an epic. Its tickets stay and lose their epic (the
-// foreign key sets it to NULL). It reports how many tickets that cleared,
+// foreign key sets it to NULL); its own documents are deleted with it (the
+// foreign key cascades), its tickets' documents are not. It reports how many tickets that cleared,
 // read in the same transaction as the delete, like DeleteLabel.
 func (s *Store) DeleteEpic(id string) (int, error) {
 	tx, err := s.db.Begin()

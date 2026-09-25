@@ -333,3 +333,73 @@ func TestUpdateDocumentRefusesAStaleRevision(t *testing.T) {
 		t.Fatalf("stale save to a deleted document = %+v, %v; want nil, nil", missing, err)
 	}
 }
+
+func TestEpicDocuments(t *testing.T) {
+	s := newTestStore(t)
+	p := seedProject(t, s, "Docs", "DOC")
+	e := seedEpic(t, s, p.ID, "Launch")
+	tk := seedTicket(t, s, p.ID, "Has docs")
+	ticketDoc := seedDocument(t, s, tk.ID, "Plan", "")
+
+	d, err := s.CreateDocument(models.CreateDocumentRequest{EpicID: e.ID, Name: "Plan", Content: "# Rollout"})
+	if err != nil || d.EpicID != e.ID || d.TicketID != "" {
+		t.Fatalf("epic document = %+v, %v", d, err)
+	}
+	_, err = s.CreateDocument(models.CreateDocumentRequest{EpicID: e.ID, Name: "plan"})
+	wantInvalid(t, err, `This epic already has a document called "Plan.md".`)
+	_, err = s.CreateDocument(models.CreateDocumentRequest{TicketID: tk.ID, EpicID: e.ID, Name: "Both"})
+	wantInvalid(t, err, msgDocOwner)
+	_, err = s.CreateDocument(models.CreateDocumentRequest{Name: "Neither"})
+	wantInvalid(t, err, msgDocOwner)
+	_, err = s.CreateDocument(models.CreateDocumentRequest{EpicID: "nope", Name: "X"})
+	wantInvalid(t, err, "epic not found")
+	_, err = s.ListDocuments(DocumentOwner{TicketID: tk.ID, EpicID: e.ID})
+	wantInvalid(t, err, msgDocOwner)
+
+	id, err := s.ResolveDocumentRef(DocumentOwner{EpicID: e.ID}, "plan.md")
+	if err != nil || id != d.ID {
+		t.Fatalf("resolve on epic = %q, %v", id, err)
+	}
+	_, err = s.ResolveDocumentRef(DocumentOwner{EpicID: e.ID}, "Missing")
+	wantInvalid(t, err, `This epic has no document called "Missing".`)
+
+	name := "Rollout"
+	renamed, err := s.UpdateDocument(d.ID, models.UpdateDocumentRequest{Name: &name})
+	if err != nil || renamed.Name != "Rollout" || renamed.EpicID != e.ID {
+		t.Fatalf("rename epic document = %+v, %v", renamed, err)
+	}
+	// The ticket's "Plan" does not clash with the epic's documents.
+	if _, err := s.CreateDocument(models.CreateDocumentRequest{EpicID: e.ID, Name: "Plan"}); err != nil {
+		t.Fatalf("epic Plan beside a ticket Plan: %v", err)
+	}
+	taken := "plan"
+	_, err = s.UpdateDocument(d.ID, models.UpdateDocumentRequest{Name: &taken})
+	wantInvalid(t, err, `This epic already has a document called "Plan.md".`)
+
+	full, err := s.GetEpic(e.ID)
+	if err != nil || full.DocumentCount != 2 || len(full.Documents) != 2 {
+		t.Fatalf("GetEpic documents = %+v, %v", full, err)
+	}
+	list, err := s.ListEpics(p.ID)
+	if err != nil || len(list) != 1 || list[0].DocumentCount != 2 || list[0].Documents != nil {
+		t.Fatalf("ListEpics = %+v, %v", list, err)
+	}
+	// Ticket documents never count towards an epic, even the epic's tickets'.
+	inEpic := seedTicketInEpic(t, s, p.ID, e.ID, "In the epic")
+	inEpicDoc := seedDocument(t, s, inEpic.ID, "Notes", "")
+	if full, _ := s.GetEpic(e.ID); full.DocumentCount != 2 {
+		t.Fatalf("epic count after a ticket document = %d, want 2", full.DocumentCount)
+	}
+
+	if _, err := s.DeleteEpic(e.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.GetDocument(d.ID); got != nil {
+		t.Fatal("deleting the epic should delete its documents")
+	}
+	for _, kept := range []*models.Document{ticketDoc, inEpicDoc} {
+		if got, _ := s.GetDocument(kept.ID); got == nil {
+			t.Fatalf("deleting the epic must not touch its tickets' documents (%s)", kept.Name)
+		}
+	}
+}

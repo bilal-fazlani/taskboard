@@ -45,11 +45,12 @@ func FormatSize(bytes int) string {
 }
 
 // DocumentMeta is a document without its content: what lists and a ticket's
-// details carry. Size is the content's length in bytes. Revision counts
+// or an epic's details carry. Exactly one of TicketID and EpicID is set. Size is the content's length in bytes. Revision counts
 // content saves, starting at 1; a rename leaves it alone.
 type DocumentMeta struct {
 	ID        string    `json:"id"`
 	TicketID  string    `json:"ticketId,omitempty"`
+	EpicID    string    `json:"epicId,omitempty"`
 	Name      string    `json:"name"`
 	Format    string    `json:"format"`
 	Size      int       `json:"size"`
@@ -69,8 +70,10 @@ type Document struct {
 }
 
 type CreateDocumentRequest struct {
-	// TicketID is the owning ticket's id; callers resolve display keys first.
-	TicketID string `json:"ticketId"`
+	// Exactly one of TicketID and EpicID is set: the owning ticket's or
+	// epic's id. Callers resolve display keys and epic names first.
+	TicketID string `json:"ticketId,omitempty"`
+	EpicID   string `json:"epicId,omitempty"`
 	Name     string `json:"name"`
 	// Format defaults to markdown when empty.
 	Format  string `json:"format,omitempty"`
