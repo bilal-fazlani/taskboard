@@ -184,12 +184,25 @@ without a name supplies the name and format as above.
 - HTML rows get a code-file icon. The document modal shows the page at full
   width and height in a frame.
 - **Trust boundary:** the page may run its own scripts and load from the
-  internet (CDNs, fonts, images). It runs in a sandboxed frame with an origin
-  separate from the board (no same-origin grant), so it cannot read the
-  board's storage or navigate the board away. The board's API stays out of
-  reach because the server sends no CORS headers and `rejectCrossOriginWrites`
-  refuses cross-origin writes. A sandboxed frame sends `Origin: null`, and a
-  test must prove that such a write is refused.
+  internet (CDNs, fonts, images), and nothing more. It is served from
+  `GET /api/documents/{ref}/raw` with `Content-Security-Policy: sandbox
+  allow-scripts`, and the frame carries `sandbox="allow-scripts"`: scripts
+  only, the same in both places (narrowed by Bilal on 2026-09-25). There is
+  no `allow-same-origin`, `allow-top-navigation`, `allow-popups`,
+  `allow-forms`, `allow-modals` or `allow-downloads`, and tests assert the
+  exact header and attribute and that those tokens are absent. So the page
+  runs in an origin separate from the board, framed or opened on its own: it
+  cannot read the board's storage or navigate the board away, its forms don't
+  submit, `alert`/`confirm`/`prompt`/`print` are blocked, and it cannot start
+  a download. The board's API stays out of reach because the server sends no
+  CORS headers and `rejectCrossOriginWrites` refuses cross-origin writes. A
+  sandboxed frame sends `Origin: null`, and a test must prove that such a
+  write is refused.
+- Downloading the document itself from the Documents row or the modal header
+  uses the board's own download route and still works; only the page's own
+  downloads are blocked.
+- The frame's address carries the revision (`?rev=`), so an agent's save
+  reloads it.
 - Users never edit HTML, even after ticket 2. Rename, delete and download
   work as for markdown.
 
