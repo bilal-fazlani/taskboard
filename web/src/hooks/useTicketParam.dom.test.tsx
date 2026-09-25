@@ -351,30 +351,137 @@ describe("useTicketParam under BrowserRouter", () => {
     expect(state.selected).toBeNull();
   });
 
-  it("switches to another ticket by id, keeping the filters and the history entry", async () => {
+  it("switches to another ticket as a new entry, and one close leaves every ticket entry", async () => {
     await mount("/kanban?status=todo");
     await act(async () => navigate("/table"));
     await act(async () => state.open(tickets[0]));
-    await act(async () => state.onDirtyChange(true));
-
     await act(async () => state.switchTo("01BBB"));
     expect(url()).toBe("/table?ticket=ACP-25");
     expect(state.selected?.id).toBe("01BBB");
-    expect(state.closeRequested).toBe(false);
 
-    // The switch replaced the entry opening pushed, so one close leaves the
-    // editor altogether rather than landing back on the first ticket.
     await act(async () => {
       state.close();
       await settle();
     });
     expect(url()).toBe("/table");
     expect(state.selected).toBeNull();
+    // Both ticket entries went with the close, so Back leaves the view.
     await act(async () => {
       window.history.back();
       await settle();
     });
     expect(url()).toBe("/kanban?status=todo");
+  });
+
+  it("steps back through the tickets followed, and forward again", async () => {
+    await mount("/kanban");
+    await act(async () => state.open(tickets[0]));
+    await act(async () => state.switchTo("01BBB"));
+
+    await act(async () => {
+      window.history.back();
+      await settle();
+    });
+    expect(url()).toBe("/kanban?ticket=ACP-7");
+    expect(state.selected?.id).toBe("01AAA");
+
+    await act(async () => {
+      window.history.back();
+      await settle();
+    });
+    expect(url()).toBe("/kanban");
+    expect(state.selected).toBeNull();
+
+    await act(async () => {
+      window.history.forward();
+      await settle();
+    });
+    expect(url()).toBe("/kanban?ticket=ACP-7");
+    expect(state.selected?.id).toBe("01AAA");
+  });
+
+  it("holds a dirty ticket when Back lands on the previous one, and shows that one on discard", async () => {
+    await mount("/kanban");
+    await act(async () => state.open(tickets[0]));
+    await act(async () => state.switchTo("01BBB"));
+    await act(async () => state.onDirtyChange(true));
+
+    await act(async () => {
+      window.history.back();
+      await settle();
+    });
+    expect(url()).toBe("/kanban?ticket=ACP-7");
+    expect(state.selected?.id).toBe("01BBB");
+    expect(state.closeRequested).toBe(true);
+
+    // Discarding goes where Back asked to go: ticket A, not the board.
+    await act(async () => {
+      state.close();
+      await settle();
+    });
+    expect(url()).toBe("/kanban?ticket=ACP-7");
+    expect(state.selected?.id).toBe("01AAA");
+    expect(state.closeRequested).toBe(false);
+  });
+
+  it("puts the dirty ticket back when that Back is cancelled, and a close still empties history", async () => {
+    await mount("/kanban");
+    await act(async () => navigate("/table"));
+    await act(async () => state.open(tickets[0]));
+    await act(async () => state.switchTo("01BBB"));
+    await act(async () => state.onDirtyChange(true));
+    await act(async () => {
+      window.history.back();
+      await settle();
+    });
+
+    await act(async () => state.cancelClose());
+    expect(url()).toBe("/table?ticket=ACP-25");
+    expect(state.selected?.id).toBe("01BBB");
+    expect(state.closeRequested).toBe(false);
+
+    await act(async () => {
+      state.close();
+      await settle();
+    });
+    expect(url()).toBe("/table");
+    await act(async () => {
+      window.history.back();
+      await settle();
+    });
+    expect(url()).toBe("/kanban");
+  });
+
+  it("follows a link from a ticket opened straight from a link, and closes to the plain view", async () => {
+    await mount("/table?project=ACP&ticket=ACP-7");
+    await act(async () => state.switchTo("01BBB"));
+    expect(url()).toBe("/table?project=ACP&ticket=ACP-25");
+    await act(async () => {
+      state.close();
+      await settle();
+    });
+    expect(url()).toBe("/table?project=ACP");
+    expect(state.selected).toBeNull();
+  });
+
+  it("still closes by popping after a filter changed while the editor was open", async () => {
+    await mount("/kanban");
+    await act(async () => navigate("/table"));
+    await act(async () => state.open(tickets[0]));
+    await act(async () => filters.setFilter("status", "todo"));
+    expect(url()).toBe("/table?ticket=ACP-7&status=todo");
+
+    await act(async () => {
+      state.close();
+      await settle();
+    });
+    // Popped, not replaced: the next Back leaves the view.
+    expect(url()).toBe("/table");
+    await act(async () => {
+      window.history.back();
+      await settle();
+    });
+    expect(url()).toBe("/kanban");
   });
 
   it("switches from a ticket opened straight from a link, and closes in place", async () => {

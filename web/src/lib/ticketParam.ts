@@ -27,12 +27,14 @@ export function ticketRef(params: URLSearchParams): string {
 }
 
 /**
- * The params with the ticket parameter set to a ticket's display key. Every
- * other parameter, the filters included, is kept as it was.
+ * The params with the ticket parameter set to a ticket's display key, and no
+ * open document, since a document belongs to the ticket it was opened on.
+ * Every other parameter, the filters included, is kept as it was.
  */
 export function withTicket(params: URLSearchParams, ticket: TicketIdentity): URLSearchParams {
   const next = new URLSearchParams(params);
   next.set(TICKET_PARAM, ticketRefFor(ticket));
+  next.delete("doc");
   return next;
 }
 

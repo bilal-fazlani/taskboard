@@ -38,6 +38,11 @@ describe("withTicket", () => {
     expect(params.get("status")).toBe("todo");
   });
 
+  it("drops an open document, which belongs to the ticket it was opened on", () => {
+    const params = withTicket(new URLSearchParams("ticket=ACP-7&doc=Plan.md&status=todo"), ticket());
+    expect(params.toString()).toBe("ticket=ACP-25&status=todo");
+  });
+
   it("does not touch the params it was given", () => {
     const params = new URLSearchParams("status=todo");
     withTicket(params, ticket());
