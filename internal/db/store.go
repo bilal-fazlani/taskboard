@@ -172,9 +172,25 @@ func (s *Store) DeleteProject(id string) error {
 	return err
 }
 
+// nextTicketNumber takes the project's next ticket number from its
+// last_ticket_number counter (migration 014), which only ever goes up, so a
+// deleted ticket's number is never handed out again. It must run inside the
+// creating transaction: the counter advances with the same single UPDATE
+// that reads it, and a failed create rolls it back.
+//
+// The MAX over the counter and the project's highest existing number keeps
+// the result clear of any ticket numbered without the counter, such as one
+// created by an older binary (which numbers from MAX(number)) still running
+// against the migrated file; without it, that ticket's number would collide
+// with the UNIQUE(project_id, number) constraint.
 func nextTicketNumber(q dbtx, projectID string) (int, error) {
 	var num int
-	err := q.QueryRow("SELECT COALESCE(MAX(number), 0) + 1 FROM tickets WHERE project_id = ?", projectID).Scan(&num)
+	err := q.QueryRow(`UPDATE projects SET last_ticket_number = MAX(
+			last_ticket_number,
+			COALESCE((SELECT MAX(number) FROM tickets WHERE project_id = ?), 0)
+		) + 1
+		WHERE id = ?
+		RETURNING last_ticket_number`, projectID, projectID).Scan(&num)
 	return num, err
 }
 
