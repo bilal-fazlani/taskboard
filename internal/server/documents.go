@@ -280,6 +280,8 @@ const documentSandbox = "sandbox allow-scripts"
 // a tab, where no iframe attribute is there to confine it. An HTML page gets
 // the history guard (documentguard.go) so its own navigations don't leave
 // Back stepping inside the frame; downloadDocument sends the stored bytes.
+// An image is refused: its file is served by /image, and relative image
+// names in the page land on getReferencedImage.
 func (s *Server) rawDocument(w http.ResponseWriter, r *http.Request) {
 	id, ok := s.documentID(w, r)
 	if !ok {
@@ -292,6 +294,11 @@ func (s *Server) rawDocument(w http.ResponseWriter, r *http.Request) {
 	}
 	if d == nil {
 		writeError(w, http.StatusNotFound, "document not found")
+		return
+	}
+	if models.IsImageFormat(d.Format) {
+		// An image has no text to show; its file is at /image.
+		writeError(w, http.StatusNotFound, "an image has no raw page; use /image")
 		return
 	}
 	contentType, content := "text/plain; charset=utf-8", d.Content

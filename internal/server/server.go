@@ -234,6 +234,9 @@ func (s *Server) setupRoutes(webFS fs.FS) {
 			r.Get("/{ref}/image", s.getDocumentImage)
 			r.Put("/{ref}/image", s.replaceDocumentImage)
 			r.Get("/{ref}/thumbnail", s.getDocumentThumbnail)
+			// An HTML document's relative <img src="Login screen.png">,
+			// resolved against its raw URL; the named routes above win.
+			r.Get("/{ref}/{name}", s.getReferencedImage)
 		})
 
 		r.Get("/board", s.getBoard)

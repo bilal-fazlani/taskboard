@@ -153,6 +153,13 @@ func (s *Server) serveImage(w http.ResponseWriter, r *http.Request, thumbnail bo
 // policy that stops other sites embedding it. It may be cached but is
 // checked each time; the ETag moves with every content save and rename.
 func writeImageFile(w http.ResponseWriter, r *http.Request, f *db.ImageFile, thumbnail bool, disposition string) {
+	writeImageFileWithPolicy(w, r, f, thumbnail, disposition, "same-origin")
+}
+
+// writeImageFileWithPolicy is writeImageFile with the
+// Cross-Origin-Resource-Policy to send: "same-origin" everywhere but the
+// referenced-image route (document_image_refs.go).
+func writeImageFileWithPolicy(w http.ResponseWriter, r *http.Request, f *db.ImageFile, thumbnail bool, disposition, resourcePolicy string) {
 	contentType := f.ContentType
 	if !strings.HasPrefix(contentType, "image/") || contentType == "image/svg+xml" {
 		// Belt and braces: only the four image types are ever stored.
@@ -166,7 +173,7 @@ func writeImageFile(w http.ResponseWriter, r *http.Request, f *db.ImageFile, thu
 	h.Set("Content-Type", contentType)
 	h.Set("X-Content-Type-Options", "nosniff")
 	h.Set("Content-Security-Policy", imageCSP)
-	h.Set("Cross-Origin-Resource-Policy", "same-origin")
+	h.Set("Cross-Origin-Resource-Policy", resourcePolicy)
 	h.Set("Referrer-Policy", "no-referrer")
 	h.Set("Cache-Control", "no-cache")
 	h.Set("ETag", fmt.Sprintf(`"%s-%s-%d-%d"`, f.Document.ID, kind, f.Document.Revision, f.Document.UpdatedAt.UnixNano()))
