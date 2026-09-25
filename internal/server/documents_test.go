@@ -257,7 +257,7 @@ func TestRawDocumentIsSandboxed(t *testing.T) {
 		}
 		body, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
-		if resp.StatusCode != http.StatusOK || string(body) != "<script>1</script>" {
+		if resp.StatusCode != http.StatusOK || string(body) != documentGuard+"<script>1</script>" {
 			t.Fatalf("%s: %d %q", path, resp.StatusCode, body)
 		}
 		for header, want := range map[string]string{

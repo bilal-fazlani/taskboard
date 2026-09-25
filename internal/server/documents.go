@@ -263,7 +263,9 @@ const documentSandbox = "sandbox allow-scripts"
 
 // rawDocument serves a document's content inline, for the web UI's HTML
 // frame. The sandbox header applies even when the URL is opened directly in
-// a tab, where no iframe attribute is there to confine it.
+// a tab, where no iframe attribute is there to confine it. An HTML page gets
+// the history guard (documentguard.go) so its own navigations don't leave
+// Back stepping inside the frame; downloadDocument sends the stored bytes.
 func (s *Server) rawDocument(w http.ResponseWriter, r *http.Request) {
 	id, ok := s.documentID(w, r)
 	if !ok {
@@ -278,9 +280,9 @@ func (s *Server) rawDocument(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "document not found")
 		return
 	}
-	contentType := "text/plain; charset=utf-8"
+	contentType, content := "text/plain; charset=utf-8", d.Content
 	if d.Format == models.DocumentFormatHTML {
-		contentType = "text/html; charset=utf-8"
+		contentType, content = "text/html; charset=utf-8", withDocumentGuard(d.Content)
 	}
 	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Content-Security-Policy", documentSandbox)
@@ -288,7 +290,7 @@ func (s *Server) rawDocument(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.WriteHeader(http.StatusOK)
-	io.WriteString(w, d.Content)
+	io.WriteString(w, content)
 }
 
 // searchDocuments answers GET /api/documents/search?q=&projectId= with the
