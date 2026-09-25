@@ -143,6 +143,7 @@ describe("images pasted or dropped while writing", () => {
   };
   const png = (name: string) => new File(["x"], name, { type: "image/png" });
   const box = () => screen.getByRole("textbox", { name: "Document content" }) as HTMLTextAreaElement;
+  const uploadLines = () => screen.queryAllByTestId("image-upload").map((e) => e.textContent);
   const srcs = (testId: string) =>
     Array.from(screen.getByTestId(testId).querySelectorAll("img")).map((i) => i.getAttribute("src"));
 
@@ -158,13 +159,13 @@ describe("images pasted or dropped while writing", () => {
     fireEvent.paste(box(), { clipboardData: { types: ["Files"], files: [png("image.png")] } });
     expect(box().value).toBe("![](Pasted image.png)Intro");
     expect(screen.getByText("unsaved")).toBeTruthy();
-    expect(screen.getByRole("status").textContent).toBe("Uploading Pasted image.png… it appears in Documents when done");
+    expect(uploadLines()).toEqual(["Uploading Pasted image.png… it appears in Documents when done"]);
     expect(mockApi.documents.createImage.mock.calls[0][0]).toEqual({ epicId: "e1" });
     expect((mockApi.documents.createImage.mock.calls[0][1] as File).name).toBe("Pasted image.png");
 
     await act(async () => finish(pasted));
     expect(onImageAdded).toHaveBeenCalledWith(pasted);
-    expect(screen.queryByRole("status")).toBeNull();
+    expect(uploadLines()).toEqual([]);
     rerender({ documents: [spec, pasted], owner: { epicId: "e1" }, ownerNoun: "epic", onImageAdded });
     fireEvent.click(screen.getByRole("button", { name: "Preview" }));
     expect(srcs("document-preview")).toEqual(["/api/documents/img9/image?rev=1"]);
@@ -185,6 +186,30 @@ describe("images pasted or dropped while writing", () => {
     expect(screen.getByRole("alert").textContent).toContain(
       "flow chart.png wasn't uploaded: This isn't a PNG image: its content is GIF.",
     );
+  });
+
+  it("still shows the upload, and then why it failed, after Save ends editing, without changing the saved text", async () => {
+    let refuse!: (err: Error) => void;
+    mockApi.documents.get.mockResolvedValue({ ...spec, content: "Intro" });
+    mockApi.documents.createImage.mockReturnValue(new Promise((_, reject) => (refuse = reject)));
+    mockApi.documents.update.mockResolvedValue({ ...spec, revision: 2, content: "Intro![](Pasted image.png)" });
+    setup();
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    await screen.findByRole("textbox", { name: "Document content" });
+    box().setSelectionRange(5, 5);
+    fireEvent.paste(box(), { clipboardData: { types: ["Files"], files: [png("image.png")] } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(screen.queryByRole("textbox", { name: "Document content" })).toBeNull());
+    expect(mockApi.documents.update).toHaveBeenCalledWith("d1", { content: "Intro![](Pasted image.png)", expectedRevision: 1 });
+    expect(uploadLines()).toEqual(["Uploading Pasted image.png… it appears in Documents when done"]);
+
+    await act(async () => refuse(new Error('API error 400: {"error":"This isn\'t a PNG image: its content is GIF."}')));
+    expect(uploadLines()).toEqual([]);
+    expect(screen.getByRole("alert").textContent).toContain(
+      "Pasted image.png wasn't uploaded: This isn't a PNG image: its content is GIF. The saved text still refers to it.",
+    );
+    expect(mockApi.documents.update).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId("document-content")).toBeTruthy();
   });
 
   it("leaves a text paste to the browser", async () => {

@@ -20,12 +20,16 @@ function Harness({
   documents = [],
   onEdit,
   onUploaded,
+  live,
+  saved,
 }: {
   initial?: string;
   owner?: DocumentOwnerRef | null;
   documents?: DocumentMeta[] | null;
   onEdit?: (next: string) => void;
   onUploaded?: (doc: DocumentMeta) => void;
+  live?: boolean;
+  saved?: string;
 }) {
   const [value, setValue] = useState(initial);
   const ref = useRef<HTMLTextAreaElement>(null);
@@ -33,7 +37,16 @@ function Harness({
     setValue(next);
     onEdit?.(next);
   };
-  const paste = usePasteImages({ owner, documents, value, onChange: change, textareaRef: ref, onUploaded });
+  const paste = usePasteImages({
+    owner,
+    documents,
+    value,
+    onChange: change,
+    textareaRef: ref,
+    onUploaded,
+    live,
+    savedText: saved === undefined ? undefined : () => saved,
+  });
   return (
     <>
       <textarea ref={ref} aria-label="Text" value={value} onChange={(e) => change(e.target.value)} {...paste.textareaProps} />
@@ -48,6 +61,7 @@ function image(name: string, type = "image/png", size = 10): File {
   return f;
 }
 
+const uploadLines = () => screen.queryAllByTestId("image-upload").map((e) => e.textContent);
 const textarea = () => screen.getByLabelText("Text") as HTMLTextAreaElement;
 
 function paste(files: File[], types = ["Files"]) {
@@ -101,7 +115,7 @@ describe("usePasteImages: paste", () => {
     expect(textarea().value).toBe("Before ![](Pasted image.png)after");
     expect(onEdit).toHaveBeenCalledWith("Before ![](Pasted image.png)after");
     expect(textarea().selectionStart).toBe(7 + "![](Pasted image.png)".length);
-    expect(screen.getByRole("status").textContent).toBe("Uploading Pasted image.png… it appears in Documents when done");
+    expect(uploadLines()).toEqual(["Uploading Pasted image.png… it appears in Documents when done"]);
     const [owner, sent] = mockApi.documents.createImage.mock.calls[0];
     expect(owner).toEqual({ ticketId: "t1" });
     expect((sent as File).name).toBe("Pasted image.png");
@@ -109,7 +123,7 @@ describe("usePasteImages: paste", () => {
     const added = meta("d1", "Pasted image");
     await act(async () => upload.resolve(added));
     expect(onUploaded).toHaveBeenCalledWith(added);
-    expect(screen.queryByRole("status")).toBeNull();
+    expect(uploadLines()).toEqual([]);
     expect(textarea().value).toBe("Before ![](Pasted image.png)after");
   });
 
@@ -120,7 +134,7 @@ describe("usePasteImages: paste", () => {
     paste([image("image.png")]);
     paste([image("image.png")]);
     expect(textarea().value).toBe("![](Pasted image 2.png)![](Pasted image 4.png)");
-    expect(screen.getAllByRole("status").map((s) => s.textContent)).toEqual([
+    expect(uploadLines()).toEqual([
       "Uploading Pasted image 2.png… it appears in Documents when done",
       "Uploading Pasted image 4.png… it appears in Documents when done",
     ]);
@@ -157,7 +171,7 @@ describe("usePasteImages: paste", () => {
     paste([image("image.png")]);
     await waitFor(() => expect(textarea().value).toBe("x![](Pasted image 2.png)"));
     expect((mockApi.documents.createImage.mock.calls[1][1] as File).name).toBe("Pasted image 2.png");
-    await waitFor(() => expect(screen.queryByRole("status")).toBeNull());
+    await waitFor(() => expect(uploadLines()).toEqual([]));
     expect(screen.queryByRole("alert")).toBeNull();
   });
 });
@@ -244,7 +258,7 @@ describe("usePasteImages: checks and failures", () => {
     expect(textarea().value).toBe("Start a and ![](Pasted image 2.png)b end");
     expect(onEdit).toHaveBeenCalledWith("Start a and ![](Pasted image 2.png)b end");
     expect(screen.getByRole("alert").textContent).toContain("Pasted image.png wasn't uploaded: This isn't a PNG image: its content is JPEG.");
-    expect(screen.getAllByRole("status")).toHaveLength(1);
+    expect(uploadLines()).toHaveLength(1);
     await act(async () => second.reject(new Error("Failed to fetch")));
     expect(textarea().value).toBe("Start a and b end");
     expect(screen.getByRole("alert").textContent).toContain("Pasted image 2.png wasn't uploaded: The image was not uploaded.");
@@ -268,6 +282,78 @@ describe("usePasteImages: checks and failures", () => {
     place(0);
     paste([image("image.png")]);
     await waitFor(() => expect(screen.getByRole("alert")).toBeTruthy());
+    paste([image("image.png")]);
+    expect(textarea().value).toBe("![](Pasted image.png)");
+  });
+
+  it("keeps a failed paste's name taken while the saved text still refers to it", async () => {
+    let refuse!: (err: Error) => void;
+    mockApi.documents.createImage
+      .mockReturnValueOnce(new Promise((_, reject) => (refuse = reject)))
+      .mockReturnValue(new Promise(() => {}));
+    const { rerender } = render(<Harness />);
+    place(0);
+    paste([image("image.png")]);
+    // The text is saved with the reference in it before the upload fails.
+    rerender(<Harness saved="![](Pasted image.png)" />);
+    await act(async () => refuse(new Error("API error 500: boom")));
+    expect(textarea().value).toBe("");
+    expect(screen.getByRole("alert").textContent).toContain("Pasted image.png wasn't uploaded: boom");
+    paste([image("image.png")]);
+    expect(textarea().value).toBe("![](Pasted image 2.png)");
+  });
+
+  it("keeps a failed paste's name taken while the user's edited reference still names it", async () => {
+    let refuse!: (err: Error) => void;
+    mockApi.documents.createImage
+      .mockReturnValueOnce(new Promise((_, reject) => (refuse = reject)))
+      .mockReturnValue(new Promise(() => {}));
+    render(<Harness />);
+    place(0);
+    paste([image("image.png")]);
+    fireEvent.change(textarea(), { target: { value: "![Login](Pasted image.png)" } });
+    await act(async () => refuse(new Error("API error 500: boom")));
+    place(textarea().value.length);
+    paste([image("image.png")]);
+    expect(textarea().value).toBe("![Login](Pasted image.png)![](Pasted image 2.png)");
+  });
+
+  it("changes nothing once editing has ended, says the saved text still refers to the image, and keeps its name", async () => {
+    let refuse!: (err: Error) => void;
+    mockApi.documents.createImage
+      .mockReturnValueOnce(new Promise((_, reject) => (refuse = reject)))
+      .mockReturnValue(new Promise(() => {}));
+    const onEdit = vi.fn();
+    const { rerender } = render(<Harness onEdit={onEdit} />);
+    place(0);
+    paste([image("image.png")]);
+    onEdit.mockClear();
+    rerender(<Harness onEdit={onEdit} live={false} saved="Intro ![](Pasted image.png)" />);
+    await act(async () => refuse(new Error("API error 500: boom")));
+    expect(onEdit).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert").textContent).toContain(
+      "Pasted image.png wasn't uploaded: boom The saved text still refers to it.",
+    );
+    rerender(<Harness onEdit={onEdit} live saved="Intro ![](Pasted image.png)" />);
+    place(0);
+    paste([image("image.png")]);
+    expect(textarea().value.startsWith("![](Pasted image 2.png)")).toBe(true);
+  });
+
+  it("frees the name when editing ended without saving the reference", async () => {
+    let refuse!: (err: Error) => void;
+    mockApi.documents.createImage
+      .mockReturnValueOnce(new Promise((_, reject) => (refuse = reject)))
+      .mockReturnValue(new Promise(() => {}));
+    const { rerender } = render(<Harness />);
+    place(0);
+    paste([image("image.png")]);
+    rerender(<Harness live={false} saved="" />);
+    await act(async () => refuse(new Error("API error 500: boom")));
+    expect(screen.getByRole("alert").textContent).not.toContain("still refers");
+    rerender(<Harness live saved="" />);
+    fireEvent.change(textarea(), { target: { value: "" } });
+    place(0);
     paste([image("image.png")]);
     expect(textarea().value).toBe("![](Pasted image.png)");
   });

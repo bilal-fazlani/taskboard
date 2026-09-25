@@ -64,7 +64,11 @@ function mapPosition(pos: number, start: number, end: number, length: number): n
  * An upload refused or failed takes out exactly the reference it put in,
  * wherever later typing moved it, and says why in `problems`; a reference
  * the user has since edited is left as they made it. Nothing else in the text
- * is touched. Text pastes, text drags and dropped files that are not images
+ * is touched. While the text is not being edited (`live` false: a document
+ * saved or cancelled before its upload ended) nothing is taken out; the
+ * reason still shows, saying when the saved text (`savedText`) still refers
+ * to the image. A failed paste's name stays taken while any text may still
+ * refer to it, so a later paste never takes over a stale reference. Text pastes, text drags and dropped files that are not images
  * behave as before, except that a file is never dropped into the text as it
  * is (the browser would open it and leave the page).
  *
@@ -79,6 +83,8 @@ export function usePasteImages({
   onChange,
   textareaRef,
   onUploaded,
+  live = true,
+  savedText,
 }: {
   owner: DocumentOwnerRef | null;
   /** The owner's documents, null while they load. */
@@ -90,9 +96,15 @@ export function usePasteImages({
   textareaRef: React.RefObject<HTMLTextAreaElement | null>;
   /** An image was added: the owner reloads its documents. */
   onUploaded?: (doc: DocumentMeta) => void;
+  /** Whether `value` is the text being edited now (false once a document's editing has ended). */
+  live?: boolean;
+  /** The owner's text as last saved, which a failed image's reference may already be in. */
+  savedText?: () => string | null;
 }) {
   const [uploads, setUploads] = useState<ImageUpload[]>([]);
   const [problems, setProblems] = useState<ImageUploadProblem[]>([]);
+  // The last image added, for screen readers.
+  const [added, setAdded] = useState<string | null>(null);
 
   // The text the tracked references' positions are in, and those positions.
   const seen = useRef(value);
@@ -105,9 +117,9 @@ export function usePasteImages({
   const seq = useRef(0);
   const mounted = useRef(true);
 
-  const latest = useRef({ owner, documents, ownerNoun, onChange, onUploaded });
+  const latest = useRef({ owner, documents, ownerNoun, onChange, onUploaded, live, savedText });
   useEffect(() => {
-    latest.current = { owner, documents, ownerNoun, onChange, onUploaded };
+    latest.current = { owner, documents, ownerNoun, onChange, onUploaded, live, savedText };
   });
   useEffect(() => {
     mounted.current = true;
@@ -188,11 +200,16 @@ export function usePasteImages({
   const fail = (id: number, shown: string, reason: string) => {
     const ref = tracked.current.get(id);
     tracked.current.delete(id);
-    claims.current.delete(id);
     if (!mounted.current) return;
-    if (ref && ref.start !== null) replaceAt(ref.start, ref.text, "");
+    const { live, savedText } = latest.current;
+    const removed = live && !!ref && ref.start !== null && replaceAt(ref.start, ref.text, "");
+    const inSaved = !!ref && (savedText?.() ?? "").includes(ref.text);
+    // The name is freed only when no text can still refer to it: the editor's
+    // (a reference the user edited) or the saved copy.
+    if (!inSaved && (removed || !live)) claims.current.delete(id);
     settle(id);
-    setProblems((list) => [...list, { id, text: problemText(shown, reason) }]);
+    const note = inSaved && !removed ? " The saved text still refers to it." : "";
+    setProblems((list) => [...list, { id, text: problemText(shown, reason) + note }]);
   };
 
   const upload = async (id: number, owner: DocumentOwnerRef, image: PreparedImage, pasted: boolean, attempt = 0) => {
@@ -201,11 +218,12 @@ export function usePasteImages({
       const claim = claims.current.get(id);
       if (claim) claim.docId = doc.id;
       settle(id);
+      if (mounted.current) setAdded(image.shown);
       latest.current.onUploaded?.(doc);
     } catch (err) {
       const reason = serverMessage(err, "The image was not uploaded.");
       const ref = tracked.current.get(id);
-      if (pasted && NAME_TAKEN.test(reason) && attempt < RENAME_ATTEMPTS && ref && ref.start !== null && mounted.current) {
+      if (pasted && NAME_TAKEN.test(reason) && attempt < RENAME_ATTEMPTS && ref && ref.start !== null && mounted.current && latest.current.live) {
         // Someone took the name meanwhile: the paste takes the next free one,
         // and its reference says so.
         takenByServer.current.add(image.name);
@@ -297,5 +315,5 @@ export function usePasteImages({
 
   const dismissProblems = useCallback(() => setProblems([]), []);
 
-  return { textareaProps: { onPaste, onDragOver, onDrop }, uploads, problems, dismissProblems };
+  return { textareaProps: { onPaste, onDragOver, onDrop }, uploads, problems, added, dismissProblems };
 }

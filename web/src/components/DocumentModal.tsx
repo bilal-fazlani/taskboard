@@ -144,7 +144,12 @@ export default function DocumentModal({
     onChange: setDraft,
     textareaRef,
     onUploaded: onImageAdded,
+    // Once Save or Cancel ends editing, the draft is no longer the text: a
+    // failed image says so rather than changing it.
+    live: editing,
+    savedText: () => saved?.content ?? null,
   });
+  const imageStatus = pasteImages.uploads.length > 0 || pasteImages.problems.length > 0;
   const asking = pending !== null || urlAsking;
   const gone = deleted || goneOnSave;
 
@@ -536,10 +541,19 @@ export default function DocumentModal({
           }`}
         >
           {body}
-          {editing && (
-            <ImageUploadStatus uploads={pasteImages.uploads} problems={pasteImages.problems} onDismiss={pasteImages.dismissProblems} />
-          )}
         </div>
+        {(editing || imageStatus) && (
+          // Below the text, and kept after Save or Cancel while an image is
+          // still on its way or one failed.
+          <div className={`shrink-0 px-4 sm:px-8 ${imageStatus ? "pb-3" : ""}`}>
+            <ImageUploadStatus
+              uploads={pasteImages.uploads}
+              problems={pasteImages.problems}
+              added={pasteImages.added}
+              onDismiss={pasteImages.dismissProblems}
+            />
+          </div>
+        )}
         {image && <ImageViewerFooter images={images} ownerNoun={ownerNoun} />}
         {doc.format === "html" && (
           // Tab inside the frame never reaches trapTab (its keys stay in the
