@@ -82,4 +82,9 @@ type CreateDocumentRequest struct {
 type UpdateDocumentRequest struct {
 	Name    *string `json:"name,omitempty"`
 	Content *string `json:"content,omitempty"`
+	// ExpectedRevision, when set with Content, is the revision the caller
+	// started editing from. If the document has moved past it, the save is
+	// refused rather than overwriting someone else's. The web UI sends it;
+	// agents do not. A rename alone ignores it.
+	ExpectedRevision *int `json:"expectedRevision,omitempty"`
 }

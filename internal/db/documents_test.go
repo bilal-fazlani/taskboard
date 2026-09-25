@@ -267,3 +267,51 @@ func TestTicketsCarryDocuments(t *testing.T) {
 		t.Fatalf("ClearData with documents: %v", err)
 	}
 }
+
+func TestUpdateDocumentRefusesAStaleRevision(t *testing.T) {
+	s := newTestStore(t)
+	p := seedProject(t, s, "Docs", "DOC")
+	tk := seedTicket(t, s, p.ID, "Has docs")
+	d := seedDocument(t, s, tk.ID, "Plan", "v1")
+
+	theirs := "theirs"
+	if _, err := s.UpdateDocument(d.ID, models.UpdateDocumentRequest{Content: &theirs}); err != nil {
+		t.Fatal(err)
+	}
+
+	mine := "mine"
+	stale := 1
+	_, err := s.UpdateDocument(d.ID, models.UpdateDocumentRequest{Content: &mine, ExpectedRevision: &stale})
+	var conflict *ErrDocumentConflict
+	if !errors.As(err, &conflict) {
+		t.Fatalf("err = %v, want ErrDocumentConflict", err)
+	}
+	if conflict.Current.Content != "theirs" || conflict.Current.Revision != 2 {
+		t.Fatalf("current = %+v", conflict.Current)
+	}
+	if got, _ := s.GetDocument(d.ID); got.Content != "theirs" {
+		t.Fatalf("a refused save changed the content to %q", got.Content)
+	}
+
+	current := 2
+	saved, err := s.UpdateDocument(d.ID, models.UpdateDocumentRequest{Content: &mine, ExpectedRevision: &current})
+	if err != nil || saved.Content != "mine" || saved.Revision != 3 {
+		t.Fatalf("save at the current revision = %+v, %v", saved, err)
+	}
+
+	// A rename never conflicts: it does not change the content.
+	name := "Plan v2"
+	renamed, err := s.UpdateDocument(d.ID, models.UpdateDocumentRequest{Name: &name, ExpectedRevision: &stale})
+	if err != nil || renamed.Name != "Plan v2" || renamed.Revision != 3 {
+		t.Fatalf("rename with a stale revision = %+v, %v", renamed, err)
+	}
+
+	// A stale save to a document deleted meanwhile is still not found.
+	if _, err := s.DeleteDocument(d.ID); err != nil {
+		t.Fatal(err)
+	}
+	missing, err := s.UpdateDocument(d.ID, models.UpdateDocumentRequest{Content: &mine, ExpectedRevision: &stale})
+	if err != nil || missing != nil {
+		t.Fatalf("stale save to a deleted document = %+v, %v; want nil, nil", missing, err)
+	}
+}

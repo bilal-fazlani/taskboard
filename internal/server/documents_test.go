@@ -172,3 +172,57 @@ func TestDeleteDocumentByTicketAndName(t *testing.T) {
 		t.Fatalf("unknown ticket: %d %q", status, body.Error)
 	}
 }
+
+func TestCreateDocumentOverHTTP(t *testing.T) {
+	r := serve(t)
+	tk, _ := seedTicketDocument(t, r)
+
+	created, status := doRequest[models.Document](t, http.MethodPost, r.url+"/api/documents",
+		`{"ticketId":"`+tk.ID+`","name":"Notes","format":"markdown","content":""}`)
+	if status != http.StatusCreated || created.Name != "Notes" || created.Revision != 1 || created.TicketID != tk.ID {
+		t.Fatalf("create: %d %+v", status, created)
+	}
+	body, status := errorBody(t, http.MethodPost, r.url+"/api/documents",
+		`{"ticketId":"`+tk.ID+`","name":"design SPEC","content":""}`)
+	if status != http.StatusBadRequest || body.Error != `This ticket already has a document called "Design spec.md".` {
+		t.Fatalf("taken name: %d %q", status, body.Error)
+	}
+	body, status = errorBody(t, http.MethodPost, r.url+"/api/documents",
+		`{"ticketId":"`+tk.ID+`","name":"notes.md","content":""}`)
+	if status != http.StatusBadRequest || body.Error != "Use letters, digits, spaces, _ and - only." {
+		t.Fatalf("bad name: %d %q", status, body.Error)
+	}
+	_, status = errorBody(t, http.MethodPost, r.url+"/api/documents", `{"ticketId":"nope","name":"X"}`)
+	if status != http.StatusBadRequest {
+		t.Fatalf("unknown ticket status = %d", status)
+	}
+	_, status = errorBody(t, http.MethodPost, r.url+"/api/documents", `{`)
+	if status != http.StatusBadRequest {
+		t.Fatalf("invalid JSON status = %d", status)
+	}
+}
+
+func TestStaleSaveIsAConflict(t *testing.T) {
+	r := serve(t)
+	_, d := seedTicketDocument(t, r)
+
+	// An agent's save sends no revision and always lands.
+	_, status := doRequest[models.Document](t, http.MethodPut, r.url+"/api/documents/"+d.ID, `{"content":"theirs"}`)
+	if status != http.StatusOK {
+		t.Fatalf("agent save status = %d", status)
+	}
+	type conflict struct {
+		Error   string          `json:"error"`
+		Current models.Document `json:"current"`
+	}
+	got, status := doRequest[conflict](t, http.MethodPut, r.url+"/api/documents/"+d.ID, `{"content":"mine","expectedRevision":1}`)
+	if status != http.StatusConflict || got.Current.Content != "theirs" || got.Current.Revision != 2 ||
+		got.Error != "This document changed since you started editing." {
+		t.Fatalf("stale save: %d %+v", status, got)
+	}
+
+	saved, status := doRequest[models.Document](t, http.MethodPut, r.url+"/api/documents/"+d.ID, `{"content":"mine","expectedRevision":2}`)
+	if status != http.StatusOK || saved.Content != "mine" || saved.Revision != 3 {
+		t.Fatalf("save at the current revision: %d %+v", status, saved)
+	}
+}

@@ -82,6 +82,23 @@ func (s *Server) getDocument(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, d)
 }
 
+// createDocument adds a document to a ticket (the web's New and Upload).
+// Rule failures and an unknown ticket are 400s with the store's message.
+func (s *Server) createDocument(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxDocumentRequestBytes)
+	var req models.CreateDocumentRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	d, err := s.store.CreateDocument(req)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, d)
+}
+
 func (s *Server) updateDocument(w http.ResponseWriter, r *http.Request) {
 	id, ok := s.documentID(w, r)
 	if !ok {
@@ -95,6 +112,13 @@ func (s *Server) updateDocument(w http.ResponseWriter, r *http.Request) {
 	}
 	d, err := s.store.UpdateDocument(id, req)
 	if err != nil {
+		// A save from a revision the document has moved past: the web shows
+		// the current document in its conflict notice.
+		var conflict *db.ErrDocumentConflict
+		if errors.As(err, &conflict) {
+			writeJSON(w, http.StatusConflict, map[string]any{"error": err.Error(), "current": conflict.Current})
+			return
+		}
 		writeStoreError(w, err)
 		return
 	}

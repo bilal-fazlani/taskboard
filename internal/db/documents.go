@@ -91,6 +91,17 @@ func msgDocTooLarge(size int) string {
 	return fmt.Sprintf("This document is %s. The limit is 8 MB.", models.FormatSize(size))
 }
 
+// ErrDocumentConflict refuses a content save made from a revision the
+// document has moved past. Current is the document as it is now, so the
+// caller can show it.
+type ErrDocumentConflict struct {
+	Current *models.Document
+}
+
+func (e *ErrDocumentConflict) Error() string {
+	return "This document changed since you started editing."
+}
+
 // DocumentOwner names what a document belongs to. Callers resolve display
 // keys to ids first (ResolveTicketID).
 type DocumentOwner struct {
@@ -262,7 +273,9 @@ func (s *Store) CreateDocument(req models.CreateDocumentRequest) (*models.Docume
 
 // UpdateDocument renames a document and/or replaces its content. It returns
 // (nil, nil) for an unknown id. A content save bumps the revision; a rename
-// alone does not. Either bumps updated_at.
+// alone does not. Either bumps updated_at. A content save that names an
+// ExpectedRevision the document has moved past is refused with
+// ErrDocumentConflict and changes nothing, the rename included.
 func (s *Store) UpdateDocument(id string, req models.UpdateDocumentRequest) (*models.Document, error) {
 	if req.Name == nil && req.Content == nil {
 		return nil, invalidInput(msgDocNothingToUpdate)
@@ -279,12 +292,29 @@ func (s *Store) UpdateDocument(id string, req models.UpdateDocumentRequest) (*mo
 
 	var owner DocumentOwner
 	var name string
-	err = tx.QueryRow("SELECT COALESCE(ticket_id, ''), name FROM documents WHERE id = ?", id).Scan(&owner.TicketID, &name)
+	var revision int
+	err = tx.QueryRow("SELECT COALESCE(ticket_id, ''), name, revision FROM documents WHERE id = ?", id).
+		Scan(&owner.TicketID, &name, &revision)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
+	}
+	// The transaction is BEGIN IMMEDIATE, so no other save can land between
+	// this check and the update below.
+	if req.Content != nil && req.ExpectedRevision != nil && *req.ExpectedRevision != revision {
+		// Release the write lock before reading on another connection; the
+		// deferred rollback is then a no-op.
+		tx.Rollback()
+		current, err := s.GetDocument(id)
+		if err != nil {
+			return nil, err
+		}
+		if current == nil {
+			return nil, nil
+		}
+		return nil, &ErrDocumentConflict{Current: current}
 	}
 	if req.Name != nil {
 		if name, err = checkDocumentName(tx, owner, *req.Name, id); err != nil {
