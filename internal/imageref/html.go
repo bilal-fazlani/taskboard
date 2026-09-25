@@ -91,7 +91,14 @@ func tagTargets(content string, offset int, raw string, attrs []nethtml.Attribut
 		values = append(values, units)
 	}
 	var out []target
+	seen := map[string]bool{}
 	for i, a := range attrs {
+		// A browser keeps the first of a repeated attribute and ignores the
+		// rest, so only the first is a reference.
+		if seen[a.Key] {
+			continue
+		}
+		seen[a.Key] = true
 		var units []unit
 		quoted := false
 		if agree {
