@@ -485,6 +485,9 @@ func (s *Store) CreateTicket(req models.CreateTicketRequest) (*models.Ticket, er
 	if status == "" {
 		status = models.StatusTodo
 	}
+	if !validStatus(status) {
+		return nil, invalidStatus(status)
+	}
 	priority := req.Priority
 	if priority == "" {
 		priority = "medium"
@@ -625,6 +628,9 @@ func (s *Store) UpdateTicket(id string, req models.UpdateTicketRequest, opts ...
 		t.Description = *req.Description
 	}
 	if req.Status != nil {
+		if !validStatus(*req.Status) {
+			return nil, invalidStatus(*req.Status)
+		}
 		t.Status = *req.Status
 	}
 	if err := collectWriteOptions(opts).checkStatusChange(fromStatus, t.Status, req.Note); err != nil {
@@ -723,6 +729,10 @@ func (s *Store) UpdateTicket(id string, req models.UpdateTicketRequest, opts ...
 // within a column writes none. opts can add rules for the change (see
 // RequireNoteLeavingReview).
 func (s *Store) MoveTicket(id string, req models.MoveTicketRequest, opts ...WriteOption) (*models.Ticket, error) {
+	if !validStatus(req.Status) {
+		return nil, invalidStatus(req.Status)
+	}
+
 	tx, err := s.db.Begin()
 	if err != nil {
 		return nil, fmt.Errorf("beginning transaction: %w", err)

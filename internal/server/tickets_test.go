@@ -215,3 +215,24 @@ func TestUpdateTicketClearsFieldsSentEmpty(t *testing.T) {
 		t.Errorf("ticket = %+v, want its labels, repos and dependencies cleared", cleared)
 	}
 }
+
+// The store's status validation (internal/db) must actually reach an HTTP
+// caller as a 400, not a 500 or a silently-accepted ticket: no view has a
+// column for a status no one recognizes.
+func TestCreateTicketWithUnknownStatusIs400(t *testing.T) {
+	r := serve(t)
+
+	project := doJSON[models.Project](t, http.MethodPost, r.url+"/api/projects", map[string]string{
+		"name":   "Billing",
+		"prefix": "BILL",
+	})
+
+	body, status := errorBody(t, http.MethodPost, r.url+"/api/tickets",
+		`{"projectId":"`+project.ID+`","title":"Invoice export","status":"bogus"}`)
+	if status != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", status)
+	}
+	if body.Error == "" {
+		t.Fatal("want an error message naming the valid statuses")
+	}
+}

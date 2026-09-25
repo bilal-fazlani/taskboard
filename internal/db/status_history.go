@@ -52,6 +52,27 @@ func (o writeOptions) checkStatusChange(from, to, note string) error {
 	return nil
 }
 
+// validStatus reports whether status is one of models.Statuses, the single
+// source of truth for the status set. It gates writes only (CreateTicket,
+// UpdateTicket, MoveTicket): a row already holding some other value, from
+// before this check existed, must still be readable, so no read path calls
+// it.
+func validStatus(status string) bool {
+	for _, s := range models.Statuses {
+		if status == s {
+			return true
+		}
+	}
+	return false
+}
+
+// invalidStatus is the error a write gets for a status outside
+// models.Statuses, naming the valid values so the caller — HTTP, MCP or the
+// CLI — knows what to send instead.
+func invalidStatus(status string) error {
+	return invalidInput("invalid status %q: must be one of %s", status, strings.Join(models.Statuses, ", "))
+}
+
 // currentStatus reads a ticket's status inside q's transaction, so a rule
 // checked against it and the write that follows see the same value. found is
 // false when there is no such ticket.

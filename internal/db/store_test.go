@@ -1757,6 +1757,104 @@ func TestMoveTicketToAgentReview(t *testing.T) {
 	}
 }
 
+// An unknown status must reject the whole create rather than storing a
+// ticket that no board column has, the same way a malformed due date is
+// rejected.
+func TestCreateTicketRejectsUnknownStatus(t *testing.T) {
+	s := newTestStore(t)
+	p := seedProject(t, s, "Billing", "BILL")
+
+	_, err := s.CreateTicket(models.CreateTicketRequest{
+		ProjectID: p.ID, Title: "Invoice export", Status: "bogus",
+	})
+	if err == nil {
+		t.Fatal("expected an error for an unknown status")
+	}
+	if !errors.As(err, new(*ErrInvalidInput)) {
+		t.Fatalf("error %v should be an ErrInvalidInput so the HTTP layer returns 400", err)
+	}
+
+	tickets, err := s.ListTickets(models.TicketFilter{})
+	if err != nil {
+		t.Fatalf("ListTickets: %v", err)
+	}
+	if len(tickets) != 0 {
+		t.Fatalf("tickets = %d, want 0; a rejected create must leave nothing behind", len(tickets))
+	}
+}
+
+// An omitted status on create still defaults to todo, the behaviour from
+// before this validation existed.
+func TestCreateTicketWithNoStatusDefaultsToTodo(t *testing.T) {
+	s := newTestStore(t)
+	p := seedProject(t, s, "Billing", "BILL")
+
+	tk, err := s.CreateTicket(models.CreateTicketRequest{ProjectID: p.ID, Title: "Invoice export"})
+	if err != nil {
+		t.Fatalf("CreateTicket: %v", err)
+	}
+	if tk.Status != models.StatusTodo {
+		t.Fatalf("status = %q, want %q", tk.Status, models.StatusTodo)
+	}
+}
+
+// An unknown status must reject the whole update rather than writing it,
+// leaving the ticket's previous status in place.
+func TestUpdateTicketRejectsUnknownStatus(t *testing.T) {
+	s := newTestStore(t)
+	p := seedProject(t, s, "Billing", "BILL")
+	tk := seedTicket(t, s, p.ID, "Invoice export")
+
+	bad := "bogus"
+	_, err := s.UpdateTicket(tk.ID, models.UpdateTicketRequest{Status: &bad})
+	if err == nil {
+		t.Fatal("expected an error for an unknown status")
+	}
+	if !errors.As(err, new(*ErrInvalidInput)) {
+		t.Fatalf("error %v should be an ErrInvalidInput so the HTTP layer returns 400", err)
+	}
+
+	got, err := s.GetTicket(tk.ID)
+	if err != nil {
+		t.Fatalf("GetTicket: %v", err)
+	}
+	if got.Status != models.StatusTodo {
+		t.Fatalf("status = %q, want unchanged at %q", got.Status, models.StatusTodo)
+	}
+}
+
+// An unknown status must reject the whole move rather than writing it or its
+// history row.
+func TestMoveTicketRejectsUnknownStatus(t *testing.T) {
+	s := newTestStore(t)
+	p := seedProject(t, s, "Billing", "BILL")
+	tk := seedTicket(t, s, p.ID, "Invoice export")
+
+	_, err := s.MoveTicket(tk.ID, models.MoveTicketRequest{Status: "bogus"})
+	if err == nil {
+		t.Fatal("expected an error for an unknown status")
+	}
+	if !errors.As(err, new(*ErrInvalidInput)) {
+		t.Fatalf("error %v should be an ErrInvalidInput so the HTTP layer returns 400", err)
+	}
+
+	got, err := s.GetTicket(tk.ID)
+	if err != nil {
+		t.Fatalf("GetTicket: %v", err)
+	}
+	if got.Status != models.StatusTodo {
+		t.Fatalf("status = %q, want unchanged at %q", got.Status, models.StatusTodo)
+	}
+
+	history, err := s.ListStatusChanges(tk.ID)
+	if err != nil {
+		t.Fatalf("ListStatusChanges: %v", err)
+	}
+	if len(history) != 1 {
+		t.Fatalf("history has %d entries, want just the creation row (a rejected move must write no history)", len(history))
+	}
+}
+
 func TestGetBoardHasAColumnPerStatusInOrder(t *testing.T) {
 	s := newTestStore(t)
 	p := seedProject(t, s, "Agent Control Plane", "ACP")
