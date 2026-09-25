@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -74,6 +75,39 @@ func ticketCommands() *cobra.Command {
 	listCmd.Flags().StringVar(&listRepo, "repo", "", "filter by repo")
 	listCmd.Flags().StringVar(&listLabel, "label", "", "filter by label name")
 	listCmd.Flags().StringVar(&listEpic, "epic", "", `filter by epic name (case-insensitive) or id, or "none" for tickets without an epic`)
+
+	var getJSON bool
+	getCmd := &cobra.Command{
+		Use:   "get [id-or-key]",
+		Short: "Show a ticket with its labels, dependencies and subtasks, by id or display key (e.g. BILL-2)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			store, err := openStore()
+			if err != nil {
+				return err
+			}
+			ticketID, err := store.ResolveTicketID(args[0])
+			if err != nil {
+				return err
+			}
+			t, err := store.GetTicket(ticketID)
+			if err != nil {
+				return err
+			}
+			if t == nil {
+				return fmt.Errorf("ticket not found")
+			}
+			weburl.Fill(t)
+			if getJSON {
+				enc := json.NewEncoder(cmd.OutOrStdout())
+				enc.SetIndent("", "  ")
+				return enc.Encode(t)
+			}
+			fmt.Fprint(cmd.OutOrStdout(), formatTicketDetail(*t))
+			return nil
+		},
+	}
+	getCmd.Flags().BoolVar(&getJSON, "json", false, "print the full ticket as JSON instead of readable text")
 
 	var createProject, createPriority, createDue, createEpic string
 	var createRepos, createLabels, createDependsOn []string
@@ -297,8 +331,151 @@ func ticketCommands() *cobra.Command {
 	updateCmd.Flags().StringSliceVar(&updLabelAlias, "label", nil, "alias for --labels")
 	updateCmd.Flags().StringSliceVar(&updDependsOn, "depends-on", nil, "replace dependencies; comma-separated or repeated, empty value clears")
 
-	cmd.AddCommand(listCmd, createCmd, moveCmd, deleteCmd, updateCmd, historyCmd)
+	cmd.AddCommand(listCmd, getCmd, createCmd, moveCmd, deleteCmd, updateCmd, historyCmd, subtaskCommands())
 	return cmd
+}
+
+// subtaskCommands returns the `ticket subtask` command group: add, toggle and
+// delete. Subtasks have no display key of their own, so only `add` takes a
+// ticket argument (id or display key); toggle and delete address the subtask
+// directly by id, the same id `ticket get` and the MCP tools print.
+func subtaskCommands() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "subtask",
+		Short: "Manage a ticket's subtasks (checklist items)",
+	}
+
+	addCmd := &cobra.Command{
+		Use:   "add [id-or-key] [title]",
+		Short: "Add a subtask to a ticket, by id or display key (e.g. BILL-2)",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if strings.TrimSpace(args[1]) == "" {
+				return fmt.Errorf("title is required")
+			}
+			store, err := openStore()
+			if err != nil {
+				return err
+			}
+			ticketID, err := store.ResolveTicketID(args[0])
+			if err != nil {
+				return err
+			}
+			st, err := store.AddSubtask(ticketID, models.CreateSubtaskRequest{Title: args[1]})
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "Added subtask %s (%s)\n", st.Title, st.ID)
+			return nil
+		},
+	}
+
+	toggleCmd := &cobra.Command{
+		Use:   "toggle [subtask-id]",
+		Short: "Flip a subtask between done and not done",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			store, err := openStore()
+			if err != nil {
+				return err
+			}
+			st, err := store.ToggleSubtask(args[0])
+			if err != nil {
+				return err
+			}
+			state := "not done"
+			if st.Completed {
+				state = "done"
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "%s is now %s (%s)\n", st.Title, state, st.ID)
+			return nil
+		},
+	}
+
+	deleteCmd := &cobra.Command{
+		Use:   "delete [subtask-id]",
+		Short: "Delete a subtask",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			store, err := openStore()
+			if err != nil {
+				return err
+			}
+			// store.DeleteSubtask never reports whether it matched a row, so
+			// an unknown id would otherwise print success and exit 0. Check
+			// existence first and fail clearly instead; the same gap through
+			// MCP and HTTP is ACP-121.
+			st, err := store.GetSubtask(args[0])
+			if err != nil {
+				return err
+			}
+			if st == nil {
+				return fmt.Errorf("subtask not found: %q", args[0])
+			}
+			if err := store.DeleteSubtask(args[0]); err != nil {
+				return err
+			}
+			fmt.Fprintln(cmd.OutOrStdout(), "Subtask deleted.")
+			return nil
+		},
+	}
+
+	cmd.AddCommand(addCmd, toggleCmd, deleteCmd)
+	return cmd
+}
+
+// formatTicketDetail renders a ticket for `ticket get`'s readable (non-JSON)
+// output: a summary line like `ticket list`'s, then its description,
+// dependencies and subtasks, one section per line so a person can scan it and
+// an agent can grep it.
+func formatTicketDetail(t models.Ticket) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "[%s] %s - %s (%s)\n", t.DisplayKey(), t.Title, t.Status, t.Priority)
+	fmt.Fprintf(&b, "  %s  (%s)\n", t.URL, t.ID)
+	if t.Description != "" {
+		fmt.Fprintf(&b, "\n%s\n\n", t.Description)
+	}
+	if len(t.Repos) > 0 {
+		fmt.Fprintf(&b, "Repos: %s\n", strings.Join(t.Repos, ", "))
+	}
+	if len(t.Labels) > 0 {
+		names := make([]string, len(t.Labels))
+		for i, l := range t.Labels {
+			names[i] = l.Name
+		}
+		fmt.Fprintf(&b, "Labels: %s\n", strings.Join(names, ", "))
+	}
+	if t.Epic != nil {
+		fmt.Fprintf(&b, "Epic: %s\n", t.Epic.Name)
+	}
+	if t.DueDate != nil {
+		fmt.Fprintf(&b, "Due: %s\n", t.DueDate.Format("2006-01-02"))
+	}
+	if len(t.DependsOn) > 0 {
+		keys := make([]string, len(t.DependsOn))
+		for i, d := range t.DependsOn {
+			keys[i] = d.Key
+		}
+		fmt.Fprintf(&b, "Depends on: %s\n", strings.Join(keys, ", "))
+	}
+	if len(t.Blocks) > 0 {
+		keys := make([]string, len(t.Blocks))
+		for i, d := range t.Blocks {
+			keys[i] = d.Key
+		}
+		fmt.Fprintf(&b, "Blocks: %s\n", strings.Join(keys, ", "))
+	}
+	if len(t.Subtasks) > 0 {
+		fmt.Fprintln(&b, "Subtasks:")
+		for _, s := range t.Subtasks {
+			mark := " "
+			if s.Completed {
+				mark = "x"
+			}
+			fmt.Fprintf(&b, "  [%s] %s  (%s)\n", mark, s.Title, s.ID)
+		}
+	}
+	return b.String()
 }
 
 const noteFlagUsage = "why the status changed, saved with the change in the ticket's history (optional; ignored when the status does not change)"

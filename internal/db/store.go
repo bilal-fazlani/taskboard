@@ -1402,6 +1402,24 @@ func (s *Store) DeleteSubtask(id string) error {
 	return err
 }
 
+// GetSubtask returns a subtask by id, or nil if none matches. It is a
+// read-only lookup, unlike ToggleSubtask and SetSubtaskState which also
+// write; the CLI uses it to give delete a clear "not found" error on an
+// unknown id, since DeleteSubtask itself never reports whether it matched a
+// row.
+func (s *Store) GetSubtask(id string) (*models.Subtask, error) {
+	var st models.Subtask
+	err := s.db.QueryRow("SELECT id, ticket_id, title, completed, position FROM subtasks WHERE id = ?", id).
+		Scan(&st.ID, &st.TicketID, &st.Title, &st.Completed, &st.Position)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &st, nil
+}
+
 // normalizeRepos trims each entry and drops blanks, so a stray "  " never
 // becomes a repo. Deduplication and ordering are left to the database:
 // ticket_repos is keyed on (ticket_id, repo), every read is ORDER BY repo, and

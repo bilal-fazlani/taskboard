@@ -119,8 +119,14 @@ taskboard project list
 
 taskboard ticket create --project <ID> --title "Implement login" --priority high
 taskboard ticket list --project <ID> --status todo
+taskboard ticket get AUTH-1                          # labels, dependsOn and subtasks, as readable text
+taskboard ticket get AUTH-1 --json                    # ...or as JSON
 taskboard ticket move <ID> --status done --note "approved and landed"
 taskboard ticket history AUTH-1   # status changes, newest first, with their notes
+
+taskboard ticket subtask add AUTH-1 "Write the integration test"
+taskboard ticket subtask toggle <subtask-id>          # flips it between done and not done
+taskboard ticket subtask delete <subtask-id>
 
 taskboard label create bug --color "#ef4444"
 taskboard label list
@@ -131,6 +137,12 @@ taskboard ticket update <ID> --labels backend,urgent --depends-on AUTH-1
 taskboard ticket update <ID> --repo acme/auth-api,acme/auth-web  # replaces the set
 taskboard ticket list --repo acme/auth-api                       # tickets touching that repo
 ```
+
+`ticket get`, `ticket move`, `ticket history`, `ticket delete`, `ticket update`
+and `ticket subtask add` all accept either a ticket's ID or its display key
+(e.g. `AUTH-1`); the display key matches case-insensitively, the ID does not.
+`ticket subtask toggle` and `ticket subtask delete` address the subtask itself
+by ID, since subtasks have no display key of their own.
 
 `ticket move` and `ticket update` take an optional `--note`, saved in the
 ticket's status history when the status changes. The CLI never requires one.
