@@ -105,7 +105,7 @@ func epicCommands() *cobra.Command {
 	var deleteProject string
 	deleteCmd := &cobra.Command{
 		Use:   "delete [epic]",
-		Short: "Delete an epic, by id, or by name with --project; its tickets stay but lose the epic",
+		Short: "Delete an epic, by id, or by name with --project; its tickets stay but lose the epic, and its documents are deleted for good",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			store, err := openStore()

@@ -671,7 +671,8 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 		{
 			Name: "delete_epic",
 			Description: "Delete an epic. Its tickets are not deleted; they simply lose the epic. The response's " +
-				"clearedFromTickets field reports how many tickets that was.",
+				"clearedFromTickets field reports how many tickets that was. Its own documents are deleted for good " +
+				"with it and cannot be restored; its tickets' documents stay.",
 			InputSchema: jsonSchema{
 				Type: "object",
 				Properties: map[string]schemaProp{

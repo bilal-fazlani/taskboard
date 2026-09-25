@@ -572,6 +572,13 @@ describe("Epics delete", () => {
     expect(screen.queryByRole("alertdialog")).toBeNull();
   });
 
+  it("warns that the epic's documents are deleted for good, even with no tickets", async () => {
+    serves({ ...LIST, epics: LIST.epics.map((e) => (e === IDEAS ? { ...e, documentCount: 2 } : e)) });
+    await mount();
+    const dialog = await openDelete("Ideas");
+    expect(dialog.textContent).toContain("It has no tickets. Its 2 documents are deleted for good. This can't be undone.");
+  });
+
   it("shows the server's message when it refuses the delete, and stays open", async () => {
     mockApi.epics.delete.mockRejectedValue(new Error('API error 404: {"error":"epic not found"}'));
     await mount();

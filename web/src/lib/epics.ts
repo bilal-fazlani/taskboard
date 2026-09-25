@@ -117,11 +117,19 @@ export function nameError(name: string, epics: readonly Epic[], editingId?: stri
   return null;
 }
 
-/** The delete confirmation's body: what happens to the epic's tickets. */
-export function deleteMessage(total: number): string {
-  if (total <= 0) return "It has no tickets.";
-  if (total === 1) return "Its 1 ticket stays as it is and moves to No epic. This can't be undone.";
-  return `Its ${total} tickets stay as they are and move to No epic. This can't be undone.`;
+/**
+ * The delete confirmation's body: what happens to the epic's tickets, which
+ * stay, and to its own documents, which are deleted with it for good.
+ */
+export function deleteMessage(total: number, documents: number): string {
+  const parts: string[] = [];
+  if (total <= 0) parts.push("It has no tickets.");
+  else if (total === 1) parts.push("Its 1 ticket stays as it is and moves to No epic.");
+  else parts.push(`Its ${total} tickets stay as they are and move to No epic.`);
+  if (documents === 1) parts.push("Its 1 document is deleted for good.");
+  else if (documents > 1) parts.push(`Its ${documents} documents are deleted for good.`);
+  if (total > 0 || documents > 0) parts.push("This can't be undone.");
+  return parts.join(" ");
 }
 
 /** The API client's message shape, e.g. `API error 400: {"error":"…"}`. */

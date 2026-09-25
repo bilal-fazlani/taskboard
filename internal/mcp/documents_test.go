@@ -239,3 +239,17 @@ func TestEpicDocumentTools(t *testing.T) {
 		t.Fatalf("after delete, list_documents = %+v", listed)
 	}
 }
+
+func TestDeleteEpicToolSaysItsDocumentsAreDeleted(t *testing.T) {
+	s := newTestServer(t)
+	for _, def := range s.toolDefinitions() {
+		if def.Name != "delete_epic" {
+			continue
+		}
+		if !strings.Contains(def.Description, "Its own documents are deleted for good") {
+			t.Fatalf("delete_epic description = %q", def.Description)
+		}
+		return
+	}
+	t.Fatal("delete_epic not listed")
+}

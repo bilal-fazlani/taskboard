@@ -241,3 +241,13 @@ func TestDocCommandsOnEpics(t *testing.T) {
 		t.Fatalf("epic name without --project: %v", err)
 	}
 }
+
+func TestEpicDeleteHelpSaysItsDocumentsAreDeleted(t *testing.T) {
+	cmd, _, err := NewRootCmd(nil).Find([]string{"epic", "delete"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(cmd.Short, "its documents are deleted for good") {
+		t.Fatalf("epic delete Short = %q", cmd.Short)
+	}
+}

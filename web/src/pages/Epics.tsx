@@ -325,7 +325,7 @@ function DeleteDialog({
       onClose={onClose}
     >
       <p id={bodyId} className="text-sm text-slate-400">
-        {deleteMessage(epic.total)}
+        {deleteMessage(epic.total, epic.documentCount ?? 0)}
       </p>
       {error && (
         <p role="alert" className="mt-3 text-xs text-red-400">

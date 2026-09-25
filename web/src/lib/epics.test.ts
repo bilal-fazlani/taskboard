@@ -124,9 +124,17 @@ describe("nameError", () => {
 
 describe("deleteMessage", () => {
   it("says what happens to the tickets", () => {
-    expect(deleteMessage(4)).toBe("Its 4 tickets stay as they are and move to No epic. This can't be undone.");
-    expect(deleteMessage(1)).toBe("Its 1 ticket stays as it is and moves to No epic. This can't be undone.");
-    expect(deleteMessage(0)).toBe("It has no tickets.");
+    expect(deleteMessage(4, 0)).toBe("Its 4 tickets stay as they are and move to No epic. This can't be undone.");
+    expect(deleteMessage(1, 0)).toBe("Its 1 ticket stays as it is and moves to No epic. This can't be undone.");
+    expect(deleteMessage(0, 0)).toBe("It has no tickets.");
+  });
+
+  it("says the epic's documents are deleted for good, with or without tickets", () => {
+    expect(deleteMessage(4, 2)).toBe(
+      "Its 4 tickets stay as they are and move to No epic. Its 2 documents are deleted for good. This can't be undone.",
+    );
+    expect(deleteMessage(0, 1)).toBe("It has no tickets. Its 1 document is deleted for good. This can't be undone.");
+    expect(deleteMessage(0, 3)).toBe("It has no tickets. Its 3 documents are deleted for good. This can't be undone.");
   });
 });
 
