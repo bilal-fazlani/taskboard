@@ -46,6 +46,11 @@ func OpenAt(dbPath string) (*sql.DB, error) {
 		return nil, fmt.Errorf("running migrations: %w", err)
 	}
 
+	if err := fillDocumentSearch(db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("filling in document text: %w", err)
+	}
+
 	return db, nil
 }
 

@@ -10,6 +10,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/tcarac/taskboard/internal/doctext"
 	"github.com/tcarac/taskboard/internal/models"
 )
 
@@ -278,7 +279,8 @@ func (s *Store) ResolveDocumentRef(owner DocumentOwner, ref string) (string, err
 }
 
 // CreateDocument checks the name and inserts in one transaction, so two
-// writers cannot both pass the duplicate check.
+// writers cannot both pass the duplicate check. The readable text the search
+// matches is worked out first, outside the transaction, and stored with it.
 func (s *Store) CreateDocument(req models.CreateDocumentRequest) (*models.Document, error) {
 	format := req.Format
 	if format == "" {
@@ -291,6 +293,7 @@ func (s *Store) CreateDocument(req models.CreateDocumentRequest) (*models.Docume
 		return nil, invalidInput("%s", msgDocTooLarge(len(req.Content)))
 	}
 	owner := DocumentOwner{TicketID: req.TicketID, EpicID: req.EpicID}
+	text := doctext.ReadableText(format, req.Content)
 
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -314,6 +317,9 @@ func (s *Store) CreateDocument(req models.CreateDocumentRequest) (*models.Docume
 	); err != nil {
 		return nil, err
 	}
+	if err := saveDocumentText(tx, id, 1, text); err != nil {
+		return nil, err
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("committing document: %w", err)
 	}
@@ -324,13 +330,29 @@ func (s *Store) CreateDocument(req models.CreateDocumentRequest) (*models.Docume
 // (nil, nil) for an unknown id. A content save bumps the revision; a rename
 // alone does not. Either bumps updated_at. A content save that names an
 // ExpectedRevision the document has moved past is refused with
-// ErrDocumentConflict and changes nothing, the rename included.
+// ErrDocumentConflict and changes nothing, the rename included. A content
+// save also replaces the readable text the search matches, worked out before
+// the transaction; a rename leaves it as it is.
 func (s *Store) UpdateDocument(id string, req models.UpdateDocumentRequest) (*models.Document, error) {
 	if req.Name == nil && req.Content == nil {
 		return nil, invalidInput(msgDocNothingToUpdate)
 	}
 	if req.Content != nil && len(*req.Content) > models.MaxDocumentBytes {
 		return nil, invalidInput("%s", msgDocTooLarge(len(*req.Content)))
+	}
+	var text string
+	if req.Content != nil {
+		// A document's format never changes, so reading it ahead of the
+		// transaction is safe.
+		var format string
+		err := s.db.QueryRow("SELECT format FROM documents WHERE id = ?", id).Scan(&format)
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		text = doctext.ReadableText(format, *req.Content)
 	}
 
 	tx, err := s.db.Begin()
@@ -380,6 +402,11 @@ func (s *Store) UpdateDocument(id string, req models.UpdateDocumentRequest) (*mo
 	args = append(args, id)
 	if _, err := tx.Exec("UPDATE documents SET "+set+" WHERE id = ?", args...); err != nil {
 		return nil, err
+	}
+	if req.Content != nil {
+		if err := saveDocumentText(tx, id, revision+1, text); err != nil {
+			return nil, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("committing document: %w", err)
