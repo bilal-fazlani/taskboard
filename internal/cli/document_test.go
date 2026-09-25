@@ -155,3 +155,89 @@ func TestDocCommandErrors(t *testing.T) {
 		t.Fatalf("name without --ticket: %v", err)
 	}
 }
+
+func TestDocCommandsOnEpics(t *testing.T) {
+	setLiveBuild(t, false)
+	sandboxHome(t)
+	path := filepath.Join(t.TempDir(), "dev.db")
+	for _, args := range [][]string{
+		{"project", "create", "Docs", "--prefix", "DOC"},
+		{"epic", "create", "DOC", "Launch"},
+		{"ticket", "create", "--project", "DOC", "--title", "Has docs"},
+	} {
+		if _, err := runCLI(t, append([]string{"--db", path}, args...)...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	added := captureStdout(t, func() {
+		if _, err := runCLIWithInput(t, "# r", "--db", path, "doc", "add", "--epic", "Launch", "--project", "DOC", "--name", "Rollout", "--file", "-"); err != nil {
+			t.Fatalf("doc add on epic: %v", err)
+		}
+	})
+	if !strings.Contains(added, "Added document Rollout.md") || !strings.Contains(added, "/epics?project=DOC&epic=Launch&doc=Rollout.md") {
+		t.Fatalf("doc add printed %q", added)
+	}
+	listed := captureStdout(t, func() {
+		if _, err := runCLI(t, "--db", path, "doc", "list", "--epic", "launch", "--project", "doc"); err != nil {
+			t.Fatalf("doc list on epic: %v", err)
+		}
+	})
+	if !strings.Contains(listed, "Rollout.md") || !strings.Contains(listed, "/epics?project=DOC&epic=Launch&doc=Rollout.md") {
+		t.Fatalf("doc list printed %q", listed)
+	}
+	shown := captureStdout(t, func() {
+		if _, err := runCLI(t, "--db", path, "doc", "show", "Rollout", "--epic", "Launch", "--project", "DOC"); err != nil {
+			t.Fatalf("doc show on epic: %v", err)
+		}
+	})
+	if shown != "# r" {
+		t.Fatalf("doc show printed %q", shown)
+	}
+	if _, err := runCLIWithInput(t, "# v2", "--db", path, "doc", "write", "rollout.md", "--epic", "Launch", "--project", "DOC", "--file", "-"); err != nil {
+		t.Fatalf("doc write on epic: %v", err)
+	}
+	renamed := captureStdout(t, func() {
+		if _, err := runCLI(t, "--db", path, "doc", "rename", "Rollout", "Go live", "--epic", "Launch", "--project", "DOC"); err != nil {
+			t.Fatalf("doc rename on epic: %v", err)
+		}
+	})
+	if !strings.Contains(renamed, "Renamed to Go live.md") || !strings.Contains(renamed, "&epic=Launch&doc=Go+live.md") {
+		t.Fatalf("doc rename printed %q", renamed)
+	}
+	// The epic's "Go live" and a ticket's "Go live" live side by side.
+	if _, err := runCLIWithInput(t, "t", "--db", path, "doc", "add", "DOC-1", "--name", "Go live", "--file", "-"); err != nil {
+		t.Fatalf("doc add on ticket beside the epic's: %v", err)
+	}
+	deleted := captureStdout(t, func() {
+		if _, err := runCLI(t, "--db", path, "doc", "delete", "go live", "--epic", "Launch", "--project", "DOC"); err != nil {
+			t.Fatalf("doc delete on epic: %v", err)
+		}
+	})
+	if !strings.Contains(deleted, "Deleted Go live.md") {
+		t.Fatalf("doc delete printed %q", deleted)
+	}
+	ticketDocs := captureStdout(t, func() {
+		if _, err := runCLI(t, "--db", path, "doc", "list", "DOC-1"); err != nil {
+			t.Fatalf("doc list on ticket: %v", err)
+		}
+	})
+	if !strings.Contains(ticketDocs, "Go live.md") {
+		t.Fatalf("deleting the epic's document touched the ticket's: %q", ticketDocs)
+	}
+
+	if _, err := runCLI(t, "--db", path, "doc", "list"); err == nil || !strings.Contains(err.Error(), "--epic") {
+		t.Fatalf("doc list with no owner: %v", err)
+	}
+	if _, err := runCLI(t, "--db", path, "doc", "list", "DOC-1", "--epic", "Launch", "--project", "DOC"); err == nil ||
+		!strings.Contains(err.Error(), "not both") {
+		t.Fatalf("doc list with both owners: %v", err)
+	}
+	if _, err := runCLI(t, "--db", path, "doc", "show", "Go live", "--ticket", "DOC-1", "--epic", "Launch", "--project", "DOC"); err == nil ||
+		!strings.Contains(err.Error(), "not both") {
+		t.Fatalf("doc show with both owners: %v", err)
+	}
+	if _, err := runCLI(t, "--db", path, "doc", "list", "--epic", "Launch"); err == nil ||
+		!strings.Contains(err.Error(), "--project") {
+		t.Fatalf("epic name without --project: %v", err)
+	}
+}

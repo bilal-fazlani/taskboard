@@ -139,7 +139,7 @@ func TestDocumentToolErrors(t *testing.T) {
 		t.Fatalf("bad name error = %v", err)
 	}
 	_, err = s.callTool("create_document", mustJSON(t, map[string]any{"name": "Plan"}))
-	if err == nil || err.Error() != "ticket is required" {
+	if err == nil || err.Error() != "ticket or epic is required" {
 		t.Fatalf("missing ticket error = %v", err)
 	}
 	_, err = s.callTool("get_document", mustJSON(t, map[string]any{"id": "Plan"}))
@@ -158,9 +158,84 @@ func TestDocumentToolsAreListed(t *testing.T) {
 	for _, def := range s.toolDefinitions() {
 		names[def.Name] = true
 	}
-	for _, want := range []string{"get_document", "create_document", "update_document", "delete_document"} {
+	for _, want := range []string{"list_documents", "get_document", "create_document", "update_document", "delete_document"} {
 		if !names[want] {
 			t.Errorf("tools/list is missing %s", want)
 		}
+	}
+}
+
+func TestEpicDocumentTools(t *testing.T) {
+	t.Setenv(weburl.BaseEnv, "http://board.test")
+	s := newTestServer(t)
+	tk := seedMCPTicket(t, s)
+	if _, err := s.store.CreateEpic(models.CreateEpicRequest{ProjectID: tk.ProjectID, Name: "Launch"}); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := s.callTool("create_document", mustJSON(t, map[string]any{
+		"epic": "launch", "project": "DOC", "name": "Rollout", "content": "# r",
+	}))
+	if err != nil {
+		t.Fatalf("create_document on epic: %v", err)
+	}
+	d := got.(*models.Document)
+	if d.URL != "http://board.test/epics?project=DOC&epic=Launch&doc=Rollout.md" || d.EpicID == "" || d.TicketID != "" {
+		t.Fatalf("created = %+v", d.DocumentMeta)
+	}
+	_, err = s.callTool("create_document", mustJSON(t, map[string]any{
+		"epic": "Launch", "project": "DOC", "name": "rollout", "content": "",
+	}))
+	if err == nil || err.Error() != `This epic already has a document called "Rollout.md".` {
+		t.Fatalf("taken name on epic error = %v", err)
+	}
+
+	listed, err := s.callTool("list_documents", mustJSON(t, map[string]any{"epic": "Launch", "project": "doc"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	docs := listed.([]models.DocumentMeta)
+	if len(docs) != 1 || docs[0].URL != d.URL {
+		t.Fatalf("list_documents on epic = %+v", docs)
+	}
+	listed, err = s.callTool("list_documents", mustJSON(t, map[string]any{"ticket": "DOC-1"}))
+	if err != nil || len(listed.([]models.DocumentMeta)) != 0 {
+		t.Fatalf("list_documents on ticket = %+v, %v", listed, err)
+	}
+	if _, err := s.callTool("list_documents", mustJSON(t, map[string]any{})); err == nil || err.Error() != "ticket or epic is required" {
+		t.Fatalf("list_documents with no owner error = %v", err)
+	}
+
+	read, err := s.callTool("get_document", mustJSON(t, map[string]any{"id": "rollout.md", "epic": "Launch", "project": "DOC"}))
+	if err != nil || read.(*models.Document).Content != "# r" || read.(*models.Document).URL != d.URL {
+		t.Fatalf("get_document by epic name = %+v, %v", read, err)
+	}
+	if _, err := s.callTool("get_document", mustJSON(t, map[string]any{"id": "Rollout", "epic": d.EpicID})); err != nil {
+		t.Fatalf("get_document by epic id: %v", err)
+	}
+	_, err = s.callTool("get_document", mustJSON(t, map[string]any{"id": "Rollout", "epic": "Launch", "project": "DOC", "ticket": "DOC-1"}))
+	if err == nil || err.Error() != "pass ticket or epic, not both" {
+		t.Fatalf("both owners error = %v", err)
+	}
+	_, err = s.callTool("get_document", mustJSON(t, map[string]any{"id": "Rollout", "epic": "Launch"}))
+	if err == nil || !strings.Contains(err.Error(), "pass project") {
+		t.Fatalf("epic name without project error = %v", err)
+	}
+
+	updated, err := s.callTool("update_document", mustJSON(t, map[string]any{
+		"id": "Rollout", "epic": "Launch", "project": "DOC", "name": "Go live", "content": "# v2",
+	}))
+	if err != nil {
+		t.Fatalf("update_document on epic: %v", err)
+	}
+	if u := updated.(*models.Document); u.URL != "http://board.test/epics?project=DOC&epic=Launch&doc=Go+live.md" || u.Content != "# v2" {
+		t.Fatalf("updated = %+v", u)
+	}
+	if _, err := s.callTool("delete_document", mustJSON(t, map[string]any{"id": "go live", "epic": "Launch", "project": "DOC"})); err != nil {
+		t.Fatalf("delete_document on epic: %v", err)
+	}
+	listed, _ = s.callTool("list_documents", mustJSON(t, map[string]any{"epic": "Launch", "project": "DOC"}))
+	if len(listed.([]models.DocumentMeta)) != 0 {
+		t.Fatalf("after delete, list_documents = %+v", listed)
 	}
 }
