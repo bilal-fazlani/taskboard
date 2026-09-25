@@ -8,7 +8,10 @@ import { useEscape } from "../lib/escapeStack";
 // click beside the box or Escape cancels. Deleting is permanent. For an
 // image, the box first asks the server where the owner's text uses it and
 // names those places, which will show a missing image; Delete waits for
-// that answer, and works without it if it never comes.
+// that answer, for up to USAGE_TIMEOUT_MS, and works without it if it never
+// comes.
+export const USAGE_TIMEOUT_MS = 5000;
+
 export default function DeleteDocumentConfirm({
   doc,
   onCancel,
@@ -32,6 +35,9 @@ export default function DeleteDocumentConfirm({
   useEffect(() => {
     if (!image) return;
     let cancelled = false;
+    // An answer that takes too long is given up on, so Delete never waits
+    // for good.
+    const giveUp = setTimeout(() => setWarning((w) => (w === undefined ? null : w)), USAGE_TIMEOUT_MS);
     Promise.resolve()
       .then(() => api.documents.usage(doc.id))
       .then((usage) => {
@@ -42,6 +48,7 @@ export default function DeleteDocumentConfirm({
       });
     return () => {
       cancelled = true;
+      clearTimeout(giveUp);
     };
   }, [doc.id, image]);
 

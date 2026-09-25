@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { DocumentMeta } from "../api/client";
 
 const mockApi = vi.hoisted(() => ({
@@ -17,6 +17,7 @@ const mockApi = vi.hoisted(() => ({
 vi.mock("../api/client", () => ({ api: mockApi }));
 
 import DocumentsSection from "./DocumentsSection";
+import { USAGE_TIMEOUT_MS } from "./DeleteDocumentConfirm";
 
 const spec: DocumentMeta = {
   id: "d1", name: "Design spec", format: "markdown", size: 14 * 1024, revision: 1,
@@ -316,6 +317,23 @@ describe("DocumentsSection", () => {
       fireEvent.click(del);
       await waitFor(() => expect(mockApi.documents.delete).toHaveBeenCalledWith("d5"));
       await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1));
+    });
+
+    it("stops waiting for where an image is used after a while", async () => {
+      vi.useFakeTimers();
+      try {
+        mockApi.documents.usage.mockReturnValue(new Promise(() => {}));
+        setup([shot]);
+        fireEvent.click(screen.getByRole("button", { name: "Delete Login screen.png" }));
+        const del = within(screen.getByRole("alertdialog")).getByRole("button", { name: "Delete" }) as HTMLButtonElement;
+        await act(async () => vi.advanceTimersByTime(USAGE_TIMEOUT_MS - 1));
+        expect(del.disabled).toBe(true);
+        await act(async () => vi.advanceTimersByTime(1));
+        expect(del.disabled).toBe(false);
+        expect(screen.getByRole("alertdialog").textContent).toContain("This can't be undone.");
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it("still deletes an image when where it's used can't be told", async () => {
