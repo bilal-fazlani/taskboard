@@ -423,3 +423,61 @@ func seedTicketID(t *testing.T, r *running) string {
 	}
 	return id
 }
+
+func TestImageUsageAndRenameOverHTTP(t *testing.T) {
+	r := serve(t)
+	tk := seedImageTicket(t, r)
+	desc := "![shot](Login screen.png)"
+	if _, err := r.srv.store.UpdateTicket(tk.ID, models.UpdateTicketRequest{Description: &desc}); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := r.srv.store.CreateDocument(models.CreateDocumentRequest{TicketID: tk.ID, Name: "Plan", Content: "![a](<Login screen.png>)"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	img := upload(t, r, "ticket="+tk.ID, "Login screen.png", imagedoctest.PNG(8, 8))
+
+	type usage struct {
+		Places []models.ImagePlace `json:"places"`
+	}
+	got, status := doRequest[usage](t, http.MethodGet, r.url+"/api/documents/"+img.ID+"/usage", "")
+	want := []models.ImagePlace{{Kind: "description"}, {Kind: "document", DocumentID: plan.ID, Name: "Plan.md"}}
+	if status != http.StatusOK || !equalPlaces(got.Places, want) {
+		t.Fatalf("usage = %d %+v", status, got)
+	}
+	// By name, like the other document routes.
+	got, status = doRequest[usage](t, http.MethodGet, r.url+"/api/documents/"+url.PathEscape("Login screen.png")+"/usage?ticket="+tk.ID, "")
+	if status != http.StatusOK || len(got.Places) != 2 {
+		t.Fatalf("usage by name = %d %+v", status, got)
+	}
+	body, status := errorBody(t, http.MethodGet, r.url+"/api/documents/"+plan.ID+"/usage", "")
+	if status != http.StatusBadRequest || body.Error != "This document isn't an image." {
+		t.Fatalf("usage of a text document = %d %q", status, body.Error)
+	}
+	if _, status = errorBody(t, http.MethodGet, r.url+"/api/documents/nope/usage", ""); status != http.StatusNotFound {
+		t.Fatalf("usage of an unknown id = %d", status)
+	}
+
+	renamed, status := doRequest[models.Document](t, http.MethodPut, r.url+"/api/documents/"+img.ID, `{"name":"Home page"}`)
+	if status != http.StatusOK || !equalPlaces(renamed.ReferencesUpdated, want) {
+		t.Fatalf("rename = %d %+v", status, renamed)
+	}
+	if d, _ := r.srv.store.GetDocument(plan.ID); d.Content != "![a](<Home page.png>)" || d.Revision != 2 {
+		t.Errorf("Plan.md = %q rev %d", d.Content, d.Revision)
+	}
+	if got, _ := r.srv.store.GetTicket(tk.ID); got.Description != "![shot](Home page.png)" {
+		t.Errorf("description = %q", got.Description)
+	}
+}
+
+func equalPlaces(got, want []models.ImagePlace) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
+}

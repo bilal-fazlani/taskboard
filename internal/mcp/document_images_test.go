@@ -302,3 +302,82 @@ func TestGetDocumentToolScalesLargeImages(t *testing.T) {
 		t.Error("making the preview changed the stored file")
 	}
 }
+
+func TestImageRenameAndDeleteKeepTextInStep(t *testing.T) {
+	s := newTestServer(t)
+	tk := seedMCPTicket(t, s)
+	desc := "![shot](Login screen.png)"
+	if _, err := s.store.UpdateTicket(tk.ID, models.UpdateTicketRequest{Description: &desc}); err != nil {
+		t.Fatal(err)
+	}
+	page, err := s.store.CreateDocument(models.CreateDocumentRequest{
+		TicketID: tk.ID, Name: "Page", Format: models.DocumentFormatHTML, Content: `<img src="Login%20screen.png">`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.callTool("create_document", mustJSON(t, map[string]any{
+		"ticket": "DOC-1", "name": "Login screen.png", "data": b64(imagedoctest.PNG(8, 8)),
+	})); err != nil {
+		t.Fatal(err)
+	}
+
+	// Renaming, with or without a new picture, rewrites the references and
+	// says where.
+	got, err := s.callTool("update_document", mustJSON(t, map[string]any{"ticket": "DOC-1", "id": "Login screen.png", "name": "Home page"}))
+	if err != nil {
+		t.Fatalf("update_document: %v", err)
+	}
+	d := got.(*models.Document)
+	want := []models.ImagePlace{{Kind: "description"}, {Kind: "document", DocumentID: page.ID, Name: "Page.html"}}
+	if len(d.ReferencesUpdated) != 2 || d.ReferencesUpdated[0] != want[0] || d.ReferencesUpdated[1] != want[1] {
+		t.Errorf("referencesUpdated = %+v", d.ReferencesUpdated)
+	}
+	got, err = s.callTool("update_document", mustJSON(t, map[string]any{
+		"ticket": "DOC-1", "id": "Home page.png", "name": "Start", "data": b64(imagedoctest.PNG(9, 9)),
+	}))
+	if err != nil {
+		t.Fatalf("update_document with data: %v", err)
+	}
+	if d := got.(*models.Document); len(d.ReferencesUpdated) != 2 {
+		t.Errorf("referencesUpdated with data = %+v", d.ReferencesUpdated)
+	}
+	if tk, _ := s.store.GetTicket(tk.ID); tk.Description != "![shot](Start.png)" {
+		t.Errorf("description = %q", tk.Description)
+	}
+	if p, _ := s.store.GetDocument(page.ID); p.Content != `<img src="Start.png">` || p.Revision != 3 {
+		t.Errorf("Page.html = %q rev %d", p.Content, p.Revision)
+	}
+
+	// Deleting it is not refused; the result says where it was used.
+	got, err = s.callTool("delete_document", mustJSON(t, map[string]any{"ticket": "DOC-1", "id": "start.png"}))
+	if err != nil {
+		t.Fatalf("delete_document: %v", err)
+	}
+	m := got.(map[string]any)
+	used, _ := m["usedIn"].([]models.ImagePlace)
+	if m["deleted"] != true || len(used) != 2 || used[0] != want[0] || used[1] != want[1] {
+		t.Errorf("delete_document = %+v", m)
+	}
+	// A document nothing uses reports no places.
+	got, err = s.callTool("delete_document", mustJSON(t, map[string]any{"ticket": "DOC-1", "id": "Page"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m := got.(map[string]any); m["deleted"] != true || m["usedIn"] != nil {
+		t.Errorf("delete_document of a page = %+v", m)
+	}
+
+	for _, def := range s.toolDefinitions() {
+		switch def.Name {
+		case "update_document":
+			if !strings.Contains(def.Description, "rewrites every reference to it by name") {
+				t.Errorf("update_document description doesn't say a rename rewrites references: %s", def.Description)
+			}
+		case "delete_document":
+			if !strings.Contains(def.Description, "is not refused") || !strings.Contains(def.Description, "usedIn") {
+				t.Errorf("delete_document description doesn't say what deleting a used image does: %s", def.Description)
+			}
+		}
+	}
+}

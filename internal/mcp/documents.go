@@ -87,7 +87,11 @@ func (s *MCPServer) documentToolDefinitions() []toolDef {
 			Name: "update_document",
 			Description: "Rename a document and/or replace its content. content replaces the whole document; there " +
 				"are no partial edits. An image's picture is replaced with data instead, a new file of the same format. " +
-				"The format never changes.",
+				"The format never changes. Renaming an image also rewrites every reference to it by name in its owner's " +
+				"text (the ticket's description and the ticket's or epic's markdown and HTML documents), in the same " +
+				"form, together with the rename: each rewritten document gets a new revision. The result's " +
+				"referencesUpdated lists the places rewritten, and referencesLeft any place where a reference could not " +
+				"be rewritten and now shows a missing image.",
 			InputSchema: jsonSchema{
 				Type: "object",
 				Properties: documentOwnerProps(documentTicketDescription, map[string]schemaProp{
@@ -100,8 +104,11 @@ func (s *MCPServer) documentToolDefinitions() []toolDef {
 			},
 		},
 		{
-			Name:        "delete_document",
-			Description: "Delete a document for good. It cannot be restored.",
+			Name: "delete_document",
+			Description: "Delete a document for good. It cannot be restored. Deleting an image that its owner's " +
+				"text still uses (the ticket's description, or the ticket's or epic's markdown and HTML documents) is " +
+				"not refused: those places show a missing image afterwards, and the result's usedIn lists them. " +
+				"Decide before deleting whether that is what you want.",
 			InputSchema: jsonSchema{
 				Type: "object",
 				Properties: documentOwnerProps(documentTicketDescription, map[string]schemaProp{
@@ -251,14 +258,18 @@ func (s *MCPServer) callDocumentTool(name string, args json.RawMessage) (result 
 		if err != nil {
 			return nil, true, err
 		}
-		deleted, err := s.store.DeleteDocument(id)
+		deleted, usedIn, err := s.store.DeleteDocumentReportingUse(id)
 		if err != nil {
 			return nil, true, err
 		}
 		if !deleted {
 			return nil, true, fmt.Errorf("document not found")
 		}
-		return map[string]bool{"deleted": true}, true, nil
+		result := map[string]any{"deleted": true}
+		if len(usedIn) > 0 {
+			result["usedIn"] = usedIn
+		}
+		return result, true, nil
 	}
 	return nil, false, nil
 }

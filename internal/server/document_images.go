@@ -189,3 +189,26 @@ func writeImageFileWithPolicy(w http.ResponseWriter, r *http.Request, f *db.Imag
 	h.Set("Content-Disposition", mime.FormatMediaType(disposition, map[string]string{"filename": filename}))
 	http.ServeContent(w, r, "", f.Document.UpdatedAt, bytes.NewReader(f.Data))
 }
+
+// getImageUsage answers GET /api/documents/{ref}/usage with the places in
+// the image's owner's text that use it: {"places": [{"kind": "description"},
+// {"kind": "document", "documentId": …, "name": "Plan.md"}]}, worked out
+// from the text now. The web's delete confirm names them. A document that
+// is not an image is a 400. No image name ends in "usage" without an
+// extension, so this never shadows getReferencedImage.
+func (s *Server) getImageUsage(w http.ResponseWriter, r *http.Request) {
+	id, ok := s.documentID(w, r)
+	if !ok {
+		return
+	}
+	places, found, err := s.store.ImageUsage(id)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	if !found {
+		writeError(w, http.StatusNotFound, "document not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string][]models.ImagePlace{"places": places})
+}

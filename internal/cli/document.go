@@ -203,7 +203,10 @@ func documentCommands() *cobra.Command {
 	renameCmd := &cobra.Command{
 		Use:   "rename [document] [new-name]",
 		Short: "Rename a document, by id, or by name with --ticket or --epic",
-		Args:  cobra.ExactArgs(2),
+		Long: "Rename a document, by id, or by name with --ticket or --epic. Renaming an image also rewrites every " +
+			"reference to it by name in its owner's text (the ticket's description and the ticket's or epic's markdown " +
+			"and HTML documents), in the same form, together with the rename; each rewritten document gets a new revision.",
+		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			store, err := openStore()
 			if err != nil {
@@ -222,6 +225,7 @@ func documentCommands() *cobra.Command {
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "Renamed to %s (%s)\n%s\n",
 				models.DocumentDisplayName(d.Name, d.Format), d.ID, documentURL(store, &d.DocumentMeta))
+			printReferences(cmd, d)
 			return nil
 		},
 	}
@@ -231,7 +235,9 @@ func documentCommands() *cobra.Command {
 	deleteCmd := &cobra.Command{
 		Use:   "delete [document]",
 		Short: "Delete a document for good, by id, or by name with --ticket or --epic",
-		Args:  cobra.ExactArgs(1),
+		Long: "Delete a document for good, by id, or by name with --ticket or --epic. Deleting an image its owner's " +
+			"text still uses is not refused: those places show a missing image afterwards, and the output names them.",
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			store, err := openStore()
 			if err != nil {
@@ -241,10 +247,15 @@ func documentCommands() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if _, err := store.DeleteDocument(d.ID); err != nil {
+			_, usedIn, err := store.DeleteDocumentReportingUse(d.ID)
+			if err != nil {
 				return err
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "Deleted %s\n", models.DocumentDisplayName(d.Name, d.Format))
+			if len(usedIn) > 0 {
+				fmt.Fprintf(cmd.OutOrStdout(), "It was used in %s, which now show%s a missing image.\n",
+					models.JoinImagePlaces(usedIn), plural(len(usedIn), "", "s"))
+			}
 			return nil
 		},
 	}
@@ -437,4 +448,23 @@ func documentURL(store *db.Store, d *models.DocumentMeta) string {
 		return ""
 	}
 	return weburl.TicketDocument(weburl.Base(), weburl.Ref(*t), display)
+}
+
+// printReferences says what renaming an image did to its owner's text.
+func printReferences(cmd *cobra.Command, d *models.Document) {
+	if len(d.ReferencesUpdated) > 0 {
+		fmt.Fprintf(cmd.OutOrStdout(), "Updated references in %s.\n", models.JoinImagePlaces(d.ReferencesUpdated))
+	}
+	if len(d.ReferencesLeft) > 0 {
+		fmt.Fprintf(cmd.OutOrStdout(), "Couldn't update a reference in %s: %s a missing image until it's fixed by hand.\n",
+			models.JoinImagePlaces(d.ReferencesLeft), plural(len(d.ReferencesLeft), "they show", "it shows"))
+	}
+}
+
+// plural picks many for a count other than one, else one.
+func plural(n int, many, one string) string {
+	if n == 1 {
+		return one
+	}
+	return many
 }

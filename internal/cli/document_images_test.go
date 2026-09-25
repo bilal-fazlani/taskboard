@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tcarac/taskboard/internal/db"
 	"github.com/tcarac/taskboard/internal/imagedoc/imagedoctest"
 )
 
@@ -183,5 +184,62 @@ func TestDocCommandImageRefusals(t *testing.T) {
 	listed, _ := runCLI(t, "--db", path, "doc", "list", "DOC-1")
 	if !strings.Contains(listed, "No documents.") {
 		t.Errorf("refused files were attached: %q", listed)
+	}
+}
+
+func TestDocRenameAndDeleteKeepTextInStep(t *testing.T) {
+	path := cliImageBoard(t)
+	run := func(args ...string) string {
+		t.Helper()
+		out, err := runCLI(t, append([]string{"--db", path}, args...)...)
+		if err != nil {
+			t.Fatalf("%v: %v", args, err)
+		}
+		return out
+	}
+	run("ticket", "update", "DOC-1", "--description", "![shot](Login screen.png)")
+	run("doc", "add", "DOC-1", "--file", writeTemp(t, "Plan.md", []byte("![a](<Login screen.png>)")))
+	run("doc", "add", "DOC-1", "--file", writeTemp(t, "Login screen.png", imagedoctest.PNG(8, 8)))
+	run("doc", "add", "--epic", "Launch", "--project", "DOC", "--file", writeTemp(t, "Board.html", []byte(`<img src="./Flow.png">`)))
+	run("doc", "add", "--epic", "Launch", "--project", "DOC", "--file", writeTemp(t, "Flow.png", imagedoctest.PNG(8, 8)))
+
+	out := run("doc", "rename", "Login screen.png", "Home page", "--ticket", "DOC-1")
+	if !strings.Contains(out, "Renamed to Home page.png") || !strings.Contains(out, "Updated references in the description and Plan.md.") {
+		t.Errorf("doc rename printed %q", out)
+	}
+	database, err := db.OpenAt(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := db.NewStore(database)
+	id, _ := store.ResolveTicketID("DOC-1")
+	tk, _ := store.GetTicket(id)
+	database.Close()
+	if tk == nil || tk.Description != "![shot](Home page.png)" {
+		t.Errorf("description after rename: %+v", tk)
+	}
+	if shown := run("doc", "show", "Plan", "--ticket", "DOC-1"); !strings.Contains(shown, "![a](<Home page.png>)") {
+		t.Errorf("Plan.md after rename: %q", shown)
+	}
+	out = run("doc", "rename", "flow.png", "Rollout flow", "--epic", "Launch", "--project", "DOC")
+	if !strings.Contains(out, "Updated references in Board.html.") {
+		t.Errorf("epic doc rename printed %q", out)
+	}
+	if shown := run("doc", "show", "Board", "--epic", "Launch", "--project", "DOC"); !strings.Contains(shown, `<img src="./Rollout flow.png">`) {
+		t.Errorf("Board.html after rename: %q", shown)
+	}
+
+	out = run("doc", "delete", "Home page.png", "--ticket", "DOC-1")
+	if !strings.Contains(out, "Deleted Home page.png") ||
+		!strings.Contains(out, "It was used in the description and Plan.md, which now show a missing image.") {
+		t.Errorf("doc delete printed %q", out)
+	}
+	out = run("doc", "delete", "Rollout flow.png", "--epic", "Launch", "--project", "DOC")
+	if !strings.Contains(out, "It was used in Board.html, which now shows a missing image.") {
+		t.Errorf("epic doc delete printed %q", out)
+	}
+	out = run("doc", "delete", "Plan", "--ticket", "DOC-1")
+	if strings.Contains(out, "used in") {
+		t.Errorf("deleting a text document printed %q", out)
 	}
 }
