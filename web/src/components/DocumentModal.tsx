@@ -9,8 +9,13 @@ import { useEscape } from "../lib/escapeStack";
 import DeleteDocumentConfirm from "./DeleteDocumentConfirm";
 import DocumentRenameField from "./DocumentRenameField";
 
+// The HTML document's frame is in the Tab order, so the keyboard can reach
+// and scroll the page.
 const FOCUSABLE =
-  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), iframe, [tabindex]:not([tabindex="-1"])';
+// Marks the element after the frame that sends focus back to the top; it is
+// never a stop of its own.
+const FOCUS_WRAP = "data-focus-wrap";
 const ICON_BUTTON = "shrink-0 text-slate-500 transition-colors hover:text-slate-300 focus:text-slate-300 focus:outline-none";
 const TOGGLE = "inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs transition-colors";
 const NOTICE =
@@ -257,10 +262,13 @@ export default function DocumentModal({
     onClose();
   };
 
+  const focusables = () =>
+    Array.from(dialogRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? []).filter((el) => !el.hasAttribute(FOCUS_WRAP));
+
   const trapTab = (e: React.KeyboardEvent<HTMLDivElement>) => {
     const root = dialogRef.current;
     if (e.key !== "Tab" || !root || deleting || asking) return;
-    const focusable = Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE));
+    const focusable = focusables();
     if (focusable.length === 0) return;
     const first = focusable[0];
     const last = focusable[focusable.length - 1];
@@ -461,6 +469,12 @@ export default function DocumentModal({
         >
           {body}
         </div>
+        {!editable && (
+          // Tab inside the frame never reaches trapTab (its keys stay in the
+          // page), so leaving the page's last control lands here and wraps
+          // to the top of the modal.
+          <span tabIndex={0} data-focus-wrap="" className="sr-only" onFocus={() => focusables()[0]?.focus()} />
+        )}
       </div>
 
       {deleting && (

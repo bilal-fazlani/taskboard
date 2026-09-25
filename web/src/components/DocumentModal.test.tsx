@@ -407,6 +407,33 @@ describe("HTML documents", () => {
     expect(before.isConnected).toBe(false);
   });
 
+  it("puts the page in the Tab order, after the header, and wraps back from it", () => {
+    setup(page);
+    const dialog = screen.getByRole("dialog");
+    const frame = screen.getByTitle("Report.html");
+    // Shift+Tab from the dialog wraps to its last stop: the page.
+    fireEvent.keyDown(dialog, { key: "Tab", shiftKey: true });
+    expect(document.activeElement).toBe(frame);
+    // Tab from Close is not wrapped: it goes on into the page.
+    const close = screen.getByRole("button", { name: "Close document" });
+    close.focus();
+    expect(fireEvent.keyDown(close, { key: "Tab" })).toBe(true);
+    expect(document.activeElement).toBe(close);
+    // Tabbing out of the page's own controls lands after the frame and
+    // wraps to the first control in the header.
+    const wrap = document.querySelector<HTMLElement>("[data-focus-wrap]");
+    expect(wrap).not.toBeNull();
+    wrap!.focus();
+    expect(document.activeElement).toBe(screen.getByRole("link", { name: "Download Report.html" }));
+  });
+
+  it("has no wrap stop for a markdown document", async () => {
+    mockApi.documents.get.mockResolvedValue({ ...spec, content: "x" });
+    setup();
+    await waitFor(() => expect(mockApi.documents.get).toHaveBeenCalled());
+    expect(document.querySelector("[data-focus-wrap]")).toBeNull();
+  });
+
   it("never opens an HTML document in edit mode", () => {
     setup(page, { startEditing: true });
     expect(screen.getByTitle("Report.html").tagName).toBe("IFRAME");
