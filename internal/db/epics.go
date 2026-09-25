@@ -313,7 +313,7 @@ func (s *Store) CreateEpic(req models.CreateEpicRequest) (*models.Epic, error) {
 	id := newID()
 	if _, err := tx.Exec(
 		"INSERT INTO epics (id, project_id, name, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-		id, projectID, name, req.Description, now, now,
+		id, projectID, name, req.Description, stamp(now), stamp(now),
 	); err != nil {
 		return nil, err
 	}
@@ -349,7 +349,7 @@ func (s *Store) UpdateEpic(id string, req models.UpdateEpicRequest) (*models.Epi
 	}
 	if _, err := tx.Exec(
 		"UPDATE epics SET name = ?, description = ?, updated_at = ? WHERE id = ?",
-		e.Name, e.Description, time.Now(), e.ID,
+		e.Name, e.Description, stamp(time.Now()), e.ID,
 	); err != nil {
 		return nil, err
 	}

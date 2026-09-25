@@ -352,7 +352,7 @@ func (s *Store) CreateDocument(req models.CreateDocumentRequest) (*models.Docume
 	if _, err := tx.Exec(
 		`INSERT INTO documents (id, ticket_id, epic_id, name, format, content, revision, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)`,
-		id, nullable(owner.TicketID), nullable(owner.EpicID), name, format, req.Content, now, now,
+		id, nullable(owner.TicketID), nullable(owner.EpicID), name, format, req.Content, stamp(now), stamp(now),
 	); err != nil {
 		return nil, err
 	}
@@ -447,7 +447,7 @@ func (s *Store) UpdateDocument(id string, req models.UpdateDocumentRequest) (*mo
 	}
 
 	set := "name = ?, updated_at = ?"
-	args := []any{name, now}
+	args := []any{name, stamp(now)}
 	if req.Content != nil {
 		set += ", content = ?, revision = revision + 1"
 		args = append(args, *req.Content)

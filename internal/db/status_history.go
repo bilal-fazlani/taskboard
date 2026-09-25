@@ -73,7 +73,7 @@ func recordStatusChange(q dbtx, ticketID, from, to, note string, at time.Time) e
 	if _, err := q.Exec(
 		`INSERT INTO ticket_status_changes (id, ticket_id, from_status, to_status, note, created_at)
 		VALUES (?, ?, ?, ?, ?, ?)`,
-		newID(), ticketID, from, to, strings.TrimSpace(note), at.UTC(),
+		newID(), ticketID, from, to, strings.TrimSpace(note), stamp(at),
 	); err != nil {
 		return fmt.Errorf("recording status change: %w", err)
 	}

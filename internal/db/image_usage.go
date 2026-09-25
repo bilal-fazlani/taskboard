@@ -164,13 +164,13 @@ func rewriteImageRefs(tx dbtx, owner DocumentOwner, img imageref.Image, newName 
 		done.updated = append(done.updated, t.place)
 		if t.place.Kind == models.ImagePlaceDescription {
 			if _, err := tx.Exec("UPDATE tickets SET description = ?, updated_at = ? WHERE id = ?",
-				content, now, owner.TicketID); err != nil {
+				content, stamp(now), owner.TicketID); err != nil {
 				return done, fmt.Errorf("updating description: %w", err)
 			}
 			continue
 		}
 		if _, err := tx.Exec("UPDATE documents SET content = ?, revision = revision + 1, updated_at = ? WHERE id = ?",
-			content, now, t.place.DocumentID); err != nil {
+			content, stamp(now), t.place.DocumentID); err != nil {
 			return done, fmt.Errorf("updating %s: %w", t.place.Name, err)
 		}
 		if err := saveDocumentText(tx, t.place.DocumentID, t.revision+1, doctext.ReadableText(t.format, content)); err != nil {

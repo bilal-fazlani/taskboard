@@ -111,8 +111,8 @@ func (s *Store) CreateProject(req models.CreateProjectRequest) (*models.Project,
 		Icon:        req.Icon,
 		Color:       req.Color,
 		Status:      "active",
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
 	}
 	if p.Color == "" {
 		p.Color = "#3B82F6"
@@ -120,7 +120,7 @@ func (s *Store) CreateProject(req models.CreateProjectRequest) (*models.Project,
 
 	_, err := s.db.Exec(
 		"INSERT INTO projects (id, name, prefix, description, icon, color, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-		p.ID, p.Name, p.Prefix, p.Description, p.Icon, p.Color, p.Status, p.CreatedAt, p.UpdatedAt,
+		p.ID, p.Name, p.Prefix, p.Description, p.Icon, p.Color, p.Status, stamp(p.CreatedAt), stamp(p.UpdatedAt),
 	)
 	return &p, err
 }
@@ -149,11 +149,11 @@ func (s *Store) UpdateProject(id string, req models.UpdateProjectRequest) (*mode
 	if req.Status != nil {
 		p.Status = *req.Status
 	}
-	p.UpdatedAt = time.Now()
+	p.UpdatedAt = time.Now().UTC()
 
 	_, err = s.db.Exec(
 		"UPDATE projects SET name=?, prefix=?, description=?, icon=?, color=?, status=?, updated_at=? WHERE id=?",
-		p.Name, p.Prefix, p.Description, p.Icon, p.Color, p.Status, p.UpdatedAt, p.ID,
+		p.Name, p.Prefix, p.Description, p.Icon, p.Color, p.Status, stamp(p.UpdatedAt), p.ID,
 	)
 	return p, err
 }
@@ -491,8 +491,8 @@ func (s *Store) CreateTicket(req models.CreateTicketRequest) (*models.Ticket, er
 		Priority:    priority,
 		Repos:       normalizeRepos(req.Repos),
 		Position:    float64(num) * 1000,
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
 	}
 
 	if req.DueDate != nil {
@@ -525,7 +525,7 @@ func (s *Store) CreateTicket(req models.CreateTicketRequest) (*models.Ticket, er
 	if _, err = tx.Exec(
 		`INSERT INTO tickets (id, project_id, number, title, description, status, priority, due_date, epic_id, position, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		t.ID, t.ProjectID, t.Number, t.Title, t.Description, t.Status, t.Priority, t.DueDate, epicID, t.Position, t.CreatedAt, t.UpdatedAt,
+		t.ID, t.ProjectID, t.Number, t.Title, t.Description, t.Status, t.Priority, t.DueDate, epicID, t.Position, stamp(t.CreatedAt), stamp(t.UpdatedAt),
 	); err != nil {
 		return nil, err
 	}
@@ -638,11 +638,11 @@ func (s *Store) UpdateTicket(id string, req models.UpdateTicketRequest, opts ...
 			return nil, err
 		}
 	}
-	t.UpdatedAt = time.Now()
+	t.UpdatedAt = time.Now().UTC()
 
 	if _, err = tx.Exec(
 		`UPDATE tickets SET title=?, description=?, status=?, priority=?, due_date=?, position=?, updated_at=? WHERE id=?`,
-		t.Title, t.Description, t.Status, t.Priority, t.DueDate, t.Position, t.UpdatedAt, t.ID,
+		t.Title, t.Description, t.Status, t.Priority, t.DueDate, t.Position, stamp(t.UpdatedAt), t.ID,
 	); err != nil {
 		return nil, err
 	}
@@ -731,7 +731,7 @@ func (s *Store) MoveTicket(id string, req models.MoveTicketRequest, opts ...Writ
 		return nil, err
 	}
 
-	now := time.Now()
+	now := time.Now().UTC()
 	position := float64(0)
 	if req.Position != nil {
 		position = *req.Position
@@ -742,7 +742,7 @@ func (s *Store) MoveTicket(id string, req models.MoveTicketRequest, opts ...Writ
 	}
 
 	if _, err := tx.Exec("UPDATE tickets SET status=?, position=?, updated_at=? WHERE id=?",
-		req.Status, position, now, id); err != nil {
+		req.Status, position, stamp(now), id); err != nil {
 		return nil, err
 	}
 	if req.Status != fromStatus {

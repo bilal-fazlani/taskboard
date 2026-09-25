@@ -78,7 +78,7 @@ func (s *Store) CreateImageDocument(req models.CreateImageRequest) (*models.Docu
 		`INSERT INTO documents (id, ticket_id, epic_id, name, format, revision, size, width, height, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)`,
 		id, nullable(owner.TicketID), nullable(owner.EpicID), name, format,
-		len(img.Data), img.Width, img.Height, now, now,
+		len(img.Data), img.Width, img.Height, stamp(now), stamp(now),
 	); err != nil {
 		return nil, err
 	}
@@ -148,7 +148,7 @@ func (s *Store) ReplaceDocumentImage(id string, data []byte, name *string) (*mod
 		}
 	}
 	if _, err := tx.Exec(`UPDATE documents SET name = ?, size = ?, width = ?, height = ?, revision = revision + 1, updated_at = ?
-		WHERE id = ?`, current, len(img.Data), img.Width, img.Height, now, id); err != nil {
+		WHERE id = ?`, current, len(img.Data), img.Width, img.Height, stamp(now), id); err != nil {
 		return nil, err
 	}
 	if _, err := tx.Exec(`UPDATE document_images SET thumbnail_type = ?, thumbnail = ?, data = ? WHERE document_id = ?`,
