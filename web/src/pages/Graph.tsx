@@ -7,12 +7,14 @@ import TicketCard from "../components/TicketCard";
 import FilterPanel from "../components/FilterPanel";
 import { useChangeGlow } from "../hooks/useChangeGlow";
 import { useDocumentMatches } from "../hooks/useDocumentMatches";
+import { useDocumentVisible } from "../hooks/useDocumentVisible";
 import { useFilters } from "../hooks/useFilters";
 import { useUnmatched } from "../hooks/useUnmatched";
 import { useLiveRefresh } from "../hooks/useLiveRefresh";
 import { useTicketParam } from "../hooks/useTicketParam";
 import { CHANGE_GLOW_CLASS } from "../lib/changeGlow";
 import { awaitingProject } from "../lib/defaultProject";
+import { stepFit } from "../lib/graphFit";
 import { NARROWING_KEYS, inProject, matchesFilters, repoOptions } from "../lib/filters";
 import {
   chainFinder,
@@ -184,11 +186,20 @@ export default function Graph() {
   // card that has left the graph is dropped, below.
   const [picked, setPicked] = useState<HighlightState>(NO_HIGHLIGHT);
   // Pan and zoom: screen = translate + scale * canvas. `fitPending` is true
-  // from first load until the fit has run.
+  // from first load until the fit has run or the user has moved the graph
+  // (lib/graphFit.ts).
   const [transform, setTransform] = useState<Transform>(IDENTITY);
   const [fitPending, setFitPending] = useState(true);
   const [viewportSize, setViewportSize] = useState<Extent | null>(null);
   const [panning, setPanning] = useState(false);
+  const visible = useDocumentVisible();
+  // Every pan and zoom the user makes, and the Fit button, go through here
+  // and settle a pending fit, so no fit is applied over a graph the user has
+  // moved.
+  const moveView = useCallback((move: (t: Transform) => Transform) => {
+    setFitPending((pending) => stepFit(pending, { type: "userMoved" }).pending);
+    setTransform(move);
+  }, []);
   const filterState = useFilters();
   const { filters } = filterState;
   const docMatches = useDocumentMatches(filters.q, filters.project);
@@ -419,21 +430,28 @@ export default function Graph() {
   // column count changing, cards resizing and the window resizing; the Fit
   // button does. A pending fit waits for the tickets to arrive and form a
   // graph, for every card to be measured, so it fits the real extent, and for
-  // the viewport's size. With no open tickets the fit stays pending, so the
-  // first graph shown is fitted. The fit is state adjusted while rendering:
-  // React renders again before committing, so the unfitted graph is never
-  // painted, and the canvas stays invisible while a fit is pending.
+  // the viewport's size. It also waits for the document to be shown: a graph
+  // opened in a background tab is fitted as the tab is shown, not on a live
+  // refresh some time later. With no open tickets the fit stays pending, so
+  // the first graph shown is fitted. The user panning or zooming first drops
+  // it (moveView). The fit is state adjusted while rendering: React renders
+  // again before committing, so the unfitted graph is never painted, and the
+  // canvas stays invisible while a fit is pending.
   const hiddenBy = hiding ? NARROWING_KEYS.map((key) => filters[key]).join("\n") : "";
   const graphKey = `${filters.project.toLowerCase()}\n${unmatched}\n${hiddenBy}`;
   const [laidOut, setLaidOut] = useState(graphKey);
   if (graphKey !== laidOut) {
     setLaidOut(graphKey);
-    setFitPending(true);
+    setFitPending(stepFit(fitPending, { type: "requested" }).pending);
   }
   const measured = useMemo(() => topology.nodes.every((node) => sizes.has(node.id)), [topology, sizes]);
   const hasGraph = !loading && topology.nodes.length > 0;
-  if (fitPending && hasGraph && measured && viewportSize) {
-    setFitPending(false);
+  const fitStep = stepFit(fitPending, {
+    type: "rendered",
+    moment: { visible, hasGraph, measured, hasViewport: viewportSize !== null },
+  });
+  if (fitStep.fit && viewportSize) {
+    setFitPending(fitStep.pending);
     setTransform(fitTransform({ width: canvasWidth, height: canvasHeight }, viewportSize, FIT_INSETS));
   }
 
@@ -467,10 +485,10 @@ export default function Graph() {
       if (zoom) {
         const at = pointIn(e.clientX, e.clientY);
         const factor = wheelZoomFactor(e.deltaY, e.deltaMode);
-        setTransform((t) => zoomAround(t, at, factor));
+        moveView((t) => zoomAround(t, at, factor));
       } else {
         const by = wheelPan(e);
-        setTransform((t) => panBy(t, by.x, by.y));
+        moveView((t) => panBy(t, by.x, by.y));
       }
     };
     // Safari's gesture scale is cumulative from gesturestart.
@@ -487,7 +505,7 @@ export default function Graph() {
       const factor = gesture.scale / gestureScale;
       gestureScale = gesture.scale;
       const at = pointIn(gesture.clientX, gesture.clientY);
-      setTransform((t) => zoomAround(t, at, factor));
+      moveView((t) => zoomAround(t, at, factor));
     };
     el.addEventListener("wheel", onWheel, { passive: false });
     el.addEventListener("gesturestart", onGestureStart, { passive: false });
@@ -500,7 +518,7 @@ export default function Graph() {
       el.removeEventListener("gesturechange", onGestureChange);
       el.removeEventListener("gestureend", onGestureStart);
     };
-  }, []);
+  }, [moveView]);
 
   // Dragging pans, from empty space or from a card. A pointer that moves no
   // more than DRAG_THRESHOLD before it goes up is a click, and a card opens
@@ -537,7 +555,7 @@ export default function Graph() {
     const dx = at.x - drag.last.x;
     const dy = at.y - drag.last.y;
     drag.last = at;
-    setTransform((t) => panBy(t, dx, dy));
+    moveView((t) => panBy(t, dx, dy));
   };
 
   // Forgets the drag without swallowing a click, and lets go of the pointer.
@@ -581,7 +599,7 @@ export default function Graph() {
     const target = e.target as HTMLElement;
     if (!target.dataset.ticketId || !target.matches(":focus-visible")) return;
     const by = panIntoView(target.getBoundingClientRect(), e.currentTarget.getBoundingClientRect());
-    if (by.x !== 0 || by.y !== 0) setTransform((t) => panBy(t, by.x, by.y));
+    if (by.x !== 0 || by.y !== 0) moveView((t) => panBy(t, by.x, by.y));
   };
 
   const centre: Point = { x: (viewportSize?.width ?? 0) / 2, y: (viewportSize?.height ?? 0) / 2 };
@@ -593,7 +611,7 @@ export default function Graph() {
   const fit = () => {
     if (!viewportSize) return;
     const box = matchingBounds(layout.nodes, matching) ?? { width: canvasWidth, height: canvasHeight };
-    setTransform(fitTransform(box, viewportSize, FIT_INSETS));
+    moveView(() => fitTransform(box, viewportSize, FIT_INSETS));
   };
 
   return (
@@ -800,7 +818,7 @@ export default function Graph() {
             <div className="w-px h-4 mx-0.5 bg-slate-700" />
             <button
               type="button"
-              onClick={() => setTransform((t) => zoomOut(t, centre))}
+              onClick={() => moveView((t) => zoomOut(t, centre))}
               disabled={!canZoomOut(transform)}
               title="Zoom out"
               aria-label="Zoom out"
@@ -813,7 +831,7 @@ export default function Graph() {
             </span>
             <button
               type="button"
-              onClick={() => setTransform((t) => zoomIn(t, centre))}
+              onClick={() => moveView((t) => zoomIn(t, centre))}
               disabled={!canZoomIn(transform)}
               title="Zoom in"
               aria-label="Zoom in"

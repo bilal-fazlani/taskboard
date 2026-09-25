@@ -213,6 +213,83 @@ describe("Dependencies across a refetch", () => {
   });
 });
 
+// A graph opened in a background tab is fitted as the tab is shown, never on
+// a render that comes later, and never over a graph the user has moved.
+describe("Dependencies fitting a graph first shown later", () => {
+  const canvas = () => document.querySelector<HTMLElement>("[data-graph-canvas]")!;
+  const unfitted = "translate(0px, 0px) scale(1)";
+  let visibility: DocumentVisibilityState = "visible";
+
+  async function setVisibility(state: DocumentVisibilityState) {
+    visibility = state;
+    await act(async () => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+  }
+
+  beforeEach(() => {
+    visibility = "visible";
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => visibility });
+  });
+
+  afterEach(() => {
+    delete (document as unknown as { visibilityState?: unknown }).visibilityState;
+  });
+
+  it("fits a graph loaded in a background tab once, when the tab is shown", async () => {
+    visibility = "hidden";
+    await mount(<Graph />, "/?project=ACP");
+    // Even measured, and through a live refresh, a hidden graph waits.
+    await layout();
+    await liveChange(after);
+    await layout();
+    expect(canvas().className).toContain("invisible");
+    expect(canvas().style.transform).toBe(unfitted);
+
+    await setVisibility("visible");
+    expect(canvas().className).not.toContain("invisible");
+    const fitted = canvas().style.transform;
+    expect(fitted).not.toBe(unfitted);
+
+    // Hidden and shown again, and changed meanwhile: no second fit.
+    await act(async () => screen.getByLabelText("Zoom in").click());
+    const moved = canvas().style.transform;
+    await setVisibility("hidden");
+    await liveChange(before);
+    await setVisibility("visible");
+    await layout();
+    expect(canvas().style.transform).toBe(moved);
+  });
+
+  it("drops a pending fit the user has zoomed or panned before, so a live refresh can't apply it", async () => {
+    await mount(<Graph />, "/?project=ACP");
+    // Nothing is measured yet, so the fit is still pending.
+    expect(canvas().className).toContain("invisible");
+    await act(async () => screen.getByLabelText("Zoom in").click());
+    await act(async () => {
+      canvas().parentElement!.dispatchEvent(new WheelEvent("wheel", { deltaX: 30, deltaY: 60, bubbles: true }));
+    });
+    const moved = canvas().style.transform;
+    expect(moved).not.toBe(unfitted);
+    expect(canvas().className).not.toContain("invisible");
+
+    await layout();
+    await liveChange(after);
+    await layout();
+    expect(canvas().style.transform).toBe(moved);
+  });
+
+  it("still fits on Fit, after the user has moved the graph", async () => {
+    await mount(<Graph />, "/?project=ACP");
+    await layout();
+    const fitted = canvas().style.transform;
+    await act(async () => screen.getByLabelText("Zoom in").click());
+    expect(canvas().style.transform).not.toBe(fitted);
+    await act(async () => screen.getByLabelText("Fit to screen").click());
+    expect(canvas().style.transform).toBe(fitted);
+  });
+});
+
 // Hide mode fits afresh when the user changes the filters, never when a live
 // refresh changes which cards they lay out: agents move tickets all the time,
 // and the view under the user must neither jump nor blink.
