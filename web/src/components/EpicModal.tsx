@@ -173,6 +173,7 @@ export default function EpicModal({
           }}
           onDirtyChange={docParam.onDirtyChange}
           onStep={docParam.step}
+          onImageAdded={reload}
           onClose={docParam.close}
           onRenamed={(doc) => {
             docParam.renamed(doc);

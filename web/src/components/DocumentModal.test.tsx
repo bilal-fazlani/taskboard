@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, createEvent, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { DocumentMeta } from "../api/client";
 
 const mockApi = vi.hoisted(() => ({
@@ -9,6 +9,7 @@ const mockApi = vi.hoisted(() => ({
     get: vi.fn(),
     update: vi.fn(),
     delete: vi.fn(),
+    createImage: vi.fn(),
     downloadUrl: (id: string) => `/api/documents/${id}/download`,
     rawUrl: (id: string, revision: number) => `/api/documents/${id}/raw?rev=${revision}`,
     imageUrl: (id: string, revision: number) => `/api/documents/${id}/image?rev=${revision}`,
@@ -132,6 +133,69 @@ describe("images in a markdown document", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Preview" }));
     expect(srcs("document-preview")).toEqual([shotSrc]);
+  });
+});
+
+describe("images pasted or dropped while writing", () => {
+  const pasted: DocumentMeta = {
+    id: "img9", name: "Pasted image", format: "png", size: 10, revision: 1, width: 4, height: 3,
+    createdAt: "2026-09-25T09:00:00Z", updatedAt: "2026-09-25T09:00:00Z",
+  };
+  const png = (name: string) => new File(["x"], name, { type: "image/png" });
+  const box = () => screen.getByRole("textbox", { name: "Document content" }) as HTMLTextAreaElement;
+  const srcs = (testId: string) =>
+    Array.from(screen.getByTestId(testId).querySelectorAll("img")).map((i) => i.getAttribute("src"));
+
+  it("adds a pasted image to the epic, refers to it at the cursor, and shows it in Preview", async () => {
+    let finish!: (doc: DocumentMeta) => void;
+    mockApi.documents.get.mockResolvedValue({ ...spec, content: "Intro" });
+    mockApi.documents.createImage.mockReturnValue(new Promise((resolve) => (finish = resolve)));
+    const onImageAdded = vi.fn();
+    const { rerender } = setup(spec, { owner: { epicId: "e1" }, ownerNoun: "epic", onImageAdded });
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    await screen.findByRole("textbox", { name: "Document content" });
+    box().setSelectionRange(0, 0);
+    fireEvent.paste(box(), { clipboardData: { types: ["Files"], files: [png("image.png")] } });
+    expect(box().value).toBe("![](Pasted image.png)Intro");
+    expect(screen.getByText("unsaved")).toBeTruthy();
+    expect(screen.getByRole("status").textContent).toBe("Uploading Pasted image.png… it appears in Documents when done");
+    expect(mockApi.documents.createImage.mock.calls[0][0]).toEqual({ epicId: "e1" });
+    expect((mockApi.documents.createImage.mock.calls[0][1] as File).name).toBe("Pasted image.png");
+
+    await act(async () => finish(pasted));
+    expect(onImageAdded).toHaveBeenCalledWith(pasted);
+    expect(screen.queryByRole("status")).toBeNull();
+    rerender({ documents: [spec, pasted], owner: { epicId: "e1" }, ownerNoun: "epic", onImageAdded });
+    fireEvent.click(screen.getByRole("button", { name: "Preview" }));
+    expect(srcs("document-preview")).toEqual(["/api/documents/img9/image?rev=1"]);
+  });
+
+  it("names a second paste Pasted image 2, keeps dropped names, and rolls back a refused one", async () => {
+    mockApi.documents.get.mockResolvedValue({ ...spec, content: "" });
+    mockApi.documents.createImage
+      .mockReturnValueOnce(new Promise(() => {}))
+      .mockRejectedValueOnce(new Error('API error 400: {"error":"This isn\'t a PNG image: its content is GIF."}'));
+    setup(spec, { documents: [spec, pasted] });
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    await screen.findByRole("textbox", { name: "Document content" });
+    fireEvent.paste(box(), { clipboardData: { types: ["Files"], files: [png("image.png")] } });
+    expect(box().value).toBe("![](Pasted image 2.png)");
+    fireEvent.drop(box(), { dataTransfer: { types: ["Files"], files: [png("flow chart.png")] } });
+    await waitFor(() => expect(box().value).toBe("![](Pasted image 2.png)"));
+    expect(screen.getByRole("alert").textContent).toContain(
+      "flow chart.png wasn't uploaded: This isn't a PNG image: its content is GIF.",
+    );
+  });
+
+  it("leaves a text paste to the browser", async () => {
+    mockApi.documents.get.mockResolvedValue({ ...spec, content: "x" });
+    setup();
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    await screen.findByRole("textbox", { name: "Document content" });
+    const event = createEvent.paste(box(), { clipboardData: { types: ["text/plain"], files: [] } });
+    fireEvent(box(), event);
+    expect(event.defaultPrevented).toBe(false);
+    expect(mockApi.documents.createImage).not.toHaveBeenCalled();
   });
 });
 

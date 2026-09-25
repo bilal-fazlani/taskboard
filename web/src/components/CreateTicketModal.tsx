@@ -1,7 +1,9 @@
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { api, type TicketWrite, type Project } from "../api/client";
+import ImageUploadStatus from "./ImageUploadStatus";
 import LabelPicker from "./LabelPicker";
+import { usePasteImages } from "../hooks/usePasteImages";
 import { DEFAULT_STATUS } from "../lib/status";
 import type { Filters } from "../lib/filters";
 import { newTicketDefaults, type ProjectEpics } from "../lib/newTicketDefaults";
@@ -60,6 +62,16 @@ export default function CreateTicketModal({
   }, [projectId]);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
+  // The ticket has nowhere to keep an image until it exists: pasting or
+  // dropping one says so, and leaves the text as it was.
+  const descriptionRef = useRef<HTMLTextAreaElement>(null);
+  const pasteImages = usePasteImages({
+    owner: null,
+    documents: null,
+    value: description,
+    onChange: setDescription,
+    textareaRef: descriptionRef,
+  });
   const [priority, setPriority] = useState("medium");
   const [dueDate, setDueDate] = useState("");
   const [labels, setLabels] = useState<string[]>([]);
@@ -164,12 +176,19 @@ export default function CreateTicketModal({
                 Description
               </label>
               <textarea
+                ref={descriptionRef}
                 id={descriptionFieldId}
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
+                {...pasteImages.textareaProps}
                 rows={3}
                 placeholder="Add more detail…"
                 className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-600 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none"
+              />
+              <ImageUploadStatus
+                uploads={pasteImages.uploads}
+                problems={pasteImages.problems}
+                onDismiss={pasteImages.dismissProblems}
               />
             </div>
 

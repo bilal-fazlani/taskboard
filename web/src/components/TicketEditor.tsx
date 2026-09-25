@@ -13,6 +13,7 @@ import ActivityList from "./ActivityList";
 import DocumentModal from "./DocumentModal";
 import OwnerMarkdown from "./OwnerMarkdown";
 import DocumentsSection from "./DocumentsSection";
+import ImageUploadStatus from "./ImageUploadStatus";
 import LabelPicker from "./LabelPicker";
 import RepoPicker from "./RepoPicker";
 import DependencyPicker, { TicketRefLabel } from "./DependencyPicker";
@@ -21,6 +22,7 @@ import { documentWindowKey } from "../lib/documents";
 import { useEscape } from "../lib/escapeStack";
 import { useDocParam } from "../hooks/useDocParam";
 import { useOwnerDocuments } from "../hooks/useOwnerDocuments";
+import { usePasteImages } from "../hooks/usePasteImages";
 import { saveErrorMessage } from "../lib/saveError";
 import { STATUSES, STATUS_LABELS, STATUS_STYLES, isStatus } from "../lib/status";
 import {
@@ -163,6 +165,20 @@ export default function TicketEditor({
   const { documents, failed: documentsFailed, reload: reloadDocuments } = useOwnerDocuments({ ticketId: ticket.id });
   const docParam = useDocParam(documents);
   const docOpen = docParam.selected !== null;
+
+  // Images pasted or dropped into the description's Write mode.
+  const descriptionRef = useRef<HTMLTextAreaElement>(null);
+  const pasteImages = usePasteImages({
+    owner: { ticketId: ticket.id },
+    documents,
+    value: description,
+    onChange: (next) => {
+      setDescription(next);
+      markDirty();
+    },
+    textareaRef: descriptionRef,
+    onUploaded: reloadDocuments,
+  });
 
   const dialogRef = useRef<HTMLDivElement>(null);
   const confirmRef = useRef<HTMLDivElement>(null);
@@ -616,8 +632,10 @@ export default function TicketEditor({
               </div>
               {descMode === "write" ? (
                 <textarea
+                  ref={descriptionRef}
                   aria-label="Description"
                   value={description}
+                  {...pasteImages.textareaProps}
                   onChange={(e) => {
                     setDescription(e.target.value);
                     markDirty();
@@ -641,6 +659,11 @@ export default function TicketEditor({
                   Add a description…
                 </div>
               )}
+              <ImageUploadStatus
+                uploads={pasteImages.uploads}
+                problems={pasteImages.problems}
+                onDismiss={pasteImages.dismissProblems}
+              />
             </div>
 
             <div>
@@ -922,6 +945,7 @@ export default function TicketEditor({
           }}
           onDirtyChange={docParam.onDirtyChange}
           onStep={docParam.step}
+          onImageAdded={reloadDocuments}
           onClose={docParam.close}
           onRenamed={(doc) => {
             docParam.renamed(doc);

@@ -30,6 +30,7 @@ const mockApi = vi.hoisted(() => ({
     get: vi.fn(),
     update: vi.fn(),
     delete: vi.fn(),
+    createImage: vi.fn(),
     downloadUrl: (id: string) => `/api/documents/${id}/download`,
     imageUrl: (id: string, revision: number) => `/api/documents/${id}/image?rev=${revision}`,
     thumbnailUrl: (id: string, revision: number) => `/api/documents/${id}/thumbnail?rev=${revision}`,
@@ -1034,6 +1035,60 @@ describe("description", () => {
     fireEvent.click(screen.getByRole("button", { name: "Preview" }));
     await waitFor(() => expect(srcs()).toEqual([shotSrc, "https://example.com/logo.png"]));
     expect(screen.getByTestId("missing-image").textContent).toBe("Missing image: Elsewhere.png");
+  });
+});
+
+describe("images pasted or dropped into the description", () => {
+  const pastedImage = {
+    id: "img2", ticketId: "t1", name: "Pasted image", format: "png" as const, size: 10, revision: 1, width: 4, height: 3,
+    createdAt: "2026-09-25T09:00:00Z", updatedAt: "2026-09-25T09:00:00Z",
+  };
+  const description = () => screen.getByLabelText("Description") as HTMLTextAreaElement;
+  const png = (name: string) => new File(["x"], name, { type: "image/png" });
+  beforeEach(() => {
+    mockApi.tickets.get.mockResolvedValue(makeTicket({ description: "" }));
+  });
+
+  it("inserts the reference as typing does, uploads the image, and shows it in Preview and Documents", async () => {
+    let finish!: (doc: typeof pastedImage) => void;
+    mockApi.documents.createImage.mockReturnValue(new Promise((resolve) => (finish = resolve)));
+    renderEditor(makeTicket({ description: "" }));
+    await waitFor(() => expect(mockApi.documents.list).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(mockApi.tickets.get).toHaveBeenCalled());
+    description().focus();
+    fireEvent.paste(description(), { clipboardData: { types: ["Files"], files: [png("image.png")] } });
+    expect(description().value).toBe("![](Pasted image.png)");
+    expect(saveButton()).toBeTruthy();
+    expect(screen.getByRole("status").textContent).toBe("Uploading Pasted image.png… it appears in Documents when done");
+    expect(mockApi.documents.createImage.mock.calls[0][0]).toEqual({ ticketId: "t1" });
+
+    mockApi.documents.list.mockResolvedValue([pastedImage]);
+    await act(async () => finish(pastedImage));
+    await waitFor(() => expect(mockApi.documents.list).toHaveBeenCalledTimes(2));
+    expect(screen.queryByRole("status")).toBeNull();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Pasted image.png" })).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Preview" }));
+    const img = screen.getByTestId("description-preview").querySelector("img");
+    expect(img?.getAttribute("src")).toBe("/api/documents/img2/image?rev=1");
+  });
+
+  it("takes a refused drop's reference back out, keeps the rest of the unsaved text, and says why", async () => {
+    let refuse!: (err: Error) => void;
+    mockApi.documents.createImage.mockReturnValue(new Promise((_, reject) => (refuse = reject)));
+    renderEditor(makeTicket({ description: "" }));
+    await waitFor(() => expect(mockApi.tickets.get).toHaveBeenCalled());
+    fireEvent.change(description(), { target: { value: "Steps" } });
+    description().focus();
+    description().setSelectionRange(5, 5);
+    fireEvent.drop(description(), { dataTransfer: { types: ["Files"], files: [png("Login screen.png")] } });
+    expect(description().value).toBe("Steps![](Login screen.png)");
+    fireEvent.change(description(), { target: { value: "Steps![](Login screen.png) to log in" } });
+    await act(async () => refuse(new Error('API error 400: {"error":"This PNG image can\'t be read. It may be damaged."}')));
+    expect(description().value).toBe("Steps to log in");
+    expect(saveButton()).toBeTruthy();
+    expect(screen.getByRole("alert").textContent).toContain(
+      "Login screen.png wasn't uploaded: This PNG image can't be read. It may be damaged.",
+    );
   });
 });
 

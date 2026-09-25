@@ -16,9 +16,11 @@ import {
 import { serverMessage } from "../lib/epics";
 import { useEscape } from "../lib/escapeStack";
 import { useImageStepping } from "../hooks/useImageStepping";
+import { usePasteImages } from "../hooks/usePasteImages";
 import DeleteDocumentConfirm from "./DeleteDocumentConfirm";
 import DiscardChangesConfirm from "./DiscardChangesConfirm";
 import DocumentRenameField from "./DocumentRenameField";
+import ImageUploadStatus from "./ImageUploadStatus";
 import ImageView, { ImageViewerControls, ImageViewerFooter, type ImageZoom } from "./ImageViewer";
 import OwnerMarkdown from "./OwnerMarkdown";
 
@@ -60,6 +62,10 @@ type Saved = { revision: number; content: string };
 // useDocParam). A document deleted mid-edit stays on screen (deleted, also
 // from useDocParam) and offers to save the text as a new document.
 //
+// In Write mode, an image pasted or dropped into the text is added to the
+// owner and referred to at the cursor (usePasteImages); onImageAdded tells
+// the owner to reload its documents.
+//
 // An image is shown by the image viewer (ImageViewer): no Edit, Fit and 100%
 // in the header, and ← and → step to the owner's other images through
 // onStep, which puts the next one in place of this one in the URL.
@@ -79,6 +85,7 @@ export default function DocumentModal({
   onDeleted,
   onRecreated,
   onStep,
+  onImageAdded,
 }: {
   doc: DocumentMeta;
   documents: readonly DocumentMeta[];
@@ -101,6 +108,8 @@ export default function DocumentModal({
   onRecreated: (doc: DocumentMeta) => void;
   /** Show another of the owner's images in place of this one (← and →). */
   onStep?: (doc: DocumentMeta) => void;
+  /** An image pasted or dropped into the text was added to the owner. */
+  onImageAdded?: (doc: DocumentMeta) => void;
 }) {
   const editable = doc.format === "markdown";
   const image = isImageFormat(doc.format);
@@ -121,11 +130,21 @@ export default function DocumentModal({
   // The action waiting on "Discard your changes?", if one asked.
   const [pending, setPending] = useState<(() => void) | null>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const titleId = useId();
   const shown = displayName(doc);
 
   const dirty = editing && base !== null && draft !== base.content;
   const urlAsking = closeRequested && dirty;
+  const pasteImages = usePasteImages({
+    owner,
+    documents,
+    ownerNoun,
+    value: draft,
+    onChange: setDraft,
+    textareaRef,
+    onUploaded: onImageAdded,
+  });
   const asking = pending !== null || urlAsking;
   const gone = deleted || goneOnSave;
 
@@ -344,9 +363,11 @@ export default function DocumentModal({
   } else if (writing) {
     body = (
       <textarea
+        ref={textareaRef}
         aria-label="Document content"
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
+        {...pasteImages.textareaProps}
         autoFocus
         placeholder="Write markdown…"
         className="min-h-[20rem] w-full flex-1 resize-none rounded-lg border border-slate-700 bg-slate-800/50 px-3 py-2 font-mono text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
@@ -515,6 +536,9 @@ export default function DocumentModal({
           }`}
         >
           {body}
+          {editing && (
+            <ImageUploadStatus uploads={pasteImages.uploads} problems={pasteImages.problems} onDismiss={pasteImages.dismissProblems} />
+          )}
         </div>
         {image && <ImageViewerFooter images={images} ownerNoun={ownerNoun} />}
         {doc.format === "html" && (
