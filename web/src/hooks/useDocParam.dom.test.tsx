@@ -140,4 +140,121 @@ describe("useDocParam", () => {
     expect(state.notice).toBe("Design spec.md was deleted.");
     expect(url()).toBe("/?ticket=ACP-7");
   });
+
+  it("keeps a document with unsaved edits on screen when Back drops it, and asks", async () => {
+    await mount("/?ticket=ACP-7", [spec]);
+    await act(async () => state.open(spec));
+    await act(async () => state.onDirtyChange(true));
+    await act(async () => {
+      window.history.back();
+      await settle();
+    });
+    expect(url()).toBe("/?ticket=ACP-7");
+    expect(state.selected?.id).toBe("d1");
+    expect(state.closeRequested).toBe(true);
+    expect(state.deleted).toBe(false);
+
+    // Keep editing: the document comes back as a history entry.
+    await act(async () => {
+      state.cancelClose();
+      await settle();
+    });
+    expect(url()).toBe("/?ticket=ACP-7&doc=Design spec.md");
+    expect(state.closeRequested).toBe(false);
+    expect(state.selected?.id).toBe("d1");
+
+    // Back again, and this time discard.
+    await act(async () => {
+      window.history.back();
+      await settle();
+    });
+    expect(state.closeRequested).toBe(true);
+    await act(async () => {
+      state.close();
+      await settle();
+    });
+    expect(state.selected).toBeNull();
+    expect(state.closeRequested).toBe(false);
+    expect(state.notice).toBeNull();
+    expect(url()).toBe("/?ticket=ACP-7");
+  });
+
+  it("lets Back close a document once its edits are no longer unsaved", async () => {
+    await mount("/?ticket=ACP-7", [spec]);
+    await act(async () => state.open(spec));
+    await act(async () => state.onDirtyChange(true));
+    await act(async () => state.onDirtyChange(false));
+    await act(async () => {
+      window.history.back();
+      await settle();
+    });
+    expect(state.selected).toBeNull();
+    expect(state.closeRequested).toBe(false);
+  });
+
+  it("keeps a document with unsaved edits on screen when it is deleted, and says so", async () => {
+    await mount("/?ticket=ACP-7", [spec, notes]);
+    await act(async () => state.open(spec));
+    await act(async () => state.onDirtyChange(true));
+    await render([notes]);
+    await act(settle);
+    expect(state.selected?.id).toBe("d1");
+    expect(state.deleted).toBe(true);
+    expect(state.closeRequested).toBe(false);
+    expect(state.notice).toBeNull();
+    expect(url()).toBe("/?ticket=ACP-7&doc=Design spec.md");
+
+    // "Save as a new document": the editor reloads the list first, and the
+    // new one, under the same name, is what the URL now names.
+    const recreated = { ...spec, id: "d3" };
+    await render([notes, recreated]);
+    await act(async () => state.renamed(recreated));
+    await act(settle);
+    expect(state.selected?.id).toBe("d3");
+    expect(state.deleted).toBe(false);
+    expect(state.notice).toBeNull();
+    expect(url()).toBe("/?ticket=ACP-7&doc=Design spec.md");
+  });
+
+  it("closes a deleted document with unsaved edits without a notice when the user discards them", async () => {
+    await mount("/?ticket=ACP-7", [spec, notes]);
+    await act(async () => state.open(spec));
+    await act(async () => state.onDirtyChange(true));
+    await render([notes]);
+    await act(settle);
+    expect(state.deleted).toBe(true);
+
+    await act(async () => {
+      state.close();
+      await settle();
+    });
+    expect(state.selected).toBeNull();
+    expect(state.deleted).toBe(false);
+    expect(state.notice).toBeNull();
+    expect(url()).toBe("/?ticket=ACP-7");
+  });
+
+  it("says a deleted document is gone when Keep editing brings its name back after a Back", async () => {
+    await mount("/?ticket=ACP-7", [spec, notes]);
+    await act(async () => state.open(spec));
+    await act(async () => state.onDirtyChange(true));
+    await act(async () => {
+      window.history.back();
+      await settle();
+    });
+    await render([notes]);
+    await act(settle);
+    expect(state.selected?.id).toBe("d1");
+    expect(state.deleted).toBe(true);
+
+    await act(async () => {
+      state.cancelClose();
+      await settle();
+    });
+    expect(url()).toBe("/?ticket=ACP-7&doc=Design spec.md");
+    expect(state.selected?.id).toBe("d1");
+    expect(state.deleted).toBe(true);
+    expect(state.closeRequested).toBe(false);
+    expect(state.notice).toBeNull();
+  });
 });

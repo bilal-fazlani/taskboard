@@ -16,11 +16,13 @@ export function useOwnerDocuments(owner: DocumentOwnerRef) {
   const [failedKey, setFailedKey] = useState<string | null>(null);
   const seq = useRef(0);
 
-  const reload = useCallback(() => {
+  // Settles once this load is in (or superseded, or failed), so a caller
+  // can wait for the list to carry a document it has just created.
+  const reload = useCallback((): Promise<void> => {
     const n = ++seq.current;
     // Through a promise so a test's API mock without `documents` fails the
     // load rather than the render.
-    Promise.resolve()
+    return Promise.resolve()
       .then(() => api.documents.list({ ticketId }))
       .then((docs) => {
         if (n !== seq.current) return;
@@ -33,7 +35,7 @@ export function useOwnerDocuments(owner: DocumentOwnerRef) {
   }, [key, ticketId]);
 
   useEffect(() => {
-    reload();
+    void reload();
   }, [reload]);
   useLiveRefresh(reload);
 

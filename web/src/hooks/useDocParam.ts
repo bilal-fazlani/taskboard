@@ -8,15 +8,36 @@ import { useOverlayHistory } from "./useOverlayHistory";
 export interface DocParamState {
   /** The open document, or null. */
   selected: DocumentMeta | null;
+  /**
+   * The open document left the list while it held unsaved edits: it was
+   * deleted. It stays on screen so the modal can offer to save it anew.
+   */
+  deleted: boolean;
+  /**
+   * The URL stopped naming the open document (Back) while it holds unsaved
+   * edits. It stays on screen so the modal can ask before it goes; the
+   * modal answers with close() or cancelClose().
+   */
+  closeRequested: boolean;
   /** Why a document the URL named is not open, until dismissed. */
   notice: string | null;
   dismissNotice: () => void;
   /** Open a document as a new history entry. */
   open: (doc: DocumentMeta) => void;
-  /** Close it: one Back, or a replace when it came from a link. */
+  /**
+   * Close it: one Back, or a replace when it came from a link. After a Back
+   * the URL is already where it asked to go, and is left there.
+   */
   close: () => void;
-  /** Point the URL at a document's new name after a rename from the UI. */
+  /** Keep a document open after a Back, which pushes its parameter back. */
+  cancelClose: () => void;
+  /**
+   * Point the URL at a document: its new name after a rename from the UI,
+   * or the copy "Save as a new document" made. Its edits are saved.
+   */
   renamed: (doc: DocumentMeta) => void;
+  /** Told by the modal whether it holds unsaved edits. */
+  onDirtyChange: (dirty: boolean) => void;
 }
 
 /**
@@ -26,12 +47,21 @@ export interface DocParamState {
  * the URL to the new name instead of closing it; one that leaves the list
  * was deleted, and closes with a notice. A name that never matched (a bad
  * link, a wrong extension) gets its own notice.
+ *
+ * Unsaved edits are never dropped without asking, as with useTicketParam: a
+ * document the modal reports dirty is held on screen when Back drops the
+ * parameter (`closeRequested`) or when it leaves the list (`deleted`, with
+ * the parameter left in place and no notice), until the modal answers.
  */
 export function useDocParam(documents: readonly DocumentMeta[] | null, ownerNoun = "ticket"): DocParamState {
   const [params] = useSearchParams();
   const overlays = useOverlayHistory();
   const ref = params.get(DOC_PARAM) ?? "";
   const found = documents && ref ? (findDocument(documents, ref) ?? null) : null;
+
+  // Whether the modal holds unsaved edits, as it reports them. State, not a
+  // ref: the render below decides on it.
+  const [dirty, setDirty] = useState(false);
 
   const [shownId, setShownId] = useState<string | null>(null);
   if (found && shownId !== found.id) setShownId(found.id);
@@ -48,8 +78,24 @@ export function useDocParam(documents: readonly DocumentMeta[] | null, ownerNoun
   const stale = renamedTo !== null && current !== null && current.id === renamedTo.id && current.name !== renamedTo.name;
   if (renamedTo && (!ref || (current && !stale))) setRenamedTo(null);
 
-  const selected = stale && current && renamedTo ? { ...current, name: renamedTo.name } : current;
+  const shown = stale && current && renamedTo ? { ...current, name: renamedTo.name } : current;
   const followed = byId && !stale ? byId : null;
+
+  // The document last shown, kept while it holds unsaved edits and the URL
+  // has dropped it (Back) or the list has (deleted). Let go only once the
+  // modal reports nothing unsaved.
+  const [held, setHeld] = useState<DocumentMeta | null>(null);
+  if (current && held !== current) setHeld(current);
+  else if (!current && held && !dirty) setHeld(null);
+  const holding = !current && dirty && held !== null;
+  const selected = shown ?? (holding ? held : null);
+  const deleted = holding && documents !== null && !documents.some((d) => d.id === held.id);
+  const closeRequested = holding && !ref;
+
+  // The parameter close() is taking away, so the render before the URL
+  // changes does not report it missing.
+  const [closing, setClosing] = useState<string | null>(null);
+  if (!ref && closing !== null) setClosing(null);
 
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -61,8 +107,9 @@ export function useDocParam(documents: readonly DocumentMeta[] | null, ownerNoun
   // deleted, anything else never matched. The notice is set once per value
   // of the parameter, during render as the other derived state here is, and
   // the parameter is dropped. shownId is left alone: it clears itself once
-  // the URL drops the parameter.
-  const missing = ref !== "" && documents !== null && current === null;
+  // the URL drops the parameter. A deleted document with unsaved edits is
+  // held instead, and one being closed is on its way out.
+  const missing = ref !== "" && documents !== null && current === null && !dirty && closing !== ref;
   const [reported, setReported] = useState<string | null>(null);
   if (missing && reported !== ref) {
     setReported(ref);
@@ -77,13 +124,32 @@ export function useDocParam(documents: readonly DocumentMeta[] | null, ownerNoun
   const open = useCallback(
     (doc: DocumentMeta) => {
       setNotice(null);
+      setDirty(false);
       overlays.push(withDoc(latestSearchParams(params), doc));
     },
     [params, overlays],
   );
-  const close = useCallback(() => overlays.closeOne(withoutDoc(latestSearchParams(params))), [params, overlays]);
+
+  const close = useCallback(() => {
+    setDirty(false);
+    setHeld(null);
+    const latest = latestSearchParams(params);
+    const now = latest.get(DOC_PARAM);
+    // A Back already dropped the parameter: nothing to undo.
+    if (!now) return;
+    setClosing(now);
+    overlays.closeOne(withoutDoc(latest));
+  }, [params, overlays]);
+
+  const cancelClose = useCallback(() => {
+    // Back popped the document's entry, so push it again rather than
+    // replacing what Back landed on: a second Back then asks again.
+    if (held) overlays.push(withDoc(latestSearchParams(params), held));
+  }, [held, params, overlays]);
+
   const renamed = useCallback(
     (doc: DocumentMeta) => {
+      setDirty(false);
       setShownId(doc.id);
       setRenamedTo(doc);
       overlays.replace(withDoc(latestSearchParams(params), doc));
@@ -92,5 +158,17 @@ export function useDocParam(documents: readonly DocumentMeta[] | null, ownerNoun
   );
   const dismissNotice = useCallback(() => setNotice(null), []);
 
-  return { selected, notice, dismissNotice, open, close, renamed };
+  // setDirty is stable, so the modal's report never re-runs on its own.
+  return {
+    selected,
+    deleted,
+    closeRequested,
+    notice,
+    dismissNotice,
+    open,
+    close,
+    cancelClose,
+    renamed,
+    onDirtyChange: setDirty,
+  };
 }
