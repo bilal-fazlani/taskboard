@@ -45,6 +45,14 @@ type Ticket struct {
 	// only the rounds since it began.
 	ReviewRounds int `json:"reviewRounds"`
 
+	// DocumentCount is how many documents the ticket has. Lists and the full
+	// ticket both carry it; the card's paperclip reads it.
+	DocumentCount int `json:"documentCount"`
+
+	// Documents lists the ticket's documents in the order they were added,
+	// without their content. Only the full ticket carries it.
+	Documents []DocumentMeta `json:"documents,omitempty"`
+
 	// History is the ticket's status changes, newest first. Only the MCP
 	// get_ticket tool fills it in; everywhere else it is left out, and the
 	// HTTP API serves it from its own endpoint.

@@ -33,6 +33,7 @@ type dbtx interface {
 
 func (s *Store) ClearData() error {
 	tables := []string{
+		"documents",
 		"ticket_status_changes",
 		"ticket_dependencies",
 		"ticket_labels",
@@ -265,7 +266,7 @@ func (s *Store) ListTickets(filter models.TicketFilter) ([]models.Ticket, error)
 	return tickets, nil
 }
 
-// attachListDetails fills Repos, Labels, Subtasks, DependsOn and ReviewRounds
+// attachListDetails fills Repos, Labels, Subtasks, DependsOn, ReviewRounds and DocumentCount
 // for a page of tickets using one query per relation rather than one per ticket. Blocks is not filled;
 // no list view renders it.
 func (s *Store) attachListDetails(tickets []models.Ticket) error {
@@ -283,10 +284,14 @@ func (s *Store) attachListDetails(tickets []models.Ticket) error {
 		tickets[i].Subtasks = nil
 		tickets[i].DependsOn = nil
 		tickets[i].ReviewRounds = 0
+		tickets[i].DocumentCount = 0
 	}
 	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
 
 	if err := s.attachReviewRounds(tickets, index, placeholders, ids); err != nil {
+		return err
+	}
+	if err := s.attachDocumentCounts(tickets, index, placeholders, ids); err != nil {
 		return err
 	}
 
@@ -433,6 +438,10 @@ func (s *Store) GetTicket(id string) (*models.Ticket, error) {
 	if t.ReviewRounds, err = s.getTicketReviewRounds(t.ID); err != nil {
 		return nil, err
 	}
+	if t.Documents, err = loadOwnerDocuments(s.db, DocumentOwner{TicketID: t.ID}); err != nil {
+		return nil, err
+	}
+	t.DocumentCount = len(t.Documents)
 
 	return &t, nil
 }
