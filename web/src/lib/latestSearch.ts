@@ -18,3 +18,13 @@ export function latestSearchParams(fallback: URLSearchParams): URLSearchParams {
   if (typeof window === "undefined") return new URLSearchParams(fallback);
   return new URLSearchParams(window.location.search);
 }
+
+// The location state of the current history entry, read from window.history
+// for the same reason latestSearchParams reads window.location: the router's
+// own `location.state` can lag a transition behind. BrowserRouter keeps the
+// state it was given under `usr`.
+export function latestLocationState(fallback: unknown): unknown {
+  if (typeof window === "undefined") return fallback;
+  const entry = window.history.state as { usr?: unknown } | null;
+  return entry?.usr;
+}
