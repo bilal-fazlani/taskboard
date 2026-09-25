@@ -40,6 +40,21 @@ function ticket(overrides: Partial<FilterableTicket> = {}): FilterableTicket {
 const f = (filters: Partial<Filters>): Filters => ({ ...EMPTY_FILTERS, ...filters });
 
 describe("matchesFilters", () => {
+  it("matches the search through a ticket's documents too", () => {
+    const t = ticket({ id: "t1", title: "Plain", description: "" });
+    expect(matchesFilters(t, f({ q: "storage" }))).toBe(false);
+    expect(matchesFilters(t, f({ q: "storage" }), null)).toBe(false);
+    expect(matchesFilters(t, f({ q: "storage" }), new Set(["t1"]))).toBe(true);
+    expect(matchesFilters(t, f({ q: "storage" }), new Set(["other"]))).toBe(false);
+    // A ticket without an id can't be matched through documents.
+    expect(matchesFilters(ticket({ title: "Plain", description: "" }), f({ q: "storage" }), new Set(["t1"]))).toBe(false);
+    // Document matches never widen the other filters.
+    expect(matchesFilters(t, f({ q: "storage", status: "done" }), new Set(["t1"]))).toBe(false);
+    expect(matchesFilters(t, f({ q: "storage", project: "LDR" }), new Set(["t1"]))).toBe(false);
+    // With no search they change nothing.
+    expect(matchesFilters(t, f({ status: "done" }), new Set(["t1"]))).toBe(false);
+  });
+
   it("matches everything with no filters", () => {
     expect(hasFilters(EMPTY_FILTERS)).toBe(false);
     expect(matchesFilters(ticket(), EMPTY_FILTERS)).toBe(true);

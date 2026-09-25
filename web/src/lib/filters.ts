@@ -19,7 +19,10 @@ export interface Filters {
   priority: string;
   label: string;
   repo: string;
-  /** Free text, matched against the ticket's key, title and description. */
+  /**
+   * Free text, matched against the ticket's key, title and description, and
+   * through the server against its documents' names and readable text.
+   */
   q: string;
 }
 
@@ -48,6 +51,8 @@ export const EMPTY_FILTERS: Filters = { project: "", epic: "", status: "", prior
 
 /** The fields of a ticket that filtering reads. */
 export interface FilterableTicket {
+  /** Needed only to match the search through the ticket's documents. */
+  id?: string;
   number: number;
   title: string;
   /** The API leaves out an empty description, and empty repos and labels. */
@@ -161,8 +166,15 @@ const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
  * compare case-insensitively; status and priority are fixed lowercase sets;
  * repos are matched exactly, as they are everywhere else. The epic filter's
  * NO_EPIC matches the tickets without an epic.
+ *
+ * `docMatches` holds the ids of the tickets whose documents match the search
+ * (see useDocumentMatches); it widens only the search, never another filter.
  */
-export function matchesFilters(ticket: FilterableTicket, filters: Filters): boolean {
+export function matchesFilters(
+  ticket: FilterableTicket,
+  filters: Filters,
+  docMatches?: ReadonlySet<string> | null,
+): boolean {
   if (filters.project && !same(ticket.projectPrefix, filters.project)) return false;
   if (filters.epic) {
     if (isNoEpic(filters.epic) ? ticket.epic : !ticket.epic || !same(ticket.epic.name, filters.epic)) return false;
@@ -174,7 +186,9 @@ export function matchesFilters(ticket: FilterableTicket, filters: Filters): bool
   const q = filters.q.trim().toLowerCase();
   if (q) {
     const haystacks = [ticketKey(ticket), ticket.title, ticket.description ?? ""];
-    if (!haystacks.some((h) => h.toLowerCase().includes(q))) return false;
+    const inText = haystacks.some((h) => h.toLowerCase().includes(q));
+    const inDocuments = ticket.id !== undefined && docMatches?.has(ticket.id) === true;
+    if (!inText && !inDocuments) return false;
   }
   return true;
 }

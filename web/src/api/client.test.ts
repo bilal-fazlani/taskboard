@@ -45,6 +45,13 @@ describe("api.documents", () => {
     expect(JSON.parse(init.body)).toEqual({ content: "mine", expectedRevision: 2 });
   });
 
+  it("searches a project's ticket documents with the text encoded", async () => {
+    const fetch = stubFetch(200, { ticketIds: ["t1"] });
+    const found = await api.documents.search("R&D plan.md", "ACP");
+    expect(found).toEqual({ ticketIds: ["t1"] });
+    expect(fetch.mock.calls[0][0]).toBe("/api/documents/search?q=R%26D+plan.md&projectId=ACP");
+  });
+
   it("rejects a stale save with the 409 body, for conflictDocument to read", async () => {
     stubFetch(409, { error: "changed", current: { id: "d1", revision: 2, content: "theirs" } });
     await expect(api.documents.update("d1", { content: "mine", expectedRevision: 1 })).rejects.toThrow(

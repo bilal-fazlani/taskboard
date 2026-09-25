@@ -291,6 +291,13 @@ export const api = {
     downloadUrl: (id: string) => `/api/documents/${encodeURIComponent(id)}/download`,
     /** The page itself, served sandboxed; a new revision is a new URL, so the frame reloads. */
     rawUrl: (id: string, revision: number) => `/api/documents/${encodeURIComponent(id)}/raw?rev=${revision}`,
+    /**
+     * The ids of the project's tickets that have a document whose display
+     * name or readable text contains `q`, ignoring case. Epic documents are
+     * not searched.
+     */
+    search: (q: string, projectId: string) =>
+      request<{ ticketIds: string[] }>(`/api/documents/search?${new URLSearchParams({ q, projectId }).toString()}`),
   },
 
   board: {
