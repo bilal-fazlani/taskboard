@@ -115,15 +115,18 @@ func TestCreateHTMLDocumentTool(t *testing.T) {
 	}
 }
 
-func TestCreateDocumentToolOffersHTML(t *testing.T) {
+func TestCreateDocumentToolOffersHTMLAndImages(t *testing.T) {
 	s := newTestServer(t)
 	for _, def := range s.toolDefinitions() {
 		if def.Name != "create_document" {
 			continue
 		}
 		enum := def.InputSchema.Properties["format"].Enum
-		if len(enum) != 2 || enum[0] != models.DocumentFormatMarkdown || enum[1] != models.DocumentFormatHTML {
+		if strings.Join(enum, ",") != "markdown,html,png,jpeg,gif,webp" {
 			t.Fatalf("create_document format enum = %v", enum)
+		}
+		if _, ok := def.InputSchema.Properties["data"]; !ok {
+			t.Fatal("create_document takes no data")
 		}
 		return
 	}

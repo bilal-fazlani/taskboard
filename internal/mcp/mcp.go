@@ -64,6 +64,19 @@ type textContent struct {
 	Text string `json:"text"`
 }
 
+// imageContent is a picture in a tool result, which a client shows to the
+// model as an image.
+type imageContent struct {
+	Type     string `json:"type"`
+	Data     string `json:"data"`
+	MimeType string `json:"mimeType"`
+}
+
+// contentResult is a tool result given as MCP content items, sent as they
+// are, rather than a value sent as JSON text. get_document uses it to return
+// an image's details and the picture itself.
+type contentResult []any
+
 func (s *MCPServer) Run() error {
 	reader := bufio.NewReader(os.Stdin)
 	writer := os.Stdout
@@ -159,6 +172,9 @@ func (s *MCPServer) handleToolCall(req jsonrpcRequest) *jsonrpcResponse {
 		}
 	}
 
+	if content, ok := result.(contentResult); ok {
+		return &jsonrpcResponse{JSONRPC: "2.0", ID: req.ID, Result: map[string]any{"content": content}}
+	}
 	data, _ := json.MarshalIndent(result, "", "  ")
 	return &jsonrpcResponse{
 		JSONRPC: "2.0",
