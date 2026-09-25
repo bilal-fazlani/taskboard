@@ -82,6 +82,10 @@ export interface Ticket {
   epic?: EpicRef;
   /** How many times the ticket has entered agent_review. The server always sends it. */
   reviewRounds?: number;
+  /** How many documents the ticket has. Lists and the full ticket carry it. */
+  documentCount?: number;
+  /** The documents, without content. Only the full ticket carries it. */
+  documents?: DocumentMeta[];
 }
 
 /** One change of a ticket's status. The first, written at creation, has an empty fromStatus. */
@@ -93,6 +97,28 @@ export interface StatusChange {
   note: string;
   createdAt: string;
 }
+
+export type DocumentFormat = "markdown" | "html";
+
+/** A document without its content, as lists carry it. size is in bytes. */
+export interface DocumentMeta {
+  id: string;
+  ticketId?: string;
+  name: string;
+  format: DocumentFormat;
+  size: number;
+  /** Counts content saves; a rename leaves it alone. */
+  revision: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DocumentWithContent extends DocumentMeta {
+  content: string;
+}
+
+/** What a document belongs to. */
+export type DocumentOwnerRef = { ticketId: string };
 
 /**
  * Fields accepted when creating or updating a ticket. Deliberately NOT
@@ -234,6 +260,18 @@ export const api = {
       }),
     delete: (id: string) =>
       request<void>(`/api/epics/${id}`, { method: "DELETE" }),
+  },
+
+  documents: {
+    list: (owner: DocumentOwnerRef) => request<DocumentMeta[]>(`/api/tickets/${owner.ticketId}/documents`),
+    get: (id: string) => request<DocumentWithContent>(`/api/documents/${encodeURIComponent(id)}`),
+    update: (id: string, data: { name?: string }) =>
+      request<DocumentWithContent>(`/api/documents/${encodeURIComponent(id)}`, {
+        method: "PUT",
+        body: JSON.stringify(data),
+      }),
+    delete: (id: string) => request<void>(`/api/documents/${encodeURIComponent(id)}`, { method: "DELETE" }),
+    downloadUrl: (id: string) => `/api/documents/${encodeURIComponent(id)}/download`,
   },
 
   board: {
