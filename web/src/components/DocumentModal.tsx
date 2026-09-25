@@ -3,7 +3,7 @@ import { Download, Eye, Pencil, Trash2, X } from "lucide-react";
 import Markdown from "react-markdown";
 import { api, type DocumentMeta, type DocumentOwnerRef, type DocumentWithContent } from "../api/client";
 import { activityTime } from "../lib/activity";
-import { conflictDocument, contentTooLarge, displayName, formatSize, isNotFound } from "../lib/documents";
+import { conflictDocument, contentTooLarge, displayName, DOCUMENT_SANDBOX, formatSize, isNotFound } from "../lib/documents";
 import { serverMessage } from "../lib/epics";
 import { useEscape } from "../lib/escapeStack";
 import DeleteDocumentConfirm from "./DeleteDocumentConfirm";
@@ -25,6 +25,12 @@ type Saved = { revision: number; content: string };
 // revision changes, which is how an agent's save reaches an open document.
 // The header renames, downloads and deletes; Edit (markdown only) switches
 // to the description's Write/Preview toggle with Save and Cancel.
+//
+// An HTML document is never fetched here or edited: it fills the modal in a
+// frame pointed at the server's raw route, sandboxed to scripts only there
+// and here (DOCUMENT_SANDBOX), so it runs in an opaque origin and cannot act
+// as the board. The frame's src carries the revision, so an agent's save
+// reloads it.
 //
 // A save sends the revision the text started from, so one made after
 // someone else's is refused (409) rather than overwriting it. While editing,
@@ -109,6 +115,8 @@ export default function DocumentModal({
   });
 
   useEffect(() => {
+    // An HTML page is loaded by its frame, straight from the server.
+    if (!editable) return;
     let cancelled = false;
     Promise.resolve()
       .then(() => api.documents.get(doc.id))
@@ -135,7 +143,7 @@ export default function DocumentModal({
     return () => {
       cancelled = true;
     };
-  }, [doc.id, doc.revision]);
+  }, [doc.id, doc.revision, editable]);
 
   useEffect(() => {
     onDirtyChange?.(dirty);
@@ -267,7 +275,17 @@ export default function DocumentModal({
 
   const writing = editing && base !== null && mode === "write";
   let body: React.ReactNode;
-  if (writing) {
+  if (!editable) {
+    body = (
+      <iframe
+        title={shown}
+        src={api.documents.rawUrl(doc.id, doc.revision)}
+        sandbox={DOCUMENT_SANDBOX}
+        referrerPolicy="no-referrer"
+        className="block h-full w-full border-0 bg-white"
+      />
+    );
+  } else if (writing) {
     body = (
       <textarea
         aria-label="Document content"
@@ -431,7 +449,11 @@ export default function DocumentModal({
           </p>
         )}
 
-        <div className={`min-h-0 flex-1 px-4 py-4 sm:px-8 sm:py-6 ${writing ? "flex flex-col" : "overflow-y-auto"}`}>
+        <div
+          className={`min-h-0 flex-1 ${
+            !editable ? "" : `px-4 py-4 sm:px-8 sm:py-6 ${writing ? "flex flex-col" : "overflow-y-auto"}`
+          }`}
+        >
           {body}
         </div>
       </div>

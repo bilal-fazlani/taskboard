@@ -10,6 +10,7 @@ const mockApi = vi.hoisted(() => ({
     update: vi.fn(),
     delete: vi.fn(),
     downloadUrl: (id: string) => `/api/documents/${id}/download`,
+    rawUrl: (id: string, revision: number) => `/api/documents/${id}/raw?rev=${revision}`,
   },
 }));
 vi.mock("../api/client", () => ({ api: mockApi }));
@@ -132,13 +133,6 @@ describe("editing", () => {
     expect(mockApi.documents.update).toHaveBeenCalledWith("d1", { content: "# New", expectedRevision: 1 });
     expect(screen.getByRole("heading", { name: "New" })).toBeTruthy();
     expect(onDirtyChange).toHaveBeenLastCalledWith(false);
-  });
-
-  it("offers no Edit for a document that is not markdown", async () => {
-    mockApi.documents.get.mockResolvedValue({ ...spec, format: "html", content: "<p>x</p>" });
-    setup({ ...spec, format: "html" });
-    await waitFor(() => expect(mockApi.documents.get).toHaveBeenCalled());
-    expect(screen.queryByRole("button", { name: "Edit" })).toBeNull();
   });
 
   it("leaves edit mode at once on Cancel with nothing changed", async () => {
@@ -362,5 +356,50 @@ describe("editing", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     expect((await screen.findByRole("alert")).textContent).toBe("disk full");
     expect(box().value).toBe("mine");
+  });
+});
+
+describe("HTML documents", () => {
+  const page: DocumentMeta = { ...spec, id: "h1", name: "Report", format: "html", revision: 3 };
+
+  it("shows the page full size in a frame sandboxed to scripts only, without an Edit button", async () => {
+    setup(page);
+    const frame = screen.getByTitle("Report.html");
+    expect(frame.tagName).toBe("IFRAME");
+    expect(frame.getAttribute("sandbox")).toBe("allow-scripts");
+    for (const token of ["allow-same-origin", "allow-top-navigation", "allow-popups", "allow-forms", "allow-modals", "allow-downloads"]) {
+      expect(frame.getAttribute("sandbox")).not.toContain(token);
+    }
+    expect(frame.getAttribute("src")).toBe("/api/documents/h1/raw?rev=3");
+    expect(frame.getAttribute("referrerpolicy")).toBe("no-referrer");
+    expect(frame.className).toContain("h-full");
+    expect(frame.className).toContain("w-full");
+    expect(screen.queryByRole("button", { name: "Edit" })).toBeNull();
+    // The page is the server's to render: the modal never fetches it as JSON.
+    await Promise.resolve();
+    expect(mockApi.documents.get).not.toHaveBeenCalled();
+  });
+
+  it("keeps Download, Rename and Delete in the header", () => {
+    setup(page);
+    const download = screen.getByRole("link", { name: "Download Report.html" });
+    expect(download.getAttribute("href")).toBe("/api/documents/h1/download");
+    expect(download.getAttribute("download")).toBe("Report.html");
+    expect(screen.getByRole("button", { name: "Rename Report.html" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Delete Report.html" })).toBeTruthy();
+  });
+
+  it("reloads the frame when an agent saves a new revision", () => {
+    const { rerender } = setup(page);
+    const next = { ...page, revision: 4 };
+    rerender({ doc: next, documents: [next] });
+    expect(screen.getByTitle("Report.html").getAttribute("src")).toBe("/api/documents/h1/raw?rev=4");
+  });
+
+  it("never opens an HTML document in edit mode", () => {
+    setup(page, { startEditing: true });
+    expect(screen.getByTitle("Report.html").tagName).toBe("IFRAME");
+    expect(screen.queryByRole("textbox", { name: "Document content" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
   });
 });

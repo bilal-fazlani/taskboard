@@ -280,6 +280,8 @@ export const api = {
       }),
     delete: (id: string) => request<void>(`/api/documents/${encodeURIComponent(id)}`, { method: "DELETE" }),
     downloadUrl: (id: string) => `/api/documents/${encodeURIComponent(id)}/download`,
+    /** The page itself, served sandboxed; a new revision is a new URL, so the frame reloads. */
+    rawUrl: (id: string, revision: number) => `/api/documents/${encodeURIComponent(id)}/raw?rev=${revision}`,
   },
 
   board: {

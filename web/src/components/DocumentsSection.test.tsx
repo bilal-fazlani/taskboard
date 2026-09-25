@@ -190,12 +190,35 @@ describe("DocumentsSection", () => {
     expect(mockApi.documents.create).toHaveBeenCalledWith({ ticketId: "t1", name: "api-design_v1 2", format: "markdown", content: "# x" });
   });
 
+  it("marks HTML documents with their own icon", () => {
+    setup([spec, { ...notes, name: "Report", format: "html" }]);
+    expect(screen.getByRole("button", { name: "Report.html" })).toBeTruthy();
+    expect(screen.getAllByTestId("document-icon-html")).toHaveLength(1);
+    expect(screen.getAllByTestId("document-icon-markdown")).toHaveLength(1);
+    expect(screen.getByRole("link", { name: "Download Report.html" }).getAttribute("href")).toBe("/api/documents/d2/download");
+  });
+
+  it("accepts .md, .html and .htm uploads", () => {
+    setup();
+    expect(screen.getByLabelText("Upload a document").getAttribute("accept")).toBe(".md,.html,.htm");
+  });
+
+  it("uploads an .HTM file as an HTML document named from its filename", async () => {
+    const created = { ...spec, id: "d9", name: "Load test", format: "html", content: "<h1>x</h1>" };
+    mockApi.documents.create.mockResolvedValue(created);
+    const { onCreated } = setup();
+    const file = new File(["<h1>x</h1>"], "Load test.HTM", { type: "text/html" });
+    fireEvent.change(screen.getByLabelText("Upload a document"), { target: { files: [file] } });
+    await waitFor(() => expect(onCreated).toHaveBeenCalledWith(created, false));
+    expect(mockApi.documents.create).toHaveBeenCalledWith({ ticketId: "t1", name: "Load test", format: "html", content: "<h1>x</h1>" });
+  });
+
   it("refuses an upload of another type, or over 8 MB, without reading it or asking the server", async () => {
     setup();
     const txt = new File(["x"], "notes.txt");
     const readTxt = vi.spyOn(txt, "text");
     fireEvent.change(screen.getByLabelText("Upload a document"), { target: { files: [txt] } });
-    expect(await screen.findByText("Only .md files can be attached.")).toBeTruthy();
+    expect(await screen.findByText("Only .md, .html and .htm files can be attached.")).toBeTruthy();
 
     const big = new File(["x"], "big.md");
     Object.defineProperty(big, "size", { value: 8 * 1024 * 1024 + 1 });

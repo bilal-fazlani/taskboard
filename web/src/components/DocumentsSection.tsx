@@ -1,8 +1,8 @@
 import { useRef, useState } from "react";
-import { Download, FileText, Pencil, Plus, Trash2, Upload, X } from "lucide-react";
+import { Download, FileCode, FileText, Pencil, Plus, Trash2, Upload, X } from "lucide-react";
 import { api, type DocumentMeta, type DocumentOwnerRef } from "../api/client";
 import { activityTime } from "../lib/activity";
-import { displayName, formatSize, MAX_DOCUMENT_BYTES, nameFromFilename, tooLargeMessage } from "../lib/documents";
+import { displayName, formatSize, MAX_DOCUMENT_BYTES, nameFromFilename, tooLargeMessage, UPLOAD_ACCEPT } from "../lib/documents";
 import { serverMessage } from "../lib/epics";
 import DeleteDocumentConfirm from "./DeleteDocumentConfirm";
 import DocumentRenameField from "./DocumentRenameField";
@@ -15,8 +15,9 @@ const ICON_BUTTON = "shrink-0 text-slate-500 transition-colors hover:text-slate-
 
 // A ticket's documents, in the order they were added: each opens in the
 // document modal, and can be downloaded, renamed in place or deleted. New
-// creates an empty markdown document by name; Upload adds a .md file, named
-// from its filename, checking its type and size before reading it.
+// creates an empty markdown document by name; Upload adds a .md, .html or
+// .htm file, named from its filename (the extension sets the format),
+// checking its type and size before reading it. HTML rows get a code icon.
 export default function DocumentsSection({
   documents,
   failed,
@@ -81,7 +82,11 @@ export default function DocumentsSection({
           const shown = displayName(doc);
           return (
             <li key={doc.id} data-testid="document-row" className="flex items-center gap-2.5 px-3 py-2">
-              <FileText aria-hidden="true" className="h-4 w-4 shrink-0 text-slate-500" />
+              {doc.format === "html" ? (
+                <FileCode aria-hidden="true" data-testid="document-icon-html" className="h-4 w-4 shrink-0 text-slate-500" />
+              ) : (
+                <FileText aria-hidden="true" data-testid="document-icon-markdown" className="h-4 w-4 shrink-0 text-slate-500" />
+              )}
               {renaming === doc.id ? (
                 <DocumentRenameField
                   doc={doc}
@@ -130,13 +135,13 @@ export default function DocumentsSection({
         <button type="button" onClick={() => setCreating(true)} aria-label="New document" title="New document" className={HEADER_BUTTON}>
           <Plus aria-hidden="true" className="h-3 w-3" /> New
         </button>
-        <button type="button" onClick={() => fileRef.current?.click()} disabled={uploading} title="Upload a .md file" className={`${HEADER_BUTTON} disabled:opacity-60`}>
+        <button type="button" onClick={() => fileRef.current?.click()} disabled={uploading} title="Upload a .md, .html or .htm file" className={`${HEADER_BUTTON} disabled:opacity-60`}>
           <Upload aria-hidden="true" className="h-3 w-3" /> Upload
         </button>
         <input
           ref={fileRef}
           type="file"
-          accept=".md"
+          accept={UPLOAD_ACCEPT}
           aria-label="Upload a document"
           tabIndex={-1}
           className="sr-only"

@@ -4,6 +4,7 @@ import {
   conflictDocument,
   contentTooLarge,
   displayName,
+  DOCUMENT_SANDBOX,
   documentNameError,
   findDocument,
   formatSize,
@@ -96,10 +97,26 @@ describe("nameFromFilename", () => {
   });
 
   it("refuses other types and names that clean to nothing", () => {
-    expect(nameFromFilename("notes.txt")).toEqual({ error: "Only .md files can be attached." });
-    expect(nameFromFilename("README")).toEqual({ error: "Only .md files can be attached." });
+    expect(nameFromFilename("notes.txt")).toEqual({ error: "Only .md, .html and .htm files can be attached." });
+    expect(nameFromFilename("README")).toEqual({ error: "Only .md, .html and .htm files can be attached." });
     expect(nameFromFilename(".md")).toEqual({ error: "Enter a name" });
     expect(nameFromFilename("%%.md")).toEqual({ error: "Enter a name" });
+  });
+});
+
+describe("HTML files", () => {
+  it("takes .html and .htm as HTML, in any case", () => {
+    expect(nameFromFilename("Load test.HTM")).toEqual({ name: "Load test", format: "html" });
+    expect(nameFromFilename("report.html")).toEqual({ name: "report", format: "html" });
+    expect(nameFromFilename("dir/Report.Html")).toEqual({ name: "Report", format: "html" });
+    expect(nameFromFilename("%%.htm")).toEqual({ error: "Enter a name" });
+  });
+
+  it("sandboxes the frame with scripts only", () => {
+    expect(DOCUMENT_SANDBOX).toBe("allow-scripts");
+    for (const token of ["allow-same-origin", "allow-top-navigation", "allow-popups", "allow-forms", "allow-modals", "allow-downloads"]) {
+      expect(DOCUMENT_SANDBOX).not.toContain(token);
+    }
   });
 });
 

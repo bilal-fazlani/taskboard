@@ -77,8 +77,20 @@ export function ownerKey(owner: DocumentOwnerRef): string {
   return `ticket:${owner.ticketId}`;
 }
 
-const FORMAT_BY_EXTENSION: Record<string, DocumentFormat> = { ".md": "markdown" };
-const EXTENSION_MESSAGE = "Only .md files can be attached.";
+const FORMAT_BY_EXTENSION: Record<string, DocumentFormat> = { ".md": "markdown", ".html": "html", ".htm": "html" };
+const EXTENSION_MESSAGE = "Only .md, .html and .htm files can be attached.";
+
+/** What the upload's file picker offers. */
+export const UPLOAD_ACCEPT = Object.keys(FORMAT_BY_EXTENSION).join(",");
+
+/**
+ * The sandbox an HTML document's frame runs in: scripts only. It must match
+ * the server's Content-Security-Policy (documentSandbox in
+ * internal/server/documents.go). Never add allow-same-origin (the page would
+ * act as the board), allow-top-navigation or allow-popups; allow-forms,
+ * allow-modals and allow-downloads were ruled out too.
+ */
+export const DOCUMENT_SANDBOX = "allow-scripts";
 
 /**
  * A document name and format from a file's name, as the server makes them
