@@ -1,6 +1,9 @@
 package models
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 type Project struct {
 	ID          string    `json:"id"`
@@ -12,6 +15,15 @@ type Project struct {
 	Status      string    `json:"status"`
 	CreatedAt   time.Time `json:"createdAt"`
 	UpdatedAt   time.Time `json:"updatedAt"`
+	// AgentInstructions says how agents should work on the project's
+	// tickets; Description says what the project is. Reads of one project
+	// always set it, to "" when there are none. Lists never read the text and
+	// leave it nil, so it is left out of their JSON.
+	AgentInstructions *string `json:"agentInstructions,omitempty"`
+	// HasAgentInstructions is whether the project has agent instructions.
+	// Every read sets it. It is not part of the project's JSON: the HTTP
+	// project list adds it for each project, and MCP never shows it.
+	HasAgentInstructions bool `json:"-"`
 }
 
 type Ticket struct {
@@ -140,20 +152,23 @@ type Column struct {
 }
 
 type CreateProjectRequest struct {
-	Name        string `json:"name"`
-	Prefix      string `json:"prefix"`
-	Description string `json:"description,omitempty"`
-	Icon        string `json:"icon,omitempty"`
-	Color       string `json:"color,omitempty"`
+	Name              string `json:"name"`
+	Prefix            string `json:"prefix"`
+	Description       string `json:"description,omitempty"`
+	AgentInstructions string `json:"agentInstructions,omitempty"`
+	Icon              string `json:"icon,omitempty"`
+	Color             string `json:"color,omitempty"`
 }
 
 type UpdateProjectRequest struct {
 	Name        *string `json:"name,omitempty"`
 	Prefix      *string `json:"prefix,omitempty"`
 	Description *string `json:"description,omitempty"`
-	Icon        *string `json:"icon,omitempty"`
-	Color       *string `json:"color,omitempty"`
-	Status      *string `json:"status,omitempty"`
+	// AgentInstructions left out (nil) leaves them unchanged; "" clears them.
+	AgentInstructions *string `json:"agentInstructions,omitempty"`
+	Icon              *string `json:"icon,omitempty"`
+	Color             *string `json:"color,omitempty"`
+	Status            *string `json:"status,omitempty"`
 }
 
 type CreateTicketRequest struct {
@@ -239,4 +254,14 @@ type TicketFilter struct {
 	// ("none", any case) for tickets without an epic. Without a ProjectID a
 	// name matches that epic in every project.
 	Epic string
+}
+
+// SetAgentInstructions sets the project's agent instructions, trimmed of
+// leading and trailing whitespace, and whether it has any. The store sets
+// them through here before writing, so whitespace-only instructions are
+// stored empty whichever surface sent them.
+func (p *Project) SetAgentInstructions(text string) {
+	text = strings.TrimSpace(text)
+	p.AgentInstructions = &text
+	p.HasAgentInstructions = text != ""
 }

@@ -589,12 +589,21 @@ const noteParamDescription = "Why the status is changing, saved with the change 
 	"Required when moving a ticket out of agent_review: say why it is leaving review, either that it was approved and landed, " +
 	"or the review findings it is being sent back to fix. Optional for every other change; ignored when the status does not change."
 
+// The help for a project's two text fields: the description says what the
+// project is, the agent instructions how to work on it.
+const (
+	projectDescriptionHelp       = "What the project is: its goals, scope and context. Not how to work on it; that goes in agentInstructions."
+	projectAgentInstructionsHelp = "Agent instructions: how agents should work on this project's tickets (for example branches, review, " +
+		"verify commands, commit style). get_project returns them; the board never acts on them."
+)
+
 func (s *MCPServer) toolDefinitions() []toolDef {
 	defs := []toolDef{
 		// --- Projects (top-level grouping) ---
 		{
-			Name:        "list_projects",
-			Description: "List all projects with optional status filter. Projects are the top-level grouping — use them like epics or initiatives to organize related work.",
+			Name: "list_projects",
+			Description: "List all projects with optional status filter. Projects are the top-level grouping — use them like epics or initiatives to organize related work. " +
+				"The list leaves out each project's agent instructions; get_project returns them.",
 			InputSchema: jsonSchema{
 				Type: "object",
 				Properties: map[string]schemaProp{
@@ -603,8 +612,9 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 			},
 		},
 		{
-			Name:        "get_project",
-			Description: "Get detailed project information by ID",
+			Name: "get_project",
+			Description: "Get detailed project information by ID, including its agentInstructions: how agents should work on the project's tickets. " +
+				"Before working on a project's tickets, read its agent instructions and follow them. The board itself never acts on them.",
 			InputSchema: jsonSchema{
 				Type:       "object",
 				Properties: map[string]schemaProp{"id": {Type: "string", Description: "Project ID or prefix (case-insensitive)"}},
@@ -616,15 +626,17 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 			Description: "Create a new project. Projects are the top-level organizational unit (like epics/initiatives). " +
 				"Create a new project for each distinct body of work instead of creating umbrella tickets. " +
 				"Hierarchy: Project → Ticket → Subtask. Never create 'epic' or 'umbrella' tickets — use a project for that. " +
-				"Use the description field to capture the project's goals, scope, and any high-level context.",
+				"Use the description field to capture what the project is: its goals, scope and context. " +
+				"Put how agents should work on the project's tickets in agentInstructions instead.",
 			InputSchema: jsonSchema{
 				Type: "object",
 				Properties: map[string]schemaProp{
-					"name":        {Type: "string", Description: "Project name"},
-					"prefix":      {Type: "string", Description: "Short prefix for ticket keys (e.g. AUTH)"},
-					"description": {Type: "string", Description: "Project description — goals, scope, context, and any high-level details about this body of work"},
-					"icon":        {Type: "string", Description: "Emoji icon"},
-					"color":       {Type: "string", Description: "Hex color code"},
+					"name":              {Type: "string", Description: "Project name"},
+					"prefix":            {Type: "string", Description: "Short prefix for ticket keys (e.g. AUTH)"},
+					"description":       {Type: "string", Description: projectDescriptionHelp},
+					"agentInstructions": {Type: "string", Description: projectAgentInstructionsHelp},
+					"icon":              {Type: "string", Description: "Emoji icon"},
+					"color":             {Type: "string", Description: "Hex color code"},
 				},
 				Required: []string{"name", "prefix"},
 			},
@@ -635,13 +647,14 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 			InputSchema: jsonSchema{
 				Type: "object",
 				Properties: map[string]schemaProp{
-					"id":          {Type: "string", Description: "Project ID or prefix (case-insensitive)"},
-					"name":        {Type: "string", Description: "Project name"},
-					"prefix":      {Type: "string", Description: "Short prefix"},
-					"description": {Type: "string", Description: "Project description — goals, scope, context"},
-					"icon":        {Type: "string", Description: "Emoji icon"},
-					"color":       {Type: "string", Description: "Hex color"},
-					"status":      {Type: "string", Description: "Status", Enum: []string{"active", "archived"}},
+					"id":                {Type: "string", Description: "Project ID or prefix (case-insensitive)"},
+					"name":              {Type: "string", Description: "Project name"},
+					"prefix":            {Type: "string", Description: "Short prefix"},
+					"description":       {Type: "string", Description: projectDescriptionHelp},
+					"agentInstructions": {Type: "string", Description: projectAgentInstructionsHelp + " Leave it out to keep them as they are; an empty string clears them."},
+					"icon":              {Type: "string", Description: "Emoji icon"},
+					"color":             {Type: "string", Description: "Hex color"},
+					"status":            {Type: "string", Description: "Status", Enum: []string{"active", "archived"}},
 				},
 				Required: []string{"id"},
 			},

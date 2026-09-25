@@ -40,7 +40,7 @@ func projectCommands() *cobra.Command {
 		},
 	}
 
-	var prefix, icon, color string
+	var prefix, icon, color, agentInstructions string
 	createCmd := &cobra.Command{
 		Use:   "create [name]",
 		Short: "Create a new project",
@@ -51,10 +51,11 @@ func projectCommands() *cobra.Command {
 				return err
 			}
 			p, err := store.CreateProject(models.CreateProjectRequest{
-				Name:   args[0],
-				Prefix: prefix,
-				Icon:   icon,
-				Color:  color,
+				Name:              args[0],
+				Prefix:            prefix,
+				AgentInstructions: agentInstructions,
+				Icon:              icon,
+				Color:             color,
 			})
 			if err != nil {
 				return err
@@ -67,6 +68,8 @@ func projectCommands() *cobra.Command {
 	createCmd.MarkFlagRequired("prefix")
 	createCmd.Flags().StringVar(&icon, "icon", "", "emoji icon")
 	createCmd.Flags().StringVar(&color, "color", "#3B82F6", "hex color")
+	createCmd.Flags().StringVar(&agentInstructions, "agent-instructions", "",
+		"how agents should work on the project's tickets (agents read it through get_project; the board never acts on it)")
 
 	deleteCmd := &cobra.Command{
 		Use:   "delete [id-or-prefix]",

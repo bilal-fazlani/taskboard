@@ -4,6 +4,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/tcarac/taskboard/internal/db"
 )
 
 // project delete must accept a project prefix (case-insensitive), the same
@@ -70,5 +72,41 @@ func TestProjectDeleteRejectsAmbiguousPrefix(t *testing.T) {
 	}
 	if !strings.Contains(listed, "[GLOW]") || !strings.Contains(listed, "[glow]") {
 		t.Fatalf("project list after a rejected ambiguous delete = %q, want both GLOW and glow still present", listed)
+	}
+}
+
+// project create stores --agent-instructions, and leaves them empty without
+// the flag.
+func TestProjectCreateTakesAgentInstructions(t *testing.T) {
+	setLiveBuild(t, false)
+	sandboxHome(t)
+	path := filepath.Join(t.TempDir(), "dev.db")
+
+	if _, err := runCLI(t, "--db", path, "project", "create", "Billing", "--prefix", "BILL",
+		"--agent-instructions", "Run the tests before landing."); err != nil {
+		t.Fatalf("project create with instructions: %v", err)
+	}
+	if _, err := runCLI(t, "--db", path, "project", "create", "Support", "--prefix", "SUP"); err != nil {
+		t.Fatalf("project create without instructions: %v", err)
+	}
+
+	database, err := db.OpenAt(path)
+	if err != nil {
+		t.Fatalf("opening database: %v", err)
+	}
+	defer database.Close()
+	store := db.NewStore(database)
+	for prefix, want := range map[string]string{"BILL": "Run the tests before landing.", "SUP": ""} {
+		id, err := store.ResolveProjectRef(prefix)
+		if err != nil {
+			t.Fatalf("resolving %s: %v", prefix, err)
+		}
+		p, err := store.GetProject(id)
+		if err != nil || p == nil || p.AgentInstructions == nil {
+			t.Fatalf("GetProject %s: %+v, %v", prefix, p, err)
+		}
+		if *p.AgentInstructions != want {
+			t.Fatalf("%s agent instructions = %q, want %q", prefix, *p.AgentInstructions, want)
+		}
 	}
 }

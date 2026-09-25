@@ -230,7 +230,8 @@ schema change, and every writer is covered.
 - **No workflow enforcement.** The board does not block a status change or a
   claim on dependency grounds.
 - **No agent orchestration.** Taskboard does not start, stop, schedule or
-  assign agents. Agents pull work; something else runs them.
+  assign agents. Agents pull work; something else runs them. Projects can
+  store agent instructions, which the board shows to agents and never acts on.
 - **No vendor-specific integration** beyond the brand mark. Every agent uses
   the same protocol.
 - **No chat.** A request is a structured question with a structured answer,

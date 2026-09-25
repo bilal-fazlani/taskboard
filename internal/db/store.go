@@ -65,8 +65,10 @@ func newID() string {
 	return ulid.MustNew(ulid.Timestamp(time.Now()), rand.Reader).String()
 }
 
+// ListProjects returns the projects without their agent instructions, which
+// can be long; each says only whether it has some.
 func (s *Store) ListProjects(status string) ([]models.Project, error) {
-	query := "SELECT id, name, prefix, description, icon, color, status, created_at, updated_at FROM projects"
+	query := "SELECT id, name, prefix, description, agent_instructions <> '', icon, color, status, created_at, updated_at FROM projects"
 	args := []any{}
 	if status != "" {
 		query += " WHERE status = ?"
@@ -83,7 +85,7 @@ func (s *Store) ListProjects(status string) ([]models.Project, error) {
 	var projects []models.Project
 	for rows.Next() {
 		var p models.Project
-		if err := rows.Scan(&p.ID, &p.Name, &p.Prefix, &p.Description, &p.Icon, &p.Color, &p.Status, &p.CreatedAt, &p.UpdatedAt); err != nil {
+		if err := rows.Scan(&p.ID, &p.Name, &p.Prefix, &p.Description, &p.HasAgentInstructions, &p.Icon, &p.Color, &p.Status, &p.CreatedAt, &p.UpdatedAt); err != nil {
 			return nil, err
 		}
 		projects = append(projects, p)
@@ -91,14 +93,17 @@ func (s *Store) ListProjects(status string) ([]models.Project, error) {
 	return projects, rows.Err()
 }
 
+// GetProject returns one project with its agent instructions.
 func (s *Store) GetProject(id string) (*models.Project, error) {
 	var p models.Project
+	var instructions string
 	err := s.db.QueryRow(
-		"SELECT id, name, prefix, description, icon, color, status, created_at, updated_at FROM projects WHERE id = ?", id,
-	).Scan(&p.ID, &p.Name, &p.Prefix, &p.Description, &p.Icon, &p.Color, &p.Status, &p.CreatedAt, &p.UpdatedAt)
+		"SELECT id, name, prefix, description, agent_instructions, icon, color, status, created_at, updated_at FROM projects WHERE id = ?", id,
+	).Scan(&p.ID, &p.Name, &p.Prefix, &p.Description, &instructions, &p.Icon, &p.Color, &p.Status, &p.CreatedAt, &p.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
+	p.SetAgentInstructions(instructions)
 	return &p, err
 }
 
@@ -114,13 +119,14 @@ func (s *Store) CreateProject(req models.CreateProjectRequest) (*models.Project,
 		CreatedAt:   time.Now().UTC(),
 		UpdatedAt:   time.Now().UTC(),
 	}
+	p.SetAgentInstructions(req.AgentInstructions)
 	if p.Color == "" {
 		p.Color = "#3B82F6"
 	}
 
 	_, err := s.db.Exec(
-		"INSERT INTO projects (id, name, prefix, description, icon, color, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-		p.ID, p.Name, p.Prefix, p.Description, p.Icon, p.Color, p.Status, stamp(p.CreatedAt), stamp(p.UpdatedAt),
+		"INSERT INTO projects (id, name, prefix, description, agent_instructions, icon, color, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		p.ID, p.Name, p.Prefix, p.Description, *p.AgentInstructions, p.Icon, p.Color, p.Status, stamp(p.CreatedAt), stamp(p.UpdatedAt),
 	)
 	return &p, err
 }
@@ -140,6 +146,9 @@ func (s *Store) UpdateProject(id string, req models.UpdateProjectRequest) (*mode
 	if req.Description != nil {
 		p.Description = *req.Description
 	}
+	if req.AgentInstructions != nil {
+		p.SetAgentInstructions(*req.AgentInstructions)
+	}
 	if req.Icon != nil {
 		p.Icon = *req.Icon
 	}
@@ -152,8 +161,8 @@ func (s *Store) UpdateProject(id string, req models.UpdateProjectRequest) (*mode
 	p.UpdatedAt = time.Now().UTC()
 
 	_, err = s.db.Exec(
-		"UPDATE projects SET name=?, prefix=?, description=?, icon=?, color=?, status=?, updated_at=? WHERE id=?",
-		p.Name, p.Prefix, p.Description, p.Icon, p.Color, p.Status, stamp(p.UpdatedAt), p.ID,
+		"UPDATE projects SET name=?, prefix=?, description=?, agent_instructions=?, icon=?, color=?, status=?, updated_at=? WHERE id=?",
+		p.Name, p.Prefix, p.Description, *p.AgentInstructions, p.Icon, p.Color, p.Status, stamp(p.UpdatedAt), p.ID,
 	)
 	return p, err
 }

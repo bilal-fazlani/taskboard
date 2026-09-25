@@ -334,6 +334,14 @@ func decodeJSON(r *http.Request, v any) error {
 	return json.NewDecoder(r.Body).Decode(v)
 }
 
+// projectListItem is a project in the HTTP list: without its agent
+// instructions, but saying whether it has any, for the Projects page's card
+// marker.
+type projectListItem struct {
+	models.Project
+	HasAgentInstructions bool `json:"hasAgentInstructions"`
+}
+
 func (s *Server) listProjects(w http.ResponseWriter, r *http.Request) {
 	status := r.URL.Query().Get("status")
 	projects, err := s.store.ListProjects(status)
@@ -341,10 +349,11 @@ func (s *Server) listProjects(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if projects == nil {
-		projects = []models.Project{}
+	items := make([]projectListItem, 0, len(projects))
+	for _, p := range projects {
+		items = append(items, projectListItem{Project: p, HasAgentInstructions: p.HasAgentInstructions})
 	}
-	writeJSON(w, http.StatusOK, projects)
+	writeJSON(w, http.StatusOK, items)
 }
 
 func (s *Server) getProject(w http.ResponseWriter, r *http.Request) {

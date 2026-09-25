@@ -115,6 +115,7 @@ A `: keep-alive` comment arrives roughly every 20 seconds while nothing changes,
 
 ```bash
 taskboard project create "Auth System" --prefix AUTH --icon "🔐"
+taskboard project create "Billing" --prefix BILL --agent-instructions "Run the tests before landing."
 taskboard project list
 
 taskboard ticket create --project <ID> --title "Implement login" --priority high
@@ -215,7 +216,7 @@ The reverse direction is derived, not stored. When `BILL-5` depends on `BILL-2`,
 | ----------------------- | ------------------------------------------------ |
 | **Projects**            |                                                  |
 | `list_projects`         | List all projects with optional status filter    |
-| `get_project`           | Get project details by ID                        |
+| `get_project`           | Get project details, with its agent instructions |
 | `create_project`        | Create a new project (use for epics/initiatives) |
 | `update_project`        | Update project properties                        |
 | `delete_project`        | Delete a project and all its tickets             |
