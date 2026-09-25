@@ -1015,6 +1015,15 @@ describe("description", () => {
     expect(screen.queryByTestId("missing-image")).toBeNull();
   });
 
+  it("marks an image missing, rather than waiting forever, when the documents fail to load", async () => {
+    mockApi.documents.list.mockRejectedValue(new Error("API error 500: boom"));
+    const described = makeTicket({ description: "![a](Login screen.png)" });
+    mockApi.tickets.get.mockResolvedValue(described);
+    renderEditor(described);
+    expect(screen.getByTestId("image-loading")).toBeTruthy();
+    await waitFor(() => expect(screen.getByTestId("missing-image").textContent).toBe("Missing image: Login screen.png"));
+  });
+
   it("shows them in Preview as they are typed, and marks an unknown name missing", async () => {
     mockApi.documents.list.mockResolvedValue([shot]);
     renderEditor(makeTicket({ description: "" }));

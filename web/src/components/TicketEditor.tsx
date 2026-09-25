@@ -631,7 +631,7 @@ export default function TicketEditor({
                   data-testid="description-preview"
                   className="prose-card min-h-[16rem] overflow-y-auto rounded-lg border border-slate-700 bg-slate-800/50 px-3 py-2"
                 >
-                  <OwnerMarkdown documents={documents}>{description}</OwnerMarkdown>
+                  <OwnerMarkdown documents={documents ?? (documentsFailed ? [] : null)}>{description}</OwnerMarkdown>
                 </div>
               ) : (
                 <div

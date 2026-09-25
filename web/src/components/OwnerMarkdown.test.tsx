@@ -61,6 +61,13 @@ describe("OwnerMarkdown images", () => {
     expect(container.textContent).toContain("![y](Login screen.png)");
   });
 
+  it("leaves an escaped reference as text, and still finds an unescaped one beside it", () => {
+    const md = "\\![a](Login screen.png) and ![a](Login screen.png) and !\\[b](Login screen.png)";
+    const { container } = render(<OwnerMarkdown documents={docs}>{md}</OwnerMarkdown>);
+    expect(images(container).map((i) => i.getAttribute("src"))).toEqual([LOGIN_SRC]);
+    expect(container.textContent).toBe("![a](Login screen.png) and  and ![b](Login screen.png)");
+  });
+
   it("keeps absolute URLs as they are", () => {
     const { container } = render(<OwnerMarkdown documents={docs}>{"![logo](https://example.com/logo.png)"}</OwnerMarkdown>);
     expect(images(container)[0].getAttribute("src")).toBe("https://example.com/logo.png");
@@ -127,10 +134,12 @@ describe("OwnerMarkdown missing images", () => {
     expect(screen.getByTestId("missing-image").getAttribute("title")).toBe('This epic has no image called "Nope.png".');
   });
 
-  it("marks a URL the sanitizer drops as missing", () => {
+  it("marks a URL the sanitizer drops as missing, without naming the alt text as the image", () => {
     const { container } = render(<OwnerMarkdown documents={docs}>{"![alt text](javascript:alert(1))"}</OwnerMarkdown>);
     expect(images(container)).toHaveLength(0);
-    expect(screen.getByTestId("missing-image").textContent).toBe("Missing image: alt text");
+    const marker = screen.getByTestId("missing-image");
+    expect(marker.textContent).toBe("Missing image");
+    expect(marker.getAttribute("title")).toBe("This image can't be shown.");
   });
 
   it("turns an owner image that fails to load into the marker", () => {

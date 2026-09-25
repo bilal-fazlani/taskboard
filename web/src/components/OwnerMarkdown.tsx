@@ -15,8 +15,10 @@ const OwnerContext = createContext<Owner>({ documents: null, ownerNoun: "ticket"
 // Stands where an image would be when the name finds none of the owner's
 // images (or the image could not be loaded): a quiet marker naming what is
 // missing, never a broken-image icon.
-function MissingImage({ name, alt, ownerNoun }: { name: string; alt?: string; ownerNoun: string }) {
-  const label = name || alt || "";
+// A URL the sanitizer dropped (data:, javascript:) leaves no name, and the
+// marker then says only that the image is missing.
+function MissingImage({ name, ownerNoun }: { name: string; ownerNoun: string }) {
+  const label = name;
   return (
     <span
       role="img"
@@ -42,7 +44,7 @@ function OwnerImage({ src, alt, title }: { src?: string; alt?: string; title?: s
   if (target.kind === "absolute") return <img src={target.src} alt={alt ?? ""} title={title} />;
   if (target.kind === "missing" || failedSrc === target.src) {
     const name = target.kind === "missing" ? target.name : displayName(target.doc);
-    return <MissingImage name={name} alt={alt} ownerNoun={ownerNoun} />;
+    return <MissingImage name={name} ownerNoun={ownerNoun} />;
   }
   const { doc } = target;
   return (

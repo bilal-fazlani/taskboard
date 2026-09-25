@@ -88,6 +88,7 @@ interface MdNode {
   alt?: string;
   title?: string | null;
   children?: MdNode[];
+  position?: { start: { offset?: number }; end: { offset?: number } };
 }
 
 // An image reference CommonMark leaves as text because its name has spaces
@@ -96,10 +97,34 @@ interface MdNode {
 // is left alone.
 const SPACED_IMAGE_REF = /!\[([^\]\n]*)\]\(\s*([^()<>\n]*?\S\.(?:png|jpe?g|gif|webp))\s*\)/gi;
 
-function splitText(value: string): MdNode[] | null {
+// Whether the n-th copy of `text` in the markdown a text node came from is
+// escaped (\![alt](…)), or cannot be found as written there (!\[alt](…)):
+// either way the author did not write an image. Without the source, nothing
+// is escaped.
+function escapedInSource(source: string | undefined, node: MdNode, text: string, n: number): boolean {
+  const start = node.position?.start.offset;
+  const end = node.position?.end.offset;
+  if (source === undefined || start === undefined || end === undefined) return false;
+  const written = source.slice(start, end);
+  let at = -1;
+  for (let i = 0; i <= n; i++) {
+    at = written.indexOf(text, at + 1);
+    if (at < 0) return true;
+  }
+  let slashes = 0;
+  for (let i = at - 1; i >= 0 && written[i] === "\\"; i--) slashes++;
+  return slashes % 2 === 1;
+}
+
+function splitText(node: MdNode, source: string | undefined): MdNode[] | null {
+  const value = node.value ?? "";
   const out: MdNode[] = [];
+  const seen = new Map<string, number>();
   let last = 0;
   for (const match of value.matchAll(SPACED_IMAGE_REF)) {
+    const n = seen.get(match[0]) ?? 0;
+    seen.set(match[0], n + 1);
+    if (escapedInSource(source, node, match[0], n)) continue;
     const at = match.index ?? 0;
     if (at > last) out.push({ type: "text", value: value.slice(last, at) });
     out.push({ type: "image", url: match[2].trim(), alt: match[1], title: null });
@@ -110,21 +135,26 @@ function splitText(value: string): MdNode[] | null {
   return out;
 }
 
-function rewrite(node: MdNode): void {
+function rewrite(node: MdNode, source: string | undefined): void {
   if (!node.children) return;
   const next: MdNode[] = [];
   for (const child of node.children) {
-    const split = child.type === "text" && child.value ? splitText(child.value) : null;
+    const split = child.type === "text" && child.value ? splitText(child, source) : null;
     if (split) next.push(...split);
     else {
-      rewrite(child);
+      rewrite(child, source);
       next.push(child);
     }
   }
   node.children = next;
 }
 
-/** A remark plugin turning plain references with spaces into images. Code is never touched: its text is not a text node. */
+/**
+ * A remark plugin turning bare references with spaces into images. Code is
+ * never touched (its text is not a text node), nor is a reference the author
+ * escaped.
+ */
 export function remarkSpacedImageRefs() {
-  return (tree: unknown) => rewrite(tree as MdNode);
+  return (tree: unknown, file?: { value?: unknown }) =>
+    rewrite(tree as MdNode, typeof file?.value === "string" ? file.value : undefined);
 }
