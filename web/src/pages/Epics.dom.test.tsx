@@ -3,7 +3,7 @@ import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { BrowserRouter, MemoryRouter, Route, Routes } from "react-router-dom";
-import type { Epic, EpicList, EpicProgress, Project, Ticket } from "../api/client";
+import type { DocumentMeta, Epic, EpicList, EpicProgress, Project, Ticket } from "../api/client";
 import { LAST_PROJECT_KEY } from "../lib/defaultProject";
 import { LAST_VIEW_KEY } from "../lib/lastView";
 import { memoryStorage } from "../test/memoryStorage";
@@ -15,6 +15,15 @@ const mockApi = vi.hoisted(() => ({
   projects: { list: vi.fn() },
   tickets: { list: vi.fn() },
   epics: { list: vi.fn(), create: vi.fn(), update: vi.fn(), delete: vi.fn() },
+  documents: {
+    list: vi.fn(),
+    get: vi.fn(),
+    update: vi.fn(),
+    delete: vi.fn(),
+    create: vi.fn(),
+    downloadUrl: (id: string) => `/api/documents/${id}/download`,
+    rawUrl: (id: string, rev: number) => `/api/documents/${id}/raw?rev=${rev}`,
+  },
 }));
 vi.mock("../api/client", () => ({ api: mockApi }));
 
@@ -79,6 +88,13 @@ async function settle() {
   for (let i = 0; i < 4; i++) await act(async () => {});
 }
 
+// Back and Forward land a moment later: the epic modal closes by going back.
+async function settleHistory() {
+  await act(async () => {
+    for (let i = 0; i < 30; i++) await new Promise((resolve) => setTimeout(resolve, 5));
+  });
+}
+
 async function mount(url = "/epics?project=ACP", { strict = false } = {}) {
   window.history.replaceState(null, "", url);
   const page = (
@@ -104,6 +120,7 @@ beforeEach(() => {
   live.refresh = [];
   mockApi.projects.list.mockResolvedValue(PROJECTS);
   mockApi.tickets.list.mockResolvedValue([]);
+  mockApi.documents.list.mockResolvedValue([]);
   serves(LIST);
 });
 
@@ -489,7 +506,9 @@ describe("Epics dialog", () => {
     expect(alert()).toBeNull();
     await press("Save");
     expect(mockApi.epics.update).toHaveBeenCalledWith("e-Graph", { name: "GRAPH", description: "Dependency graph home page" });
+    await settleHistory();
     expect(screen.queryByRole("dialog")).toBeNull();
+    expect(params().has("epic")).toBe(false);
   });
 
   it("still refuses renaming to another epic's name", async () => {
@@ -601,6 +620,7 @@ describe("Epics dialog focus", () => {
     await settle();
     expect(document.activeElement).toBe(screen.getByLabelText("Name"));
     await escape();
+    await settleHistory();
     expect(document.activeElement).toBe(toggle);
 
     await openFromMenu("Store", "Delete");
@@ -641,13 +661,14 @@ describe("Epics dialog focus", () => {
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     });
+    await settleHistory();
     expect(document.activeElement).toBe(toggle);
 
     toggle = await openFromMenu("Store", "Edit");
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Save" }));
     });
-    await settle();
+    await settleHistory();
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(document.activeElement).toBe(screen.getByRole("button", { name: "Actions for Store" }));
   });
@@ -703,5 +724,155 @@ describe("Epics live refresh", () => {
     expect(rowNames()).toContain("Payments");
     expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("Payments");
     expect(screen.getByRole("alert").textContent).toBe('This project already has an epic called "Payments".');
+  });
+});
+
+describe("Epics modal", () => {
+  const withDocs = (name: string, documentCount: number) =>
+    ({ ...LIST, epics: LIST.epics.map((e) => (e.name === name ? { ...e, documentCount } : e)) });
+  const modal = () => screen.queryByRole("dialog", { name: "Edit epic" });
+  const plan: DocumentMeta = {
+    id: "d1", epicId: "e-Graph", name: "Rollout plan", format: "markdown", size: 7, revision: 1, createdAt: "", updatedAt: "",
+  };
+
+  it("shows each epic's document count on a paperclip beside the row's link", async () => {
+    serves(withDocs("Graph", 2));
+    await mount();
+    const paperclip = within(rowOf("Graph")).getByRole("button", { name: "Documents of Graph (2)" });
+    expect(paperclip.textContent).toBe("2");
+    expect(paperclip.closest("a")).toBeNull();
+    expect(within(rowOf("Store")).getByRole("button", { name: "Documents of Store (0)" })).toBeTruthy();
+    // The No epic row has none.
+    const noEpicRow = rowOf("No epic");
+    expect(within(noEpicRow).queryByRole("button", { name: /Documents of/ })).toBeNull();
+  });
+
+  it("opens the epic modal from the row's paperclip, with the epic in the URL, and Back closes it", async () => {
+    serves(withDocs("Graph", 2));
+    await mount();
+    const paperclip = screen.getByRole("button", { name: "Documents of Graph (2)" });
+    paperclip.focus();
+    await act(async () => {
+      fireEvent.click(paperclip);
+    });
+    expect(modal()).toBeTruthy();
+    expect(params().get("epic")).toBe("Graph");
+    expect(mockApi.documents.list).toHaveBeenCalledWith({ epicId: "e-Graph" });
+
+    await act(async () => {
+      window.history.back();
+    });
+    await settleHistory();
+    expect(modal()).toBeNull();
+    expect(params().has("epic")).toBe(false);
+    expect(document.activeElement).toBe(paperclip);
+
+    await act(async () => {
+      window.history.forward();
+    });
+    await settleHistory();
+    expect(modal()).toBeTruthy();
+  });
+
+  it("opens the epic named in the URL on load, and closing drops it in place", async () => {
+    await mount("/epics?project=ACP&epic=graph");
+    expect(modal()).toBeTruthy();
+    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("Graph");
+    await act(async () => {
+      fireEvent.click(within(modal()!).getByRole("button", { name: "Close" }));
+    });
+    await settleHistory();
+    expect(modal()).toBeNull();
+    expect(window.location.search).toBe("?project=ACP");
+  });
+
+  it("drops an epic the shown project does not have, opening nothing", async () => {
+    await mount("/epics?project=ACP&epic=Elsewhere&doc=Plan.md");
+    await settleHistory();
+    expect(modal()).toBeNull();
+    expect(window.location.search).toBe("?project=ACP");
+  });
+
+  it("opens an epic's document from a pasted link", async () => {
+    mockApi.documents.list.mockResolvedValue([plan]);
+    mockApi.documents.get.mockResolvedValue({ ...plan, content: "# Steps" });
+    await mount("/epics?project=ACP&epic=Graph&doc=Rollout%20plan.md");
+    expect(await screen.findByRole("heading", { name: "Steps" })).toBeTruthy();
+    expect(modal()).toBeTruthy();
+  });
+
+  it("keeps the epic and its document through two Backs with unsaved text, and Keep editing puts both back", async () => {
+    mockApi.documents.list.mockResolvedValue([plan]);
+    mockApi.documents.get.mockResolvedValue({ ...plan, content: "# Steps" });
+    await mount();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Documents of Graph (0)" }));
+    });
+    await act(async () => {
+      fireEvent.click(await screen.findByRole("button", { name: "Rollout plan.md" }));
+    });
+    await act(async () => {
+      fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    });
+    await act(async () => {
+      fireEvent.change(screen.getByRole("textbox", { name: "Document content" }), { target: { value: "# Mine" } });
+    });
+    expect(params().get("doc")).toBe("Rollout plan.md");
+
+    await act(async () => {
+      window.history.back();
+    });
+    await settleHistory();
+    await act(async () => {
+      window.history.back();
+    });
+    await settleHistory();
+    expect(params().has("epic")).toBe(false);
+    expect(modal()).toBeTruthy();
+    const ask = screen.getByRole("alertdialog", { name: "Discard your changes?" });
+    expect((screen.getByRole("textbox", { name: "Document content" }) as HTMLTextAreaElement).value).toBe("# Mine");
+
+    await act(async () => {
+      fireEvent.click(within(ask).getByRole("button", { name: "Keep editing" }));
+    });
+    await settleHistory();
+    expect(params().get("epic")).toBe("Graph");
+    expect(params().get("doc")).toBe("Rollout plan.md");
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect((screen.getByRole("textbox", { name: "Document content" }) as HTMLTextAreaElement).value).toBe("# Mine");
+
+    // Two Backs again, and Discard this time: nothing is left open.
+    for (let i = 0; i < 2; i++) {
+      await act(async () => {
+        window.history.back();
+      });
+      await settleHistory();
+    }
+    await act(async () => {
+      fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Discard" }));
+    });
+    await settleHistory();
+    expect(modal()).toBeNull();
+    expect(screen.queryByRole("textbox", { name: "Document content" })).toBeNull();
+    expect(window.location.search).toBe("?project=ACP");
+  });
+
+  it("saves a rename, closes, and the row shows the new name", async () => {
+    mockApi.epics.update.mockResolvedValue({ ...GRAPH, name: "Graph view" });
+    await mount();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Documents of Graph (0)" }));
+    });
+    serves({ ...LIST, epics: LIST.epics.map((e) => (e === GRAPH ? { ...e, name: "Graph view" } : e)) });
+    await act(async () => {
+      fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Graph view" } });
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    });
+    await settleHistory();
+    expect(modal()).toBeNull();
+    expect(params().has("epic")).toBe(false);
+    expect(rowNames()).toContain("Graph view");
   });
 });

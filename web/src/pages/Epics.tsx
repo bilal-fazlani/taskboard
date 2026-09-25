@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { ChevronRight, CircleDashed, Ellipsis, Layers, Plus, X } from "lucide-react";
+import { ChevronRight, CircleDashed, Ellipsis, Layers, Paperclip, Plus, X } from "lucide-react";
 import { api, type Epic, type EpicList, type EpicProgress, type Project } from "../api/client";
+import EpicForm from "../components/EpicForm";
+import EpicModal from "../components/EpicModal";
 import ProjectSelect from "../components/ProjectSelect";
+import { useEpicParam } from "../hooks/useEpicParam";
 import { useFilters } from "../hooks/useFilters";
 import { useLiveRefresh } from "../hooks/useLiveRefresh";
 import { awaitingProject, namedProject, type ActivityTicket } from "../lib/defaultProject";
@@ -12,7 +15,6 @@ import {
   barSegments,
   deleteMessage,
   epicLink,
-  nameError,
   progressText,
   serverMessage,
   showsNoEpic,
@@ -138,13 +140,15 @@ function RowMenu({
 }
 
 // One row: an epic, or the project's tickets without one. The row opens the
-// tickets it counts; the menu, when there is one, sits outside that link.
+// tickets it counts; the documents button and the menu, when there are any,
+// sit outside that link.
 function Row({
   name,
   description,
   progress,
   href,
   noEpic,
+  documents,
   menu,
 }: {
   name: string;
@@ -152,6 +156,7 @@ function Row({
   progress: EpicProgress;
   href: string;
   noEpic?: boolean;
+  documents?: React.ReactNode;
   menu?: React.ReactNode;
 }) {
   const active = noEpic ? 0 : activeCount(progress);
@@ -183,6 +188,7 @@ function Row({
           {progressText(progress)}
         </span>
       </Link>
+      {documents}
       <div className="w-6 shrink-0">{menu}</div>
     </li>
   );
@@ -266,120 +272,20 @@ function Dialog({
   );
 }
 
-const FIELD =
-  "w-full bg-slate-800 border rounded-lg px-3 py-2 text-sm text-white placeholder-slate-600 focus:outline-none focus:ring-1";
-
-/**
- * New epic and Edit. The name is checked as it is typed against the project's
- * epics, with the store's own wording; the button stays enabled, and pressing
- * it while the name is wrong keeps the dialog open on the field. A save the
- * server refuses (another tab took the name meanwhile) shows its message in
- * the same place and keeps what was typed.
- */
+/** New epic: the epic form in a small dialog. Editing is the epic modal's. */
 function EpicDialog({
-  epic,
   epics,
   onClose,
   onSave,
 }: {
-  /** The epic being edited, or none for a new one. */
-  epic?: Epic;
   /** The project's epics, which the name must differ from. */
   epics: readonly Epic[];
   onClose: () => void;
   onSave: (data: { name: string; description: string }) => Promise<void>;
 }) {
-  const [name, setName] = useState(epic?.name ?? "");
-  const [description, setDescription] = useState(epic?.description ?? "");
-  // An empty name is only pointed out once there has been something to empty,
-  // or a try to save it, not the moment a new epic's dialog opens.
-  const [touched, setTouched] = useState(false);
-  const [serverError, setServerError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-  const nameRef = useRef<HTMLInputElement>(null);
-  const errorId = useId();
-  const nameId = useId();
-  const descriptionId = useId();
-
-  const invalid = nameError(name, epics, epic?.id);
-  const localError = invalid === "Enter a name" && !touched ? null : invalid;
-  const error = serverError ?? localError;
-
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (saving) return;
-    setTouched(true);
-    if (invalid) {
-      setServerError(null);
-      nameRef.current?.focus();
-      return;
-    }
-    setSaving(true);
-    try {
-      await onSave({ name: name.trim(), description: description.trim() });
-    } catch (err) {
-      setServerError(serverMessage(err, "The epic was not saved."));
-      nameRef.current?.focus();
-    } finally {
-      setSaving(false);
-    }
-  };
-
   return (
-    <Dialog title={epic ? "Edit epic" : "New epic"} onClose={onClose}>
-      <form onSubmit={submit} noValidate className="space-y-4">
-        <div>
-          <label htmlFor={nameId} className="mb-1.5 block text-xs font-medium text-slate-400">
-            Name
-          </label>
-          <input
-            id={nameId}
-            ref={nameRef}
-            autoFocus
-            value={name}
-            onChange={(e) => {
-              setName(e.target.value);
-              setTouched(true);
-              setServerError(null);
-            }}
-            aria-invalid={error ? true : undefined}
-            aria-describedby={error ? errorId : undefined}
-            className={`${FIELD} ${error ? "border-red-500/60 focus:ring-red-500" : "border-slate-700 focus:ring-blue-500"}`}
-          />
-          {error && (
-            <p id={errorId} role="alert" className="mt-1.5 text-xs text-red-400">
-              {error}
-            </p>
-          )}
-        </div>
-        <div>
-          <label htmlFor={descriptionId} className="mb-1.5 block text-xs font-medium text-slate-400">
-            Description <span className="font-normal text-slate-600">(optional)</span>
-          </label>
-          <input
-            id={descriptionId}
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            placeholder="One line about what it groups"
-            className={`${FIELD} border-slate-700 focus:ring-blue-500`}
-          />
-        </div>
-        <div className="flex justify-end gap-3 pt-2">
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-4 py-2 text-sm text-slate-400 transition-colors hover:text-white"
-          >
-            Cancel
-          </button>
-          <button
-            type="submit"
-            className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-500"
-          >
-            {epic ? "Save" : "Create"}
-          </button>
-        </div>
-      </form>
+    <Dialog title="New epic" onClose={onClose}>
+      <EpicForm epics={epics} onCancel={onClose} onSave={onSave} />
     </Dialog>
   );
 }
@@ -447,11 +353,13 @@ function DeleteDialog({
   );
 }
 
-type Editing = { kind: "new" } | { kind: "edit"; epic: Epic } | { kind: "delete"; epic: Epic } | null;
+type Editing = { kind: "new" } | { kind: "delete"; epic: Epic } | null;
 
 /**
  * The Epics view: the selected project's epics, each with its progress, the
- * busy ones first. A row opens its tickets in the ticket view used last.
+ * busy ones first. A row opens its tickets in the ticket view used last; its
+ * paperclip, and its menu's Edit, open the epic modal, which the URL names
+ * (`epic=<name>`, see useEpicParam).
  */
 export default function Epics() {
   const filterState = useFilters();
@@ -512,15 +420,16 @@ export default function Epics() {
   }, []);
 
   const epicSeq = useRef(0);
-  const loadEpics = useCallback((project: string) => {
+  const loadEpics = useCallback((project: string): Promise<void> => {
     const seq = ++epicSeq.current;
-    api.epics
+    return api.epics
       .list(project)
       .then((list) => seq === epicSeq.current && setLoaded({ project, list }))
-      .catch(
-        () =>
-          seq === epicSeq.current &&
-          setLoaded((prev) => (prev?.project === project ? prev : { project, list: null })),
+      .then(
+        () => {},
+        () => {
+          if (seq === epicSeq.current) setLoaded((prev) => (prev?.project === project ? prev : { project, list: null }));
+        },
       );
   }, []);
 
@@ -554,6 +463,28 @@ export default function Epics() {
   const view = readLastView();
   const link = (epic: string) => epicLink(view, shownProject ?? "", epic);
 
+  // The open epic modal comes from the URL (`epic=<name>`), so it survives a
+  // reload and Back closes it. Only the shown project's loaded list can name
+  // one, so a list for another project never opens or drops anything.
+  const epicParam = useEpicParam(current?.list ? epics : null);
+  // Focus goes back to what opened the modal once it has closed, as it does
+  // for the dialogs.
+  const modalOpenerRef = useRef<HTMLElement | null>(null);
+  const modalWasOpen = useRef(false);
+  useEffect(() => {
+    if (epicParam.selected) {
+      modalWasOpen.current = true;
+      return;
+    }
+    if (!modalWasOpen.current) return;
+    modalWasOpen.current = false;
+    if (modalOpenerRef.current?.isConnected) modalOpenerRef.current.focus();
+  }, [epicParam.selected]);
+  const openEpic = (epic: Epic, opener: HTMLElement | null) => {
+    modalOpenerRef.current = opener;
+    epicParam.open(epic);
+  };
+
   const close = () => setEditing(null);
   const saved = () => {
     setEditing(null);
@@ -567,10 +498,24 @@ export default function Epics() {
       description={epic.description}
       progress={epic}
       href={link(epic.name)}
+      documents={
+        <button
+          type="button"
+          aria-label={`Documents of ${epic.name} (${epic.documentCount ?? 0})`}
+          title="Documents"
+          onClick={(e) => openEpic(epic, e.currentTarget)}
+          className={`inline-flex shrink-0 items-center gap-1 rounded-md border border-slate-800 px-1.5 py-0.5 text-xs tabular-nums transition-colors hover:bg-slate-800 hover:text-slate-200 ${
+            (epic.documentCount ?? 0) > 0 ? "text-slate-300" : "text-slate-600"
+          }`}
+        >
+          <Paperclip aria-hidden="true" className="h-3 w-3" />
+          {epic.documentCount ?? 0}
+        </button>
+      }
       menu={
         <RowMenu
           name={epic.name}
-          onEdit={(opener) => openDialog({ kind: "edit", epic }, opener)}
+          onEdit={(opener) => openEpic(epic, opener)}
           onDelete={(opener) => openDialog({ kind: "delete", epic }, opener)}
         />
       }
@@ -657,14 +602,22 @@ export default function Epics() {
           }}
         />
       )}
-      {editing?.kind === "edit" && (
-        <EpicDialog
-          epic={editing.epic}
+      {epicParam.selected && shownProject && (
+        <EpicModal
+          key={epicParam.selected.id}
+          epic={epicParam.selected}
           epics={epics}
-          onClose={close}
-          onSave={async (data) => {
-            await api.epics.update(editing.epic.id, data);
-            saved();
+          projectPrefix={shownProject}
+          closeRequested={epicParam.closeRequested}
+          onCloseCancelled={epicParam.cancelClose}
+          onDirtyChange={epicParam.onDirtyChange}
+          onClose={epicParam.close}
+          onSaved={async (updated) => {
+            // Save closes the modal, as the Edit epic dialog did. The URL
+            // names the new name first, so Forward reopens it.
+            await loadEpics(shownProject);
+            epicParam.renamed(updated);
+            epicParam.close();
           }}
         />
       )}
