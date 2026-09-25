@@ -21,20 +21,20 @@ import (
 const imageCSP = "default-src 'none'; style-src 'unsafe-inline'; sandbox"
 
 // readImageBody reads an upload's body: the image file's bytes, sent as they
-// are (any Content-Type; the content decides the format). The store enforces
-// the 8 MB limit on what is read; a body too large to read at all is
-// refused here with the store's words. ok is false once an error has been
-// written.
+// are (any Content-Type; the content decides the format). A body over the
+// 8 MB limit is refused here in the store's words, without reading it: at
+// once when its Content-Length says so, or as soon as a body sent without
+// one runs past the limit. ok is false once an error has been written.
 func readImageBody(w http.ResponseWriter, r *http.Request) ([]byte, bool) {
-	data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxDocumentRequestBytes))
+	if r.ContentLength > models.MaxDocumentBytes {
+		writeError(w, http.StatusBadRequest, db.ImageTooLargeMessage(int(r.ContentLength)))
+		return nil, false
+	}
+	data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, models.MaxDocumentBytes))
 	if err != nil {
 		var tooLarge *http.MaxBytesError
 		if errors.As(err, &tooLarge) {
-			size := int(r.ContentLength)
-			if size <= maxDocumentRequestBytes {
-				size = maxDocumentRequestBytes + 1
-			}
-			writeError(w, http.StatusBadRequest, db.ImageTooLargeMessage(size))
+			writeError(w, http.StatusBadRequest, db.ImageOverLimitMessage)
 			return nil, false
 		}
 		writeError(w, http.StatusBadRequest, "could not read the image: "+err.Error())

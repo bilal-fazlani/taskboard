@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tcarac/taskboard/internal/db"
 	"github.com/tcarac/taskboard/internal/imagedoc/imagedoctest"
@@ -343,4 +344,77 @@ func TestEpicImagesOverHTTP(t *testing.T) {
 	if status != http.StatusOK || got.DocumentCount != 1 || got.Documents[0].Width != 20 {
 		t.Errorf("epic details: %d %+v", status, got)
 	}
+}
+
+// TestImageUploadSizeLimit: an upload over 8 MB is refused without being
+// read, at once when its length is declared, and as soon as it passes the
+// limit when it is sent without one.
+func TestImageUploadSizeLimit(t *testing.T) {
+	r := serve(t)
+	seedImageTicket(t, r)
+
+	// Declared 100 MB, but the body never comes: the answer must not wait
+	// for it.
+	pr, pw := io.Pipe()
+	defer pw.Close()
+	req, err := http.NewRequest(http.MethodPost, uploadURL(r, "ticket=DOC-1", "Huge.png"), pr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.ContentLength = 100 << 20
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("a declared 100 MB upload was not refused at once: %v", err)
+	}
+	var e apiError
+	json.NewDecoder(resp.Body).Decode(&e)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest || e.Error != "This image is 100.0 MB. The limit is 8 MB." {
+		t.Errorf("declared 100 MB: %d %q", resp.StatusCode, e.Error)
+	}
+
+	// Sent without a length (chunked), 20 MB: refused once it passes 8 MB,
+	// in words that don't pretend to know its size.
+	body := io.MultiReader(bytes.NewReader(imagedoctest.PNG(8, 8)), io.LimitReader(zeros{}, 20<<20))
+	req, err = http.NewRequest(http.MethodPost, uploadURL(r, "ticket=DOC-1", "Chunked.png"), body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.ContentLength = -1
+	resp, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e = apiError{}
+	json.NewDecoder(resp.Body).Decode(&e)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest || e.Error != "This image is over 8 MB. The limit is 8 MB." {
+		t.Errorf("chunked 20 MB: %d %q", resp.StatusCode, e.Error)
+	}
+
+	// Exactly 8 MB is read in full and judged by the store (here: padding
+	// after IEND is dropped, so the picture is taken).
+	exact := append(imagedoctest.PNG(8, 8), make([]byte, models.MaxDocumentBytes-len(imagedoctest.PNG(8, 8)))...)
+	upload(t, r, "ticket=DOC-1", "Exact.png", exact)
+
+	if docs, _ := r.srv.store.ListDocuments(db.DocumentOwner{TicketID: seedTicketID(t, r)}); len(docs) != 1 {
+		t.Errorf("%d documents, want only the exact one", len(docs))
+	}
+}
+
+type zeros struct{}
+
+func (zeros) Read(p []byte) (int, error) {
+	clear(p)
+	return len(p), nil
+}
+
+func seedTicketID(t *testing.T, r *running) string {
+	t.Helper()
+	id, err := r.srv.store.ResolveTicketID("DOC-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return id
 }

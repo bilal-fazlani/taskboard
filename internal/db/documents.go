@@ -123,8 +123,13 @@ func msgDocTooLarge(size int) string {
 	return fmt.Sprintf("This document is %s. The limit is 8 MB.", models.FormatSize(size))
 }
 
+// ImageOverLimitMessage refuses an image file whose size is not known
+// beyond its running past the limit: an upload sent without a length.
+const ImageOverLimitMessage = "This image is over 8 MB. The limit is 8 MB."
+
 // ImageTooLargeMessage is the refusal for an image file of size bytes, over
-// the limit. The HTTP API uses it for an upload too large to read at all.
+// the limit. The HTTP API uses it for an upload whose declared length is too
+// large to read at all.
 func ImageTooLargeMessage(size int) string {
 	return fmt.Sprintf("This image is %s. The limit is 8 MB.", models.FormatSize(size))
 }
