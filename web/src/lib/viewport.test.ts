@@ -18,6 +18,7 @@ import {
   nextZoomLevel,
   panBy,
   panIntoView,
+  pinchStep,
   previousZoomLevel,
   wheelPan,
   wheelPixels,
@@ -314,6 +315,18 @@ describe("panIntoView", () => {
   it("lines up the top left of a target bigger than the viewport", () => {
     expect(panIntoView({ left: 500, top: 50, right: 1700, bottom: 150 }, viewport, 24)).toEqual({ x: -376, y: 24 });
   });
+
+  it("keeps each side's own inset, as fit does for the toolbar", () => {
+    const insets = { top: 24, right: 24, bottom: 58, left: 24 };
+    // Inside the plain margin at the bottom, but under the toolbar's strip.
+    const target = { left: 800, top: 530, right: 1056, bottom: 606 };
+    expect(panIntoView(target, viewport)).toEqual({ x: 0, y: 0 });
+    expect(panIntoView(target, viewport, insets)).toEqual({ x: 0, y: -14 });
+    // The other sides still use theirs.
+    expect(panIntoView({ left: 90, top: 40, right: 346, bottom: 140 }, viewport, insets)).toEqual({ x: 34, y: 34 });
+    // Taller than the room between the insets: its top lines up with the top inset.
+    expect(panIntoView({ left: 300, top: 100, right: 556, bottom: 700 }, viewport, insets)).toEqual({ x: 0, y: -26 });
+  });
 });
 
 describe("isDrag", () => {
@@ -325,5 +338,53 @@ describe("isDrag", () => {
     expect(isDrag({ x: 10, y: 10 }, { x: 10, y: 6 })).toBe(false);
     expect(isDrag({ x: 10, y: 10 }, { x: 14.01, y: 10 })).toBe(true);
     expect(isDrag({ x: 10, y: 10 }, { x: 13, y: 13 })).toBe(true);
+  });
+});
+
+describe("pinchStep", () => {
+  const t: Transform = { x: 40, y: -20, k: 0.8 };
+
+  it("scales by how much further apart the fingers are, keeping the point between them there", () => {
+    const from: [Point, Point] = [{ x: 300, y: 200 }, { x: 400, y: 200 }];
+    const to: [Point, Point] = [{ x: 250, y: 200 }, { x: 450, y: 200 }];
+    const next = pinchStep(t, from, to);
+    expect(next.k).toBeCloseTo(1.6);
+    const between = toGraph(t, { x: 350, y: 200 });
+    const now = toScreen(next, between);
+    expect(now.x).toBeCloseTo(350);
+    expect(now.y).toBeCloseTo(200);
+  });
+
+  it("moves the graph with the fingers' midpoint while it scales", () => {
+    const from: [Point, Point] = [{ x: 100, y: 100 }, { x: 100, y: 300 }];
+    const to: [Point, Point] = [{ x: 160, y: 130 }, { x: 160, y: 230 }];
+    const next = pinchStep(t, from, to);
+    expect(next.k).toBeCloseTo(0.4);
+    // The graph point that was midway between the fingers is midway between them again.
+    const now = toScreen(next, toGraph(t, { x: 100, y: 200 }));
+    expect(now.x).toBeCloseTo(160);
+    expect(now.y).toBeCloseTo(180);
+  });
+
+  it("pans without zooming when the fingers keep their distance", () => {
+    const from: [Point, Point] = [{ x: 0, y: 0 }, { x: 30, y: 40 }];
+    const to: [Point, Point] = [{ x: 10, y: 5 }, { x: 40, y: 45 }];
+    expect(pinchStep(t, from, to)).toEqual({ x: 50, y: -15, k: 0.8 });
+  });
+
+  it("stops at the zoom limits and still keeps the point between the fingers under them", () => {
+    const from: [Point, Point] = [{ x: 200, y: 200 }, { x: 210, y: 200 }];
+    const to: [Point, Point] = [{ x: 100, y: 200 }, { x: 310, y: 200 }];
+    const next = pinchStep(t, from, to);
+    expect(next.k).toBe(MAX_SCALE);
+    const now = toScreen(next, toGraph(t, { x: 205, y: 200 }));
+    expect(now.x).toBeCloseTo(205);
+    expect(pinchStep(t, to, from).k).toBe(MIN_SCALE);
+  });
+
+  it("leaves the scale alone when two touches share a spot", () => {
+    const at: [Point, Point] = [{ x: 50, y: 50 }, { x: 50, y: 50 }];
+    expect(pinchStep(t, at, [{ x: 60, y: 50 }, { x: 90, y: 50 }])).toEqual({ x: 65, y: -20, k: 0.8 });
+    expect(pinchStep(t, [{ x: 40, y: 50 }, { x: 60, y: 50 }], at)).toEqual({ x: 40, y: -20, k: 0.8 });
   });
 });

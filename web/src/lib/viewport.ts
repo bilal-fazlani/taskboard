@@ -101,6 +101,22 @@ export function zoomAround(t: Transform, at: Point, factor: number): Transform {
   return zoomTo(t, at, t.k * factor);
 }
 
+/**
+ * One step of a two-finger pinch on a touch screen, from where the two
+ * touches were to where they are now, in viewport coordinates. The graph
+ * scales by how much further apart they are, around their old midpoint, and
+ * moves with the midpoint, so the graph point between the fingers stays
+ * between them. Touches on one spot leave the scale alone.
+ */
+export function pinchStep(t: Transform, from: readonly [Point, Point], to: readonly [Point, Point]): Transform {
+  const mid = ([a, b]: readonly [Point, Point]): Point => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
+  const spread = ([a, b]: readonly [Point, Point]) => Math.hypot(b.x - a.x, b.y - a.y);
+  const [before, after] = [mid(from), mid(to)];
+  const [d0, d1] = [spread(from), spread(to)];
+  const zoomed = d0 > 0 && d1 > 0 ? zoomAround(t, before, d1 / d0) : t;
+  return panBy(zoomed, after.x - before.x, after.y - before.y);
+}
+
 /** The next zoom level above `k`, or MAX_SCALE when there is none. */
 export function nextZoomLevel(k: number): number {
   return ZOOM_LEVELS.find((level) => level > k + EPSILON) ?? MAX_SCALE;
@@ -211,18 +227,20 @@ export function wheelPan(e: WheelLike): Point {
 
 /**
  * How far to pan so that `target` sits inside `viewport` with `margin` to
- * spare, or (0, 0) when it already does. A target bigger than the viewport
- * lines up its top left.
+ * spare (one number for all four sides, or per side, as fit takes it), or
+ * (0, 0) when it already does. A target bigger than the room lines up its
+ * top left.
  */
-export function panIntoView(target: Rect, viewport: Rect, margin = FIT_PADDING): Point {
+export function panIntoView(target: Rect, viewport: Rect, margin: number | Insets = FIT_PADDING): Point {
+  const inset = typeof margin === "number" ? { top: margin, right: margin, bottom: margin, left: margin } : margin;
   const axis = (start: number, end: number, min: number, max: number) => {
-    if (start < min + margin) return min + margin - start;
-    if (end > max - margin) return Math.max(max - margin - end, min + margin - start);
+    if (start < min) return min - start;
+    if (end > max) return Math.max(max - end, min - start);
     return 0;
   };
   return {
-    x: axis(target.left, target.right, viewport.left, viewport.right),
-    y: axis(target.top, target.bottom, viewport.top, viewport.bottom),
+    x: axis(target.left, target.right, viewport.left + inset.left, viewport.right - inset.right),
+    y: axis(target.top, target.bottom, viewport.top + inset.top, viewport.bottom - inset.bottom),
   };
 }
 

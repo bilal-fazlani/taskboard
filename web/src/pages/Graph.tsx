@@ -57,6 +57,7 @@ import {
   isDrag,
   panBy,
   panIntoView,
+  pinchStep,
   wheelPan,
   wheelZoomFactor,
   zoomAround,
@@ -472,6 +473,10 @@ export default function Graph() {
     setTransform(fitTransform({ width: canvasWidth, height: canvasHeight }, viewportSize, FIT_INSETS));
   }
 
+  // Touch points down on the viewport, by pointer id, in client coordinates.
+  // Two of them pinch: see the pointer handlers below.
+  const touchesRef = useRef(new Map<number, Point>());
+
   // The viewport's size, for fit and for zooming around its centre. Resizing
   // the window keeps the transform. Wheel and Safari gesture listeners are
   // added here rather than as React props, because they have to be
@@ -516,7 +521,9 @@ export default function Graph() {
     };
     const onGestureChange = (e: Event) => {
       e.preventDefault();
-      if (!showsGraph()) return;
+      // iOS Safari reports a touch pinch as gesture events too; the pointer
+      // handlers already zoom for it.
+      if (!showsGraph() || touchesRef.current.size >= 2) return;
       const gesture = e as GestureLike;
       if (!(gesture.scale > 0)) return;
       const factor = gesture.scale / gestureScale;
@@ -545,8 +552,32 @@ export default function Graph() {
   const dragRef = useRef<PointerDrag | null>(null);
   const swallowClickRef = useRef(false);
 
+  // Two fingers on a touch screen pinch: the graph zooms by how far they
+  // spread and follows their midpoint (pinchStep). A second touch takes over
+  // from a one-finger pan, and when one of the two lifts, the other carries
+  // on panning. A touch that pinched never opens a card.
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     swallowClickRef.current = false;
+    if (hasGraph && e.pointerType === "touch") {
+      const touches = touchesRef.current;
+      // The primary touch is the first finger down, so any touch still kept
+      // is one whose end never reached the viewport.
+      if (e.isPrimary) touches.clear();
+      touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (touches.size === 2) {
+        dragRef.current = null;
+        setPanning(true);
+        for (const id of touches.keys()) {
+          // A touch that has already ended can't be captured.
+          try {
+            e.currentTarget.setPointerCapture(id);
+          } catch {
+            // Its pointerup or cancel removes it.
+          }
+        }
+        return;
+      }
+    }
     if (!hasGraph || e.button !== 0 || !e.isPrimary) return;
     if ((e.target as Element).closest("[data-graph-toolbar]")) return;
     const at = { x: e.clientX, y: e.clientY };
@@ -554,6 +585,21 @@ export default function Graph() {
   };
 
   const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const touches = touchesRef.current;
+    if (touches.has(e.pointerId)) {
+      const before = [...touches.values()].slice(0, 2);
+      touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (touches.size >= 2) {
+        const after = [...touches.values()].slice(0, 2);
+        const rect = e.currentTarget.getBoundingClientRect();
+        const local = ([a, b]: Point[]): [Point, Point] => [
+          { x: a.x - rect.left, y: a.y - rect.top },
+          { x: b.x - rect.left, y: b.y - rect.top },
+        ];
+        moveView((t) => pinchStep(t, local(before), local(after)));
+        return;
+      }
+    }
     const drag = dragRef.current;
     if (!drag || drag.pointerId !== e.pointerId) return;
     if (e.pointerType === "mouse" && (e.buttons & 1) === 0) {
@@ -582,8 +628,25 @@ export default function Graph() {
     if (el.hasPointerCapture(pointerId)) el.releasePointerCapture(pointerId);
   };
 
+  // Forgets a touch. When a pinch is down to one finger, that finger pans on,
+  // as a drag already under way, so lifting it swallows the click.
+  const endTouch = (pointerId: number) => {
+    const touches = touchesRef.current;
+    const pinching = touches.size >= 2;
+    if (!touches.delete(pointerId)) return;
+    if (!pinching) return;
+    swallowClickRef.current = true;
+    if (touches.size === 1) {
+      const [[id, at]] = touches;
+      dragRef.current = { pointerId: id, start: at, last: at, panning: true };
+    } else if (touches.size === 0) {
+      setPanning(false);
+    }
+  };
+
   // Capture can also be lost without a pointerup reaching the viewport.
   const handleLostPointerCapture = (e: React.PointerEvent<HTMLDivElement>) => {
+    endTouch(e.pointerId);
     if (dragRef.current?.pointerId !== e.pointerId) return;
     dragRef.current = null;
     setPanning(false);
@@ -595,6 +658,7 @@ export default function Graph() {
   };
 
   const handlePointerEnd = (e: React.PointerEvent<HTMLDivElement>) => {
+    endTouch(e.pointerId);
     const drag = dragRef.current;
     if (!drag || drag.pointerId !== e.pointerId) return;
     dragRef.current = null;
@@ -610,12 +674,13 @@ export default function Graph() {
     e.preventDefault();
   };
 
-  // A card reached with Tab is panned into view. Pointer focus is left alone,
-  // so clicking a card near the edge doesn't move the graph under the pointer.
+  // A card reached with Tab is panned into view, clear of the toolbar's strip
+  // as fit leaves it. Pointer focus is left alone, so clicking a card near the
+  // edge doesn't move the graph under the pointer.
   const handleFocus = (e: React.FocusEvent<HTMLDivElement>) => {
     const target = e.target as HTMLElement;
     if (!target.dataset.ticketId || !target.matches(":focus-visible")) return;
-    const by = panIntoView(target.getBoundingClientRect(), e.currentTarget.getBoundingClientRect());
+    const by = panIntoView(target.getBoundingClientRect(), e.currentTarget.getBoundingClientRect(), FIT_INSETS);
     if (by.x !== 0 || by.y !== 0) moveView((t) => panBy(t, by.x, by.y));
   };
 

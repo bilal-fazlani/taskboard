@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import type { Board as BoardData, Project, Ticket } from "../api/client";
 import { DEBOUNCE_MS } from "../lib/liveRefresh";
@@ -287,6 +287,30 @@ describe("Dependencies fitting a graph first shown later", () => {
     expect(canvas().style.transform).not.toBe(fitted);
     await act(async () => screen.getByLabelText("Fit to screen").click());
     expect(canvas().style.transform).toBe(fitted);
+  });
+});
+
+// A change event that names the project already shown (a native select
+// never sends one, but a script or a future control could) changes nothing:
+// the canvas stays shown and the view stays where the user put it.
+describe("Dependencies when the project shown is picked again", () => {
+  const canvas = () => document.querySelector<HTMLElement>("[data-graph-canvas]")!;
+
+  it("neither blanks the canvas nor fits again", async () => {
+    await mount(<Graph />, "/?project=ACP");
+    await layout();
+    await act(async () => {
+      canvas().parentElement!.dispatchEvent(new WheelEvent("wheel", { deltaX: 30, deltaY: 90, bubbles: true }));
+    });
+    const moved = canvas().style.transform;
+
+    await act(async () => {
+      fireEvent.change(screen.getByLabelText("Project"), { target: { value: "ACP" } });
+    });
+    // No observer reports here: nothing was remounted, so nothing would
+    // measure again to end a pending fit.
+    expect(canvas().className).not.toContain("invisible");
+    expect(canvas().style.transform).toBe(moved);
   });
 });
 
