@@ -8,6 +8,11 @@ export interface Project {
   status: string;
   createdAt: string;
   updatedAt: string;
+  // How agents should work on the project's tickets. Only reads of one
+  // project (get, create, update) carry it; the list leaves it out.
+  agentInstructions?: string;
+  // Whether the project has agent instructions; only the list carries it.
+  hasAgentInstructions?: boolean;
 }
 
 export interface Label {

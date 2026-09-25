@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
-import { Plus, Trash2, X, FolderKanban, ChevronDown, ChevronUp } from "lucide-react";
+import { Plus, Trash2, X, FolderKanban, ChevronDown, ChevronUp, Bot } from "lucide-react";
 import Markdown from "react-markdown";
 import { api, type Project } from "../api/client";
 import { useLiveRefresh } from "../hooks/useLiveRefresh";
+import ProjectTextFields from "../components/ProjectTextFields";
 
 const DEFAULT_COLORS = [
   "#3b82f6",
@@ -28,14 +29,55 @@ function ProjectModal({
   const [name, setName] = useState(project?.name || "");
   const [prefix, setPrefix] = useState(project?.prefix || "");
   const [description, setDescription] = useState(project?.description || "");
+  // The list doesn't carry agent instructions, so an edited project's are
+  // fetched when the form opens. Until they arrive (or if they can't be) the
+  // field is read-only. Save sends them only when they were changed from what
+  // was loaded, so saving the form for something else never overwrites a
+  // newer value an agent wrote meanwhile.
+  const [agentInstructions, setAgentInstructions] = useState("");
+  const [loadedInstructions, setLoadedInstructions] = useState("");
+  const [instructionsState, setInstructionsState] = useState<"ready" | "loading" | "error">(
+    project ? "loading" : "ready",
+  );
+  const projectId = project?.id;
+  useEffect(() => {
+    if (!projectId) return;
+    let cancelled = false;
+    api.projects.get(projectId).then(
+      (full) => {
+        if (cancelled) return;
+        setAgentInstructions(full.agentInstructions ?? "");
+        setLoadedInstructions(full.agentInstructions ?? "");
+        setInstructionsState("ready");
+      },
+      () => {
+        if (!cancelled) setInstructionsState("error");
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
   const [icon, setIcon] = useState(project?.icon || "📋");
   const [color, setColor] = useState(project?.color || DEFAULT_COLORS[0]);
   const [status, setStatus] = useState(project?.status || "active");
 
+  // The store trims instructions, so a change of whitespace alone is no change.
+  const instructionsChanged =
+    instructionsState === "ready" && agentInstructions.trim() !== loadedInstructions.trim();
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim() || !prefix.trim()) return;
-    onSave({ name, prefix: prefix.toUpperCase(), description, icon, color, status });
+    onSave({
+      name,
+      prefix: prefix.toUpperCase(),
+      description,
+      ...(instructionsChanged ? { agentInstructions } : {}),
+      icon,
+      color,
+      status,
+    });
   };
 
   return (
@@ -97,18 +139,16 @@ function ProjectModal({
             </div>
           </div>
 
-          <div>
-            <label className="block text-xs font-medium text-slate-400 mb-1.5">
-              Description
-            </label>
-            <textarea
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="Supports markdown — goals, scope, and context for this project…"
-              rows={12}
-              className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-600 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-y font-mono"
-            />
-          </div>
+          <ProjectTextFields
+            description={description}
+            onDescriptionChange={setDescription}
+            instructions={agentInstructions}
+            onInstructionsChange={setAgentInstructions}
+            instructionsHaveText={
+              instructionsState === "ready" ? agentInstructions.trim() !== "" : !!project?.hasAgentInstructions
+            }
+            instructionsState={instructionsState}
+          />
 
           {isEdit && (
             <div>
@@ -298,17 +338,28 @@ export default function Projects() {
                     </button>
                   </div>
                 )}
-                <div className="mt-1 flex items-center gap-2">
+                {/* On a narrow card the row wraps and the marker takes its own line. */}
+                <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
                   <span className="text-xs font-mono text-slate-500">
                     {project.prefix}
                   </span>
                   <span
-                    className="inline-block w-1.5 h-1.5 rounded-full"
+                    className="inline-block w-1.5 h-1.5 shrink-0 rounded-full"
                     style={{ backgroundColor: project.color }}
                   />
                   <span className="text-xs text-slate-500 capitalize">
                     {project.status}
                   </span>
+                  {project.hasAgentInstructions && (
+                    <span
+                      data-testid="project-agent-instructions"
+                      title="Has agent instructions"
+                      className="ml-auto inline-flex shrink-0 items-center gap-1 text-xs text-slate-500"
+                    >
+                      <Bot aria-hidden="true" className="h-3 w-3" />
+                      Agent instructions
+                    </span>
+                  )}
                 </div>
               </div>
             ))}
