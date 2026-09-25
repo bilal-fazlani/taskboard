@@ -1,7 +1,7 @@
 // The document rules the web UI checks before it asks the server, worded
 // exactly as the server words them (internal/db/documents.go), plus the `doc`
 // query parameter that names the open document.
-import type { DocumentFormat, DocumentMeta, DocumentOwnerRef } from "../api/client";
+import type { DocumentFormat, DocumentMeta, DocumentOwnerRef, DocumentWithContent } from "../api/client";
 
 /** The query parameter naming the open document by its display name. */
 export const DOC_PARAM = "doc";
@@ -75,4 +75,58 @@ export function withoutDoc(params: URLSearchParams): URLSearchParams {
 /** A stable key for an owner, for effects and caches. */
 export function ownerKey(owner: DocumentOwnerRef): string {
   return `ticket:${owner.ticketId}`;
+}
+
+const FORMAT_BY_EXTENSION: Record<string, DocumentFormat> = { ".md": "markdown" };
+const EXTENSION_MESSAGE = "Only .md files can be attached.";
+
+/**
+ * A document name and format from a file's name, as the server makes them
+ * (DocumentNameFromFilename): the extension picks the format and goes, and
+ * every character the name rules refuse becomes a space.
+ */
+export function nameFromFilename(filename: string): { name: string; format: DocumentFormat } | { error: string } {
+  const base = filename.split(/[\\/]/).pop() ?? "";
+  const dot = base.lastIndexOf(".");
+  const format = dot >= 0 ? FORMAT_BY_EXTENSION[base.slice(dot).toLowerCase()] : undefined;
+  if (!format) return { error: EXTENSION_MESSAGE };
+  const name = [...base.slice(0, dot)].map((c) => (NAME_CHAR.test(c) ? c : " ")).join("").trim();
+  const error = documentNameError(name);
+  return error ? { error } : { name, format };
+}
+
+const API_ERROR = /^API error (\d{3}): ?([\s\S]*)$/;
+
+function apiError(error: unknown): { status: string; body: string } | null {
+  const raw = error instanceof Error ? error.message : "";
+  const match = API_ERROR.exec(raw);
+  return match ? { status: match[1], body: match[2] } : null;
+}
+
+/** The document as it is now, from a 409 refusing a stale save. */
+export function conflictDocument(error: unknown): DocumentWithContent | null {
+  const api = apiError(error);
+  if (api?.status !== "409") return null;
+  try {
+    const current = (JSON.parse(api.body) as { current?: DocumentWithContent }).current;
+    return current && typeof current.id === "string" ? current : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Whether a request failed because what it named is not there. */
+export function isNotFound(error: unknown): boolean {
+  return apiError(error)?.status === "404";
+}
+
+/** The server's size message for content over the limit, or null. */
+export function contentTooLarge(content: string): string | null {
+  const bytes = new TextEncoder().encode(content).length;
+  return bytes > MAX_DOCUMENT_BYTES ? tooLargeMessage(bytes) : null;
+}
+
+/** The server's words for a document of `bytes` over the limit. */
+export function tooLargeMessage(bytes: number): string {
+  return `This document is ${formatSize(bytes)}. The limit is 8 MB.`;
 }

@@ -265,7 +265,15 @@ export const api = {
   documents: {
     list: (owner: DocumentOwnerRef) => request<DocumentMeta[]>(`/api/tickets/${owner.ticketId}/documents`),
     get: (id: string) => request<DocumentWithContent>(`/api/documents/${encodeURIComponent(id)}`),
-    update: (id: string, data: { name?: string }) =>
+    /** Add a document; a refused name or an unknown owner is a 400 with the store's message. */
+    create: (data: { ticketId: string; name: string; format: DocumentFormat; content: string }) =>
+      request<DocumentWithContent>("/api/documents", { method: "POST", body: JSON.stringify(data) }),
+    /**
+     * Rename and/or replace the content. With `expectedRevision`, a content
+     * save the document has moved past is refused with a 409 whose body
+     * carries the document as it is now (conflictDocument reads it).
+     */
+    update: (id: string, data: { name?: string; content?: string; expectedRevision?: number }) =>
       request<DocumentWithContent>(`/api/documents/${encodeURIComponent(id)}`, {
         method: "PUT",
         body: JSON.stringify(data),

@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vitest";
 import type { DocumentMeta } from "../api/client";
 import {
+  conflictDocument,
+  contentTooLarge,
   displayName,
   documentNameError,
   findDocument,
   formatSize,
+  isNotFound,
+  nameFromFilename,
   ownerKey,
   withDoc,
   withoutDoc,
@@ -81,5 +85,48 @@ describe("doc parameter", () => {
 describe("ownerKey", () => {
   it("names the owner", () => {
     expect(ownerKey({ ticketId: "t1" })).toBe("ticket:t1");
+  });
+});
+
+describe("nameFromFilename", () => {
+  it("drops the extension and turns other symbols into spaces", () => {
+    expect(nameFromFilename("api-design_v2.md")).toEqual({ name: "api-design_v2", format: "markdown" });
+    expect(nameFromFilename("notes v1.2.MD")).toEqual({ name: "notes v1 2", format: "markdown" });
+    expect(nameFromFilename("dir/Étude (draft).md")).toEqual({ name: "Étude  draft", format: "markdown" });
+  });
+
+  it("refuses other types and names that clean to nothing", () => {
+    expect(nameFromFilename("notes.txt")).toEqual({ error: "Only .md files can be attached." });
+    expect(nameFromFilename("README")).toEqual({ error: "Only .md files can be attached." });
+    expect(nameFromFilename(".md")).toEqual({ error: "Enter a name" });
+    expect(nameFromFilename("%%.md")).toEqual({ error: "Enter a name" });
+  });
+});
+
+describe("server errors", () => {
+  const current = { id: "d1", name: "Plan", format: "markdown", size: 6, revision: 2, createdAt: "", updatedAt: "", content: "theirs" };
+
+  it("reads the current document out of a 409", () => {
+    const err = new Error(`API error 409: ${JSON.stringify({ error: "changed", current })}`);
+    expect(conflictDocument(err)).toEqual(current);
+    expect(conflictDocument(new Error('API error 409: {"error":"changed"}'))).toBeNull();
+    expect(conflictDocument(new Error("API error 409: not json"))).toBeNull();
+    expect(conflictDocument(new Error('API error 400: {"error":"x"}'))).toBeNull();
+    expect(conflictDocument("nope")).toBeNull();
+  });
+
+  it("recognises a 404", () => {
+    expect(isNotFound(new Error('API error 404: {"error":"document not found"}'))).toBe(true);
+    expect(isNotFound(new Error("API error 500: x"))).toBe(false);
+    expect(isNotFound(null)).toBe(false);
+  });
+});
+
+describe("contentTooLarge", () => {
+  it("measures UTF-8 bytes against the limit", () => {
+    expect(contentTooLarge("x".repeat(8 * 1024 * 1024))).toBeNull();
+    expect(contentTooLarge("x".repeat(8 * 1024 * 1024 + 1))).toBe("This document is 8.1 MB. The limit is 8 MB.");
+    // Four bytes each in UTF-8, though two UTF-16 units.
+    expect(contentTooLarge("😀".repeat(2 * 1024 * 1024 + 1))).toBe("This document is 8.1 MB. The limit is 8 MB.");
   });
 });
