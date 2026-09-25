@@ -57,6 +57,13 @@ func Ticket(base, ref string) string {
 	return base + "/?ticket=" + url.QueryEscape(ref)
 }
 
+// TicketDocument is the URL that opens a ticket with one of its documents on
+// top, named by its display name ("Design spec.md") as the web UI's `doc`
+// parameter expects.
+func TicketDocument(base, ticketRef, displayName string) string {
+	return Ticket(base, ticketRef) + "&doc=" + url.QueryEscape(displayName)
+}
+
 // Ref is how a ticket names itself in a URL: its display key, or its id when
 // its project has no prefix, since the bare number a prefixless DisplayKey
 // gives back matches no ticket in the web UI. This mirrors ticketRefFor in
@@ -68,13 +75,19 @@ func Ref(t models.Ticket) string {
 	return t.DisplayKey()
 }
 
-// Fill sets a ticket's URL, and hands the ticket back so it can be returned
+// Fill sets a ticket's URL and its documents' URLs, and hands the ticket back so it can be returned
 // inline. A nil ticket (a lookup that found nothing) passes through untouched.
 func Fill(t *models.Ticket) *models.Ticket {
 	if t == nil {
 		return nil
 	}
-	t.URL = Ticket(Base(), Ref(*t))
+	base := Base()
+	ref := Ref(*t)
+	t.URL = Ticket(base, ref)
+	for i := range t.Documents {
+		d := &t.Documents[i]
+		d.URL = TicketDocument(base, ref, models.DocumentDisplayName(d.Name, d.Format))
+	}
 	return t
 }
 

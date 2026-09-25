@@ -102,3 +102,22 @@ func TestFillAll(t *testing.T) {
 		}
 	}
 }
+
+func TestTicketDocumentURL(t *testing.T) {
+	got := TicketDocument("http://localhost:3011", "ACP-84", "Design spec.md")
+	want := "http://localhost:3011/?ticket=ACP-84&doc=Design+spec.md"
+	if got != want {
+		t.Fatalf("TicketDocument = %q, want %q", got, want)
+	}
+}
+
+func TestFillSetsDocumentURLs(t *testing.T) {
+	t.Setenv(BaseEnv, "http://board.test")
+	tk := &models.Ticket{ID: "01X", Number: 84, ProjectPrefix: "ACP", Documents: []models.DocumentMeta{
+		{ID: "d1", Name: "Design spec", Format: models.DocumentFormatMarkdown},
+	}}
+	Fill(tk)
+	if tk.Documents[0].URL != "http://board.test/?ticket=ACP-84&doc=Design+spec.md" {
+		t.Fatalf("document URL = %q", tk.Documents[0].URL)
+	}
+}
