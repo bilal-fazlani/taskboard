@@ -9,7 +9,7 @@ import {
   type FilterKey,
   type Filters,
 } from "../lib/filters";
-import { latestSearchParams } from "../lib/latestSearch";
+import { latestLocationState, latestSearchParams } from "../lib/latestSearch";
 
 export interface FilterState {
   filters: Filters;
@@ -31,24 +31,35 @@ export interface FilterState {
 // change starts from the latest URL (see latestSearchParams) and replaces the
 // history entry rather than pushing one, so typing a search doesn't leave a
 // back-button stop per keystroke. Other query parameters are kept.
+// The entry's location state (the overlay depth, see lib/overlayHistory) is kept.
 export function useFilters(): FilterState {
   const [params, setParams] = useSearchParams();
   const filters = useMemo(() => parseFilters(params), [params]);
   const latestFilters = useCallback(() => parseFilters(latestSearchParams(params)), [params]);
   const setFilter = useCallback(
     (key: FilterKey, value: string) =>
-      setParams(withFilter(latestSearchParams(params), key, value), { replace: true }),
+      setParams(withFilter(latestSearchParams(params), key, value), {
+        replace: true,
+        state: latestLocationState(undefined),
+      }),
     [params, setParams],
   );
   const dropFilters = useCallback(
     (keys: readonly FilterKey[]) => {
       if (keys.length === 0) return;
-      setParams(withoutFilters(latestSearchParams(params), keys), { replace: true });
+      setParams(withoutFilters(latestSearchParams(params), keys), {
+        replace: true,
+        state: latestLocationState(undefined),
+      });
     },
     [params, setParams],
   );
   const clearFilters = useCallback(
-    () => setParams(withoutFilters(latestSearchParams(params), NARROWING_KEYS), { replace: true }),
+    () =>
+      setParams(withoutFilters(latestSearchParams(params), NARROWING_KEYS), {
+        replace: true,
+        state: latestLocationState(undefined),
+      }),
     [params, setParams],
   );
   return { filters, active: hasFilters(filters, NARROWING_KEYS), latestFilters, setFilter, dropFilters, clearFilters };
