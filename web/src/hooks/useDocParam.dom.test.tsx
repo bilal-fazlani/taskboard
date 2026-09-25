@@ -204,11 +204,11 @@ describe("useDocParam", () => {
     expect(state.notice).toBeNull();
     expect(url()).toBe("/?ticket=ACP-7&doc=Design spec.md");
 
-    // "Save as a new document": the editor reloads the list first, and the
-    // new one, under the same name, is what the URL now names.
+    // "Save as a new document": the copy, under the same name, is what the
+    // URL names once the list has it.
     const recreated = { ...spec, id: "d3" };
+    await act(async () => state.recreated(recreated));
     await render([notes, recreated]);
-    await act(async () => state.renamed(recreated));
     await act(settle);
     expect(state.selected?.id).toBe("d3");
     expect(state.deleted).toBe(false);
@@ -256,5 +256,58 @@ describe("useDocParam", () => {
     expect(state.deleted).toBe(true);
     expect(state.closeRequested).toBe(false);
     expect(state.notice).toBeNull();
+  });
+
+  it("opens a document it was told about only once the list has it, with no notice before", async () => {
+    const created = { ...spec, id: "d9", name: "Draft" };
+    await mount("/?ticket=ACP-7", [spec]);
+    await act(async () => state.openWhenListed(created));
+    await act(settle);
+    // A reload that raced the create, or a live refresh that superseded it,
+    // brings a list without it: nothing opens and nothing is said.
+    await render([spec]);
+    await act(settle);
+    expect(url()).toBe("/?ticket=ACP-7");
+    expect(state.selected).toBeNull();
+    expect(state.notice).toBeNull();
+
+    await render([spec, created]);
+    await act(settle);
+    expect(url()).toBe("/?ticket=ACP-7&doc=Draft.md");
+    expect(state.selected?.id).toBe("d9");
+    expect(state.notice).toBeNull();
+
+    // It opened as a new entry: Back closes it.
+    await act(async () => {
+      window.history.back();
+      await settle();
+    });
+    expect(url()).toBe("/?ticket=ACP-7");
+    expect(state.selected).toBeNull();
+  });
+
+  it("keeps holding a deleted document until the list has its copy, with no notice", async () => {
+    await mount("/?ticket=ACP-7", [spec, notes]);
+    await act(async () => state.open(spec));
+    await act(async () => state.onDirtyChange(true));
+    await render([notes]);
+    await act(settle);
+    expect(state.deleted).toBe(true);
+
+    const recreated = { ...spec, id: "d3" };
+    await act(async () => state.recreated(recreated));
+    // The list has not caught up yet.
+    await render([notes]);
+    await act(settle);
+    expect(state.selected?.id).toBe("d1");
+    expect(state.notice).toBeNull();
+    expect(url()).toBe("/?ticket=ACP-7&doc=Design spec.md");
+
+    await render([notes, recreated]);
+    await act(settle);
+    expect(state.selected?.id).toBe("d3");
+    expect(state.deleted).toBe(false);
+    expect(state.notice).toBeNull();
+    expect(url()).toBe("/?ticket=ACP-7&doc=Design spec.md");
   });
 });

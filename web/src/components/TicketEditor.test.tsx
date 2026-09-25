@@ -35,6 +35,29 @@ const mockApi = vi.hoisted(() => ({
 
 vi.mock("../api/client", () => ({ api: mockApi }));
 
+// The live change feed, captured so a test can fire it. jsdom has no
+// EventSource, so without this the feed is silent anyway.
+const live = vi.hoisted(() => ({ listeners: new Set<() => void>() }));
+vi.mock("../hooks/useLiveRefresh", async () => {
+  const { useEffect, useRef } = await import("react");
+  return {
+    useLiveRefresh: (onChange: () => void) => {
+      const ref = useRef(onChange);
+      useEffect(() => {
+        ref.current = onChange;
+      });
+      useEffect(() => {
+        const listener = () => ref.current();
+        live.listeners.add(listener);
+        return () => {
+          live.listeners.delete(listener);
+        };
+      }, []);
+    },
+  };
+});
+const fireLive = () => act(async () => live.listeners.forEach((l) => l()));
+
 import TicketEditor from "./TicketEditor";
 
 const project: Project = {
@@ -1373,6 +1396,65 @@ describe("documents", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Rollout plan.md" }));
     expect(await screen.findByRole("button", { name: "Edit" })).toBeTruthy();
     expect(screen.queryByRole("textbox", { name: "Document content" })).toBeNull();
+  });
+
+  it("opens a new document once a later list has it, when the first reload does not", async () => {
+    const created = { ...spec, id: "d9", name: "Draft" };
+    // The first load, then the reload the create asks for, which a live
+    // refresh superseded with a list from before the create.
+    mockApi.documents.list.mockResolvedValueOnce([]).mockResolvedValueOnce([]).mockResolvedValue([created]);
+    mockApi.documents.create.mockResolvedValue({ ...created, content: "" });
+    mockApi.documents.get.mockResolvedValue({ ...created, content: "" });
+    renderEditor();
+
+    fireEvent.click(await screen.findByRole("button", { name: "New document" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "Draft" } });
+    fireEvent.submit(screen.getByRole("textbox", { name: "Name" }));
+    await waitFor(() => expect(mockApi.documents.list).toHaveBeenCalledTimes(2));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    expect(screen.queryByRole("dialog", { name: "Draft.md" })).toBeNull();
+    expect(screen.queryByText(/Couldn't find/)).toBeNull();
+    expect(new URLSearchParams(window.location.search).get("doc")).toBeNull();
+
+    await fireLive();
+    expect(await screen.findByRole("dialog", { name: "Draft.md" })).toBeTruthy();
+    expect(await screen.findByRole("textbox", { name: "Document content" })).toBeTruthy();
+    expect(screen.queryByText(/Couldn't find/)).toBeNull();
+  });
+
+  it("shows the copy saved from a deleted document once the list has it, with no deleted notice", async () => {
+    const recreated = { ...spec, id: "d3", revision: 1 };
+    mockApi.documents.list.mockResolvedValue([spec]);
+    mockApi.documents.get.mockResolvedValue({ ...spec, content: "old" });
+    mockApi.documents.create.mockResolvedValue({ ...recreated, content: "old mine" });
+    renderEditor();
+    fireEvent.click(await screen.findByRole("button", { name: "Design spec.md" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    fireEvent.change(await screen.findByRole("textbox", { name: "Document content" }), { target: { value: "old mine" } });
+
+    // Deleted elsewhere.
+    mockApi.documents.list.mockResolvedValue([]);
+    await fireLive();
+    expect((await screen.findByRole("status")).textContent).toContain("deleted while you were editing");
+
+    // The reload after the create still has the old list.
+    mockApi.documents.list.mockResolvedValueOnce([]).mockResolvedValue([recreated]);
+    fireEvent.click(screen.getByRole("button", { name: "Save as a new document" }));
+    await waitFor(() => expect(mockApi.documents.create).toHaveBeenCalled());
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    expect(screen.queryByText("Design spec.md was deleted.")).toBeNull();
+    expect(screen.getByRole("dialog", { name: "Design spec.md" })).toBeTruthy();
+
+    mockApi.documents.get.mockResolvedValue({ ...recreated, content: "old mine" });
+    await fireLive();
+    await waitFor(() => expect(screen.queryByRole("textbox", { name: "Document content" })).toBeNull());
+    expect(await screen.findByText("old mine")).toBeTruthy();
+    expect(screen.queryByText("Design spec.md was deleted.")).toBeNull();
+    expect(new URLSearchParams(window.location.search).get("doc")).toBe("Design spec.md");
   });
 
   it("uploads a document into the list without opening it", async () => {

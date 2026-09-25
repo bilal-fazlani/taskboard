@@ -25,17 +25,25 @@ export interface DocParamState {
   /** Open a document as a new history entry. */
   open: (doc: DocumentMeta) => void;
   /**
+   * Open a document just created here as a new history entry, once the list
+   * has it: until then the URL could only name something missing.
+   */
+  openWhenListed: (doc: DocumentMeta) => void;
+  /**
    * Close it: one Back, or a replace when it came from a link. After a Back
    * the URL is already where it asked to go, and is left there.
    */
   close: () => void;
   /** Keep a document open after a Back, which pushes its parameter back. */
   cancelClose: () => void;
-  /**
-   * Point the URL at a document: its new name after a rename from the UI,
-   * or the copy "Save as a new document" made. Its edits are saved.
-   */
+  /** Point the URL at a document's new name after a rename from the UI. */
   renamed: (doc: DocumentMeta) => void;
+  /**
+   * "Save as a new document" made this copy of the deleted document. The
+   * deleted one stays held until the list has the copy, which the URL then
+   * names.
+   */
+  recreated: (doc: DocumentMeta) => void;
   /** Told by the modal whether it holds unsaved edits. */
   onDirtyChange: (dirty: boolean) => void;
 }
@@ -92,6 +100,22 @@ export function useDocParam(documents: readonly DocumentMeta[] | null, ownerNoun
   const deleted = holding && documents !== null && !documents.some((d) => d.id === held.id);
   const closeRequested = holding && !ref;
 
+  // A document created here that the URL should name once the list has it:
+  // opened as a new entry (New), or put in place of the deleted one it
+  // copies ("Save as a new document"). Done once the URL names it.
+  const [awaiting, setAwaiting] = useState<{ doc: DocumentMeta; replace: boolean } | null>(null);
+  const listed = awaiting && documents ? (documents.find((d) => d.id === awaiting.doc.id) ?? null) : null;
+  if (awaiting && found?.id === awaiting.doc.id) setAwaiting(null);
+
+  useEffect(() => {
+    if (!awaiting || !listed) return;
+    const latest = latestSearchParams(params);
+    if (findDocument([listed], latest.get(DOC_PARAM) ?? "")) return;
+    const next = withDoc(latest, listed);
+    if (awaiting.replace) overlays.replace(next);
+    else overlays.push(next);
+  }, [awaiting, listed, params, overlays]);
+
   // The parameter close() is taking away, so the render before the URL
   // changes does not report it missing.
   const [closing, setClosing] = useState<string | null>(null);
@@ -130,6 +154,16 @@ export function useDocParam(documents: readonly DocumentMeta[] | null, ownerNoun
     [params, overlays],
   );
 
+  const openWhenListed = useCallback((doc: DocumentMeta) => {
+    setNotice(null);
+    setDirty(false);
+    setAwaiting({ doc, replace: false });
+  }, []);
+
+  // The modal keeps reporting its unsaved text until the copy replaces it,
+  // so the deleted document stays held, with no notice, in the meantime.
+  const recreated = useCallback((doc: DocumentMeta) => setAwaiting({ doc, replace: true }), []);
+
   const close = useCallback(() => {
     setDirty(false);
     setHeld(null);
@@ -166,9 +200,11 @@ export function useDocParam(documents: readonly DocumentMeta[] | null, ownerNoun
     notice,
     dismissNotice,
     open,
+    openWhenListed,
     close,
     cancelClose,
     renamed,
+    recreated,
     onDirtyChange: setDirty,
   };
 }

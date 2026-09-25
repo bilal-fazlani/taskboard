@@ -236,10 +236,10 @@ export default function DocumentModal({
     setSaveError(null);
     try {
       const created = await api.documents.create({ ...owner, name: doc.name, format: doc.format, content: draft });
+      // Stays "saving" until the copy replaces this modal, so it is not made twice.
       onRecreated(created);
     } catch (err) {
       setSaveError(serverMessage(err, "The document was not saved."));
-    } finally {
       setSaving(false);
     }
   };

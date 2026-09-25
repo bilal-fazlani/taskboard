@@ -85,28 +85,4 @@ describe("useOwnerDocuments", () => {
     await act(async () => answerFirst([]));
     expect(state.documents).toEqual([spec]);
   });
-
-  it("reload settles once the list it asked for is in, so a caller can wait for a new document", async () => {
-    mockApi.documents.list.mockResolvedValueOnce([]);
-    await mount("t1");
-    let answer: (docs: DocumentMeta[]) => void = () => {};
-    mockApi.documents.list.mockReturnValueOnce(new Promise<DocumentMeta[]>((resolve) => (answer = resolve)));
-    let settled = false;
-    let reloading: Promise<void> = Promise.resolve();
-    act(() => {
-      reloading = state.reload().then(() => {
-        settled = true;
-      });
-    });
-    await act(async () => {
-      await Promise.resolve();
-    });
-    expect(settled).toBe(false);
-    await act(async () => {
-      answer([spec]);
-      await reloading;
-    });
-    expect(settled).toBe(true);
-    expect(state.documents).toEqual([spec]);
-  });
 });

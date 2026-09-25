@@ -700,13 +700,14 @@ export default function TicketEditor({
               onOpen={docParam.open}
               onChanged={reloadDocuments}
               owner={{ ticketId: ticket.id }}
-              onCreated={async (doc, edit) => {
-                // Wait for the list to carry it, so the URL can name it.
-                await reloadDocuments();
+              onCreated={(doc, edit) => {
+                // New opens it, in edit mode, once the list carries it: this
+                // reload or a live refresh, whichever lands first with it.
                 if (edit) {
                   setEditOnOpen({ id: doc.id, opened: false });
-                  docParam.open(doc);
+                  docParam.openWhenListed(doc);
                 }
+                reloadDocuments();
               }}
             />
 
@@ -916,11 +917,11 @@ export default function TicketEditor({
             docParam.close();
             reloadDocuments();
           }}
-          onRecreated={async (doc) => {
+          onRecreated={(doc) => {
             // The copy takes the old name: once the list carries it, the URL
             // names it and the modal shows it.
-            await reloadDocuments();
-            docParam.renamed(doc);
+            docParam.recreated(doc);
+            reloadDocuments();
           }}
         />
       )}
