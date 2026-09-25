@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/tcarac/taskboard/internal/models"
@@ -39,5 +40,86 @@ func TestGetTicketToolListsDocuments(t *testing.T) {
 	}
 	if full.Documents[0].Size != 1 || full.Documents[0].Name != "Plan" || full.Documents[0].Format != models.DocumentFormatMarkdown {
 		t.Fatalf("get_ticket document meta = %+v", full.Documents[0])
+	}
+}
+
+func TestDocumentTools(t *testing.T) {
+	t.Setenv(weburl.BaseEnv, "http://board.test")
+	s := newTestServer(t)
+	seedMCPTicket(t, s)
+
+	created, err := s.callTool("create_document", mustJSON(t, map[string]any{
+		"ticket": "doc-1", "name": "Design spec", "content": "# v1",
+	}))
+	if err != nil {
+		t.Fatalf("create_document: %v", err)
+	}
+	d := created.(*models.Document)
+	if d.URL != "http://board.test/?ticket=DOC-1&doc=Design+spec.md" || d.Format != models.DocumentFormatMarkdown {
+		t.Fatalf("created = %+v", d.DocumentMeta)
+	}
+
+	for _, args := range []map[string]any{
+		{"id": d.ID},
+		{"id": "design spec", "ticket": "DOC-1"},
+		{"id": "Design spec.md", "ticket": "DOC-1"},
+	} {
+		got, err := s.callTool("get_document", mustJSON(t, args))
+		if err != nil || got.(*models.Document).Content != "# v1" {
+			t.Fatalf("get_document %v = %+v, %v", args, got, err)
+		}
+	}
+
+	updated, err := s.callTool("update_document", mustJSON(t, map[string]any{
+		"id": "Design spec", "ticket": "DOC-1", "content": "# v2", "name": "Plan",
+	}))
+	if err != nil {
+		t.Fatalf("update_document: %v", err)
+	}
+	u := updated.(*models.Document)
+	if u.Name != "Plan" || u.Content != "# v2" || u.Revision != 2 || !strings.HasSuffix(u.URL, "doc=Plan.md") {
+		t.Fatalf("updated = %+v", u)
+	}
+
+	if _, err := s.callTool("delete_document", mustJSON(t, map[string]any{"id": u.ID})); err != nil {
+		t.Fatalf("delete_document: %v", err)
+	}
+	if _, err := s.callTool("get_document", mustJSON(t, map[string]any{"id": u.ID})); err == nil {
+		t.Fatal("get_document after delete should fail")
+	}
+}
+
+func TestDocumentToolErrors(t *testing.T) {
+	s := newTestServer(t)
+	seedMCPTicket(t, s)
+
+	_, err := s.callTool("create_document", mustJSON(t, map[string]any{"ticket": "DOC-1", "name": "plan.md"}))
+	if err == nil || err.Error() != "Use letters, digits, spaces, _ and - only." {
+		t.Fatalf("bad name error = %v", err)
+	}
+	_, err = s.callTool("create_document", mustJSON(t, map[string]any{"name": "Plan"}))
+	if err == nil || err.Error() != "ticket is required" {
+		t.Fatalf("missing ticket error = %v", err)
+	}
+	_, err = s.callTool("get_document", mustJSON(t, map[string]any{"id": "Plan"}))
+	if err == nil || !strings.Contains(err.Error(), "pass ticket") {
+		t.Fatalf("name without ticket error = %v", err)
+	}
+	_, err = s.callTool("update_document", mustJSON(t, map[string]any{"id": "x"}))
+	if err == nil || !strings.Contains(err.Error(), "nothing to update") {
+		t.Fatalf("empty update error = %v", err)
+	}
+}
+
+func TestDocumentToolsAreListed(t *testing.T) {
+	s := newTestServer(t)
+	names := map[string]bool{}
+	for _, def := range s.toolDefinitions() {
+		names[def.Name] = true
+	}
+	for _, want := range []string{"get_document", "create_document", "update_document", "delete_document"} {
+		if !names[want] {
+			t.Errorf("tools/list is missing %s", want)
+		}
 	}
 }

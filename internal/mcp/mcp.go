@@ -480,6 +480,9 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 		return s.store.ToggleSubtask(a.ID)
 
 	default:
+		if result, ok, err := s.callDocumentTool(name, args); ok {
+			return result, err
+		}
 		return nil, fmt.Errorf("unknown tool: %s", name)
 	}
 }
@@ -558,7 +561,7 @@ const noteParamDescription = "Why the status is changing, saved with the change 
 	"or the review findings it is being sent back to fix. Optional for every other change; ignored when the status does not change."
 
 func (s *MCPServer) toolDefinitions() []toolDef {
-	return []toolDef{
+	defs := []toolDef{
 		// --- Projects (top-level grouping) ---
 		{
 			Name:        "list_projects",
@@ -746,6 +749,7 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 		{
 			Name: "get_ticket",
 			Description: "Get detailed ticket information including subtasks, labels, the epic it belongs to (if any), the tickets it depends on, the tickets it blocks, " +
+				"its documents (name, format, size, updated time and a link; read one with get_document), " +
 				"and its status history (newest first, each change with its note; the first entry, with an empty fromStatus, is its creation). " +
 				"reviewRounds counts how many times it has entered agent_review.",
 			InputSchema: jsonSchema{
@@ -908,4 +912,5 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 			},
 		},
 	}
+	return append(defs, s.documentToolDefinitions()...)
 }
