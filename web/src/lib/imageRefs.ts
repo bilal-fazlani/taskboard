@@ -10,6 +10,12 @@
 // JPEG shows as .jpg and answers to .jpeg too (as the server's lookups do).
 // Absolute http(s) URLs are shown as they are. Anything else, including a
 // path on this server or another owner's image name, is a missing image.
+//
+// An HTML document refers to them by relative URL, <img src="Login
+// screen.png"> (or Login%20screen.png, ./Login screen.png, or any other
+// relative URL that lands beside the page), which the browser resolves
+// against the raw page's URL; the server's referenced-image route
+// (internal/server/document_image_refs.go) answers it.
 import type { DocumentMeta } from "../api/client";
 import { displayName } from "./documents";
 
