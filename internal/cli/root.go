@@ -3,6 +3,7 @@ package cli
 import (
 	"database/sql"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -41,7 +42,7 @@ func NewRootCmd(webFS fs.FS) *cobra.Command {
 		Short: "Start the web UI server",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if !foreground {
-				return daemonize(port)
+				return daemonize(cmd.OutOrStdout(), port)
 			}
 			path, err := effectiveDBPath()
 			if err != nil {
@@ -92,7 +93,7 @@ func NewRootCmd(webFS fs.FS) *cobra.Command {
 			}
 
 			os.Remove(pidPath)
-			fmt.Printf("Taskboard stopped (pid %d)\n", pid)
+			fmt.Fprintf(cmd.OutOrStdout(), "Taskboard stopped (pid %d)\n", pid)
 			return nil
 		},
 	}
@@ -117,11 +118,11 @@ func NewRootCmd(webFS fs.FS) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			force, _ := cmd.Flags().GetBool("force")
 			if !force {
-				fmt.Print("This will delete all projects, tickets, and labels. Continue? [y/N] ")
+				fmt.Fprint(cmd.OutOrStdout(), "This will delete all projects, tickets, and labels. Continue? [y/N] ")
 				var answer string
 				fmt.Scanln(&answer)
 				if answer != "y" && answer != "Y" {
-					fmt.Println("Aborted.")
+					fmt.Fprintln(cmd.OutOrStdout(), "Aborted.")
 					return nil
 				}
 			}
@@ -133,7 +134,7 @@ func NewRootCmd(webFS fs.FS) *cobra.Command {
 			if err := store.ClearData(); err != nil {
 				return fmt.Errorf("clearing data: %w", err)
 			}
-			fmt.Println("All data cleared.")
+			fmt.Fprintln(cmd.OutOrStdout(), "All data cleared.")
 			return nil
 		},
 	}
@@ -180,7 +181,7 @@ func openStore() (*db.Store, error) {
 	return db.NewStore(database), nil
 }
 
-func daemonize(port int) error {
+func daemonize(w io.Writer, port int) error {
 	pidPath, err := pidFilePath()
 	if err != nil {
 		return err
@@ -214,7 +215,7 @@ func daemonize(port int) error {
 		return fmt.Errorf("writing pid file: %w", err)
 	}
 
-	fmt.Printf("Taskboard running at http://localhost:%d (pid %d)\n", port, cmd.Process.Pid)
+	fmt.Fprintf(w, "Taskboard running at http://localhost:%d (pid %d)\n", port, cmd.Process.Pid)
 	return nil
 }
 

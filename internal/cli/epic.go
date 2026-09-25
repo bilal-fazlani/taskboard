@@ -28,13 +28,13 @@ func epicCommands() *cobra.Command {
 				return err
 			}
 			for _, e := range epics {
-				fmt.Println(formatEpicProgress(e.Name, e.EpicProgress, e.ID))
+				fmt.Fprintln(cmd.OutOrStdout(), formatEpicProgress(e.Name, e.EpicProgress, e.ID))
 			}
 			noEpic, err := store.NoEpicProgress(args[0])
 			if err != nil {
 				return err
 			}
-			fmt.Println(formatEpicProgress("No epic", *noEpic, ""))
+			fmt.Fprintln(cmd.OutOrStdout(), formatEpicProgress("No epic", *noEpic, ""))
 			return nil
 		},
 	}
@@ -57,7 +57,7 @@ func epicCommands() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Printf("Created epic %s (%s)\n", e.Name, e.ID)
+			fmt.Fprintf(cmd.OutOrStdout(), "Created epic %s (%s)\n", e.Name, e.ID)
 			return nil
 		},
 	}
@@ -94,7 +94,7 @@ func epicCommands() *cobra.Command {
 			if e == nil {
 				return fmt.Errorf("epic not found: %s", args[0])
 			}
-			fmt.Printf("Updated epic %s (%s)\n", e.Name, e.ID)
+			fmt.Fprintf(cmd.OutOrStdout(), "Updated epic %s (%s)\n", e.Name, e.ID)
 			return nil
 		},
 	}
@@ -126,7 +126,7 @@ func epicCommands() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Printf("Epic deleted. Cleared from %d ticket(s).\n", count)
+			fmt.Fprintf(cmd.OutOrStdout(), "Epic deleted. Cleared from %d ticket(s).\n", count)
 			return nil
 		},
 	}

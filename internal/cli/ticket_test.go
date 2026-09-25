@@ -1,38 +1,12 @@
 package cli
 
 import (
-	"io"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/tcarac/taskboard/internal/weburl"
 )
-
-// captureStdout runs fn with os.Stdout replaced by a pipe and returns what it
-// printed. The ticket commands print with fmt.Printf, which cobra's output
-// buffer does not see.
-func captureStdout(t *testing.T, fn func()) string {
-	t.Helper()
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("creating pipe: %v", err)
-	}
-	prev := os.Stdout
-	os.Stdout = w
-	done := make(chan string, 1)
-	go func() {
-		data, _ := io.ReadAll(r)
-		done <- string(data)
-	}()
-	fn()
-	os.Stdout = prev
-	w.Close()
-	out := <-done
-	r.Close()
-	return out
-}
 
 // An agent reading CLI output should be able to hand a person a link, so every
 // command that prints a ticket prints its URL.
@@ -42,39 +16,35 @@ func TestTicketCommandsPrintTheTicketURL(t *testing.T) {
 	t.Setenv(weburl.BaseEnv, "http://localhost:3013")
 	path := filepath.Join(t.TempDir(), "dev.db")
 
-	out := captureStdout(t, func() {
-		if _, err := runCLI(t, "--db", path, "project", "create", "Agent control plane", "--prefix", "ACP"); err != nil {
-			t.Fatalf("project create: %v", err)
-		}
-	})
+	out, err := runCLI(t, "--db", path, "project", "create", "Agent control plane", "--prefix", "ACP")
+	if err != nil {
+		t.Fatalf("project create: %v", err)
+	}
 	projectID := lastParenthesized(t, out)
 
 	want := "http://localhost:3013/?ticket=ACP-1"
 
-	created := captureStdout(t, func() {
-		if _, err := runCLI(t, "--db", path, "ticket", "create", "--project", projectID, "--title", "URL-addressable tickets"); err != nil {
-			t.Fatalf("ticket create: %v", err)
-		}
-	})
+	created, err := runCLI(t, "--db", path, "ticket", "create", "--project", projectID, "--title", "URL-addressable tickets")
+	if err != nil {
+		t.Fatalf("ticket create: %v", err)
+	}
 	if !strings.Contains(created, want) {
 		t.Fatalf("ticket create printed %q, want it to contain %q", created, want)
 	}
 	ticketID := lastParenthesized(t, created)
 
-	listed := captureStdout(t, func() {
-		if _, err := runCLI(t, "--db", path, "ticket", "list"); err != nil {
-			t.Fatalf("ticket list: %v", err)
-		}
-	})
+	listed, err := runCLI(t, "--db", path, "ticket", "list")
+	if err != nil {
+		t.Fatalf("ticket list: %v", err)
+	}
 	if !strings.Contains(listed, want) {
 		t.Fatalf("ticket list printed %q, want it to contain %q", listed, want)
 	}
 
-	updated := captureStdout(t, func() {
-		if _, err := runCLI(t, "--db", path, "ticket", "update", ticketID, "--priority", "high"); err != nil {
-			t.Fatalf("ticket update: %v", err)
-		}
-	})
+	updated, err := runCLI(t, "--db", path, "ticket", "update", ticketID, "--priority", "high")
+	if err != nil {
+		t.Fatalf("ticket update: %v", err)
+	}
 	if !strings.Contains(updated, want) {
 		t.Fatalf("ticket update printed %q, want it to contain %q", updated, want)
 	}
@@ -93,31 +63,28 @@ func TestTicketCommandsAcceptDisplayKeysAndProjectPrefix(t *testing.T) {
 	}
 
 	// ticket create --project accepts a project prefix, case-insensitively.
-	created := captureStdout(t, func() {
-		if _, err := runCLI(t, "--db", path, "ticket", "create", "--project", "bill", "--title", "Invoice"); err != nil {
-			t.Fatalf("ticket create --project bill: %v", err)
-		}
-	})
+	created, err := runCLI(t, "--db", path, "ticket", "create", "--project", "bill", "--title", "Invoice")
+	if err != nil {
+		t.Fatalf("ticket create --project bill: %v", err)
+	}
 	if !strings.Contains(created, "BILL-1") {
 		t.Fatalf("ticket create --project bill printed %q, want it to mention BILL-1", created)
 	}
 
 	// ticket update by display key, case-insensitively.
-	updated := captureStdout(t, func() {
-		if _, err := runCLI(t, "--db", path, "ticket", "update", "bill-1", "--priority", "high"); err != nil {
-			t.Fatalf("ticket update bill-1: %v", err)
-		}
-	})
+	updated, err := runCLI(t, "--db", path, "ticket", "update", "bill-1", "--priority", "high")
+	if err != nil {
+		t.Fatalf("ticket update bill-1: %v", err)
+	}
 	if !strings.Contains(updated, "BILL-1") {
 		t.Fatalf("ticket update bill-1 printed %q, want it to mention BILL-1", updated)
 	}
 
 	// ticket move by display key.
-	moved := captureStdout(t, func() {
-		if _, err := runCLI(t, "--db", path, "ticket", "move", "BILL-1", "--status", "in_progress"); err != nil {
-			t.Fatalf("ticket move BILL-1: %v", err)
-		}
-	})
+	moved, err := runCLI(t, "--db", path, "ticket", "move", "BILL-1", "--status", "in_progress")
+	if err != nil {
+		t.Fatalf("ticket move BILL-1: %v", err)
+	}
 	if !strings.Contains(moved, "BILL-1") {
 		t.Fatalf("ticket move BILL-1 printed %q, want it to mention BILL-1", moved)
 	}
@@ -126,11 +93,10 @@ func TestTicketCommandsAcceptDisplayKeysAndProjectPrefix(t *testing.T) {
 	if _, err := runCLI(t, "--db", path, "ticket", "delete", "BILL-1"); err != nil {
 		t.Fatalf("ticket delete BILL-1: %v", err)
 	}
-	listed := captureStdout(t, func() {
-		if _, err := runCLI(t, "--db", path, "ticket", "list"); err != nil {
-			t.Fatalf("ticket list: %v", err)
-		}
-	})
+	listed, err := runCLI(t, "--db", path, "ticket", "list")
+	if err != nil {
+		t.Fatalf("ticket list: %v", err)
+	}
 	if !strings.Contains(listed, "No tickets found") {
 		t.Fatalf("ticket list after delete = %q, want no tickets", listed)
 	}

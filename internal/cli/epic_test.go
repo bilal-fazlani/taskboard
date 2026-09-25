@@ -20,11 +20,10 @@ func TestEpicCreateListUpdateDelete(t *testing.T) {
 		t.Fatalf("project create: %v", err)
 	}
 
-	created := captureStdout(t, func() {
-		if _, err := runCLI(t, "--db", path, "epic", "create", "BILL", "Launch", "--description", "Go live"); err != nil {
-			t.Fatalf("epic create: %v", err)
-		}
-	})
+	created, err := runCLI(t, "--db", path, "epic", "create", "BILL", "Launch", "--description", "Go live")
+	if err != nil {
+		t.Fatalf("epic create: %v", err)
+	}
 	if !strings.Contains(created, "Created epic Launch") {
 		t.Fatalf("epic create printed %q, want it to mention Launch", created)
 	}
@@ -32,11 +31,10 @@ func TestEpicCreateListUpdateDelete(t *testing.T) {
 
 	// list shows the new epic (0/0 done, not complete: it has no tickets yet)
 	// and always a trailing "No epic" line.
-	listed := captureStdout(t, func() {
-		if _, err := runCLI(t, "--db", path, "epic", "list", "BILL"); err != nil {
-			t.Fatalf("epic list: %v", err)
-		}
-	})
+	listed, err := runCLI(t, "--db", path, "epic", "list", "BILL")
+	if err != nil {
+		t.Fatalf("epic list: %v", err)
+	}
 	if !strings.Contains(listed, "Launch") {
 		t.Fatalf("epic list = %q, want it to mention Launch", listed)
 	}
@@ -45,11 +43,10 @@ func TestEpicCreateListUpdateDelete(t *testing.T) {
 	}
 
 	// Update by id.
-	updated := captureStdout(t, func() {
-		if _, err := runCLI(t, "--db", path, "epic", "update", epicID, "--name", "Launch v2"); err != nil {
-			t.Fatalf("epic update by id: %v", err)
-		}
-	})
+	updated, err := runCLI(t, "--db", path, "epic", "update", epicID, "--name", "Launch v2")
+	if err != nil {
+		t.Fatalf("epic update by id: %v", err)
+	}
 	if !strings.Contains(updated, "Launch v2") {
 		t.Fatalf("epic update printed %q, want it to mention Launch v2", updated)
 	}
@@ -64,30 +61,27 @@ func TestEpicCreateListUpdateDelete(t *testing.T) {
 	if _, err := runCLI(t, "--db", path, "ticket", "create", "--project", "BILL", "--title", "Ship it", "--epic", "Launch v2"); err != nil {
 		t.Fatalf("ticket create --epic: %v", err)
 	}
-	listedWithTicket := captureStdout(t, func() {
-		if _, err := runCLI(t, "--db", path, "epic", "list", "BILL"); err != nil {
-			t.Fatalf("epic list: %v", err)
-		}
-	})
+	listedWithTicket, err := runCLI(t, "--db", path, "epic", "list", "BILL")
+	if err != nil {
+		t.Fatalf("epic list: %v", err)
+	}
 	if !strings.Contains(listedWithTicket, "0/1 done") {
 		t.Fatalf("epic list = %q, want 0/1 done for Launch v2", listedWithTicket)
 	}
 
-	deleted := captureStdout(t, func() {
-		if _, err := runCLI(t, "--db", path, "epic", "delete", "Launch v2", "--project", "BILL"); err != nil {
-			t.Fatalf("epic delete by name: %v", err)
-		}
-	})
+	deleted, err := runCLI(t, "--db", path, "epic", "delete", "Launch v2", "--project", "BILL")
+	if err != nil {
+		t.Fatalf("epic delete by name: %v", err)
+	}
 	if !strings.Contains(deleted, "Cleared from 1 ticket(s)") {
 		t.Fatalf("epic delete printed %q, want it to report 1 cleared ticket", deleted)
 	}
 
 	// The ticket survived and now shows no epic.
-	ticketList := captureStdout(t, func() {
-		if _, err := runCLI(t, "--db", path, "ticket", "list"); err != nil {
-			t.Fatalf("ticket list: %v", err)
-		}
-	})
+	ticketList, err := runCLI(t, "--db", path, "ticket", "list")
+	if err != nil {
+		t.Fatalf("ticket list: %v", err)
+	}
 	if !strings.Contains(ticketList, "Ship it") {
 		t.Fatalf("ticket list = %q, want the ticket to still be there", ticketList)
 	}
@@ -154,50 +148,45 @@ func TestTicketEpicFlagSetsKeepsAndClears(t *testing.T) {
 		t.Fatalf("epic create: %v", err)
 	}
 
-	created := captureStdout(t, func() {
-		if _, err := runCLI(t, "--db", path, "ticket", "create", "--project", "BILL", "--title", "Ship it", "--epic", "Launch"); err != nil {
-			t.Fatalf("ticket create --epic: %v", err)
-		}
-	})
+	created, err := runCLI(t, "--db", path, "ticket", "create", "--project", "BILL", "--title", "Ship it", "--epic", "Launch")
+	if err != nil {
+		t.Fatalf("ticket create --epic: %v", err)
+	}
 	if !strings.Contains(created, "Epic: Launch") {
 		t.Fatalf("ticket create printed %q, want it to show Epic: Launch", created)
 	}
 
 	// Leaving --epic out on update keeps it.
-	kept := captureStdout(t, func() {
-		if _, err := runCLI(t, "--db", path, "ticket", "update", "BILL-1", "--priority", "high"); err != nil {
-			t.Fatalf("ticket update without --epic: %v", err)
-		}
-	})
+	kept, err := runCLI(t, "--db", path, "ticket", "update", "BILL-1", "--priority", "high")
+	if err != nil {
+		t.Fatalf("ticket update without --epic: %v", err)
+	}
 	if !strings.Contains(kept, "Epic: Launch") {
 		t.Fatalf("ticket update printed %q, want the epic kept", kept)
 	}
 
 	// ticket list shows the epic.
-	listed := captureStdout(t, func() {
-		if _, err := runCLI(t, "--db", path, "ticket", "list"); err != nil {
-			t.Fatalf("ticket list: %v", err)
-		}
-	})
+	listed, err := runCLI(t, "--db", path, "ticket", "list")
+	if err != nil {
+		t.Fatalf("ticket list: %v", err)
+	}
 	if !strings.Contains(listed, "epic:Launch") {
 		t.Fatalf("ticket list = %q, want it to show epic:Launch", listed)
 	}
 
 	// --epic none (any case) clears it, same as "".
-	cleared := captureStdout(t, func() {
-		if _, err := runCLI(t, "--db", path, "ticket", "update", "BILL-1", "--epic", "NONE"); err != nil {
-			t.Fatalf("ticket update --epic NONE: %v", err)
-		}
-	})
+	cleared, err := runCLI(t, "--db", path, "ticket", "update", "BILL-1", "--epic", "NONE")
+	if err != nil {
+		t.Fatalf("ticket update --epic NONE: %v", err)
+	}
 	if strings.Contains(cleared, "Epic:") {
 		t.Fatalf("ticket update printed %q, want no epic after clearing", cleared)
 	}
 
-	listedAfterClear := captureStdout(t, func() {
-		if _, err := runCLI(t, "--db", path, "ticket", "list"); err != nil {
-			t.Fatalf("ticket list: %v", err)
-		}
-	})
+	listedAfterClear, err := runCLI(t, "--db", path, "ticket", "list")
+	if err != nil {
+		t.Fatalf("ticket list: %v", err)
+	}
 	if strings.Contains(listedAfterClear, "epic:") {
 		t.Fatalf("ticket list = %q, want no epic reference after clearing", listedAfterClear)
 	}
@@ -210,19 +199,17 @@ func TestTicketEpicFlagSetsKeepsAndClears(t *testing.T) {
 	if _, err := runCLI(t, "--db", path, "ticket", "update", "BILL-1", "--epic", "Launch"); err != nil {
 		t.Fatalf("re-setting the epic: %v", err)
 	}
-	clearedEmpty := captureStdout(t, func() {
-		if _, err := runCLI(t, "--db", path, "ticket", "update", "BILL-1", "--epic", ""); err != nil {
-			t.Fatalf(`ticket update --epic "": %v`, err)
-		}
-	})
+	clearedEmpty, err := runCLI(t, "--db", path, "ticket", "update", "BILL-1", "--epic", "")
+	if err != nil {
+		t.Fatalf(`ticket update --epic "": %v`, err)
+	}
 	if strings.Contains(clearedEmpty, "Epic:") {
 		t.Fatalf(`ticket update printed %q, want no epic after --epic ""`, clearedEmpty)
 	}
-	listedAfterEmptyClear := captureStdout(t, func() {
-		if _, err := runCLI(t, "--db", path, "ticket", "list"); err != nil {
-			t.Fatalf("ticket list: %v", err)
-		}
-	})
+	listedAfterEmptyClear, err := runCLI(t, "--db", path, "ticket", "list")
+	if err != nil {
+		t.Fatalf("ticket list: %v", err)
+	}
 	if strings.Contains(listedAfterEmptyClear, "epic:") {
 		t.Fatalf(`ticket list = %q, want no epic reference after --epic ""`, listedAfterEmptyClear)
 	}
@@ -257,20 +244,18 @@ func TestTicketListEpicFilter(t *testing.T) {
 		t.Fatalf("ticket create without epic: %v", err)
 	}
 
-	inEpic := captureStdout(t, func() {
-		if _, err := runCLI(t, "--db", path, "ticket", "list", "--epic", "Launch"); err != nil {
-			t.Fatalf("ticket list --epic Launch: %v", err)
-		}
-	})
+	inEpic, err := runCLI(t, "--db", path, "ticket", "list", "--epic", "Launch")
+	if err != nil {
+		t.Fatalf("ticket list --epic Launch: %v", err)
+	}
 	if !strings.Contains(inEpic, "In epic") || strings.Contains(inEpic, "No epic ticket") {
 		t.Fatalf("ticket list --epic Launch = %q, want only the ticket in the epic", inEpic)
 	}
 
-	noEpic := captureStdout(t, func() {
-		if _, err := runCLI(t, "--db", path, "ticket", "list", "--epic", "none"); err != nil {
-			t.Fatalf("ticket list --epic none: %v", err)
-		}
-	})
+	noEpic, err := runCLI(t, "--db", path, "ticket", "list", "--epic", "none")
+	if err != nil {
+		t.Fatalf("ticket list --epic none: %v", err)
+	}
 	if !strings.Contains(noEpic, "No epic ticket") || strings.Contains(noEpic, "In epic") {
 		t.Fatalf("ticket list --epic none = %q, want only the ticket without an epic", noEpic)
 	}
@@ -305,11 +290,10 @@ func TestEpicListShowsProgressAndCompleteness(t *testing.T) {
 		t.Fatalf("ticket create without epic: %v", err)
 	}
 
-	listed := captureStdout(t, func() {
-		if _, err := runCLI(t, "--db", path, "epic", "list", "BILL"); err != nil {
-			t.Fatalf("epic list: %v", err)
-		}
-	})
+	listed, err := runCLI(t, "--db", path, "epic", "list", "BILL")
+	if err != nil {
+		t.Fatalf("epic list: %v", err)
+	}
 	lines := strings.Split(strings.TrimSpace(listed), "\n")
 	if len(lines) != 2 {
 		t.Fatalf("epic list = %q, want exactly 2 lines (Launch, No epic)", listed)
@@ -332,11 +316,10 @@ func TestEpicDescriptionIsSaved(t *testing.T) {
 	if _, err := runCLI(t, "--db", path, "project", "create", "Billing", "--prefix", "BILL"); err != nil {
 		t.Fatalf("project create: %v", err)
 	}
-	created := captureStdout(t, func() {
-		if _, err := runCLI(t, "--db", path, "epic", "create", "BILL", "Launch", "--description", "Go live"); err != nil {
-			t.Fatalf("epic create: %v", err)
-		}
-	})
+	created, err := runCLI(t, "--db", path, "epic", "create", "BILL", "Launch", "--description", "Go live")
+	if err != nil {
+		t.Fatalf("epic create: %v", err)
+	}
 	epicID := lastParenthesized(t, created)
 
 	getEpic := func() *models.Epic {

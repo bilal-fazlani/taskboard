@@ -22,11 +22,10 @@ func TestProjectDeleteAcceptsPrefixAndRejectsUnknownOne(t *testing.T) {
 		t.Fatal("expected an error for an unknown project prefix")
 	}
 
-	listed := captureStdout(t, func() {
-		if _, err := runCLI(t, "--db", path, "project", "list"); err != nil {
-			t.Fatalf("project list: %v", err)
-		}
-	})
+	listed, err := runCLI(t, "--db", path, "project", "list")
+	if err != nil {
+		t.Fatalf("project list: %v", err)
+	}
 	if !strings.Contains(listed, "BILL") {
 		t.Fatalf("project list after a failed delete = %q, want BILL still present", listed)
 	}
@@ -35,11 +34,10 @@ func TestProjectDeleteAcceptsPrefixAndRejectsUnknownOne(t *testing.T) {
 		t.Fatalf("project delete bill: %v", err)
 	}
 
-	listedAfter := captureStdout(t, func() {
-		if _, err := runCLI(t, "--db", path, "project", "list"); err != nil {
-			t.Fatalf("project list: %v", err)
-		}
-	})
+	listedAfter, err := runCLI(t, "--db", path, "project", "list")
+	if err != nil {
+		t.Fatalf("project list: %v", err)
+	}
 	if !strings.Contains(listedAfter, "No projects found") {
 		t.Fatalf("project list after delete by prefix = %q, want no projects", listedAfter)
 	}
@@ -66,11 +64,10 @@ func TestProjectDeleteRejectsAmbiguousPrefix(t *testing.T) {
 		t.Fatal("expected an error for a prefix matching two projects with no exact case match")
 	}
 
-	listed := captureStdout(t, func() {
-		if _, err := runCLI(t, "--db", path, "project", "list"); err != nil {
-			t.Fatalf("project list: %v", err)
-		}
-	})
+	listed, err := runCLI(t, "--db", path, "project", "list")
+	if err != nil {
+		t.Fatalf("project list: %v", err)
+	}
 	if !strings.Contains(listed, "[GLOW]") || !strings.Contains(listed, "[glow]") {
 		t.Fatalf("project list after a rejected ambiguous delete = %q, want both GLOW and glow still present", listed)
 	}

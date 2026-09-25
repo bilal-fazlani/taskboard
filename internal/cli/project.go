@@ -26,7 +26,7 @@ func projectCommands() *cobra.Command {
 				return err
 			}
 			if len(projects) == 0 {
-				fmt.Println("No projects found.")
+				fmt.Fprintln(cmd.OutOrStdout(), "No projects found.")
 				return nil
 			}
 			for _, p := range projects {
@@ -34,7 +34,7 @@ func projectCommands() *cobra.Command {
 				if icon == "" {
 					icon = " "
 				}
-				fmt.Printf("%s %s [%s] (%s) - %s\n", icon, p.Name, p.Prefix, p.Status, p.ID)
+				fmt.Fprintf(cmd.OutOrStdout(), "%s %s [%s] (%s) - %s\n", icon, p.Name, p.Prefix, p.Status, p.ID)
 			}
 			return nil
 		},
@@ -59,7 +59,7 @@ func projectCommands() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Printf("Created project %s [%s] (%s)\n", p.Name, p.Prefix, p.ID)
+			fmt.Fprintf(cmd.OutOrStdout(), "Created project %s [%s] (%s)\n", p.Name, p.Prefix, p.ID)
 			return nil
 		},
 	}
@@ -84,7 +84,7 @@ func projectCommands() *cobra.Command {
 			if err := store.DeleteProject(projectID); err != nil {
 				return err
 			}
-			fmt.Println("Project deleted.")
+			fmt.Fprintln(cmd.OutOrStdout(), "Project deleted.")
 			return nil
 		},
 	}

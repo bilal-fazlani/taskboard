@@ -27,11 +27,11 @@ func labelCommands() *cobra.Command {
 				return err
 			}
 			if len(labels) == 0 {
-				fmt.Println("No labels found.")
+				fmt.Fprintln(cmd.OutOrStdout(), "No labels found.")
 				return nil
 			}
 			for _, l := range labels {
-				fmt.Printf("%-20s %-8s %d tickets (%s)\n", l.Name, l.Color, l.TicketCount, l.ID)
+				fmt.Fprintf(cmd.OutOrStdout(), "%-20s %-8s %d tickets (%s)\n", l.Name, l.Color, l.TicketCount, l.ID)
 			}
 			return nil
 		},
@@ -51,7 +51,7 @@ func labelCommands() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Printf("Created label %s (%s)\n", l.Name, l.ID)
+			fmt.Fprintf(cmd.OutOrStdout(), "Created label %s (%s)\n", l.Name, l.ID)
 			return nil
 		},
 	}
@@ -77,7 +77,7 @@ func labelCommands() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Printf("Label deleted. Detached from %d ticket(s).\n", count)
+			fmt.Fprintf(cmd.OutOrStdout(), "Label deleted. Detached from %d ticket(s).\n", count)
 			return nil
 		},
 	}
@@ -116,7 +116,7 @@ func labelCommands() *cobra.Command {
 			if l == nil {
 				return fmt.Errorf("label not found: %s", args[0])
 			}
-			fmt.Printf("Updated label %s (%s)\n", l.Name, l.ID)
+			fmt.Fprintf(cmd.OutOrStdout(), "Updated label %s (%s)\n", l.Name, l.ID)
 			return nil
 		},
 	}

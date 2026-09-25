@@ -40,14 +40,14 @@ func documentCommands() *cobra.Command {
 				return err
 			}
 			if len(docs) == 0 {
-				fmt.Println("No documents.")
+				fmt.Fprintln(cmd.OutOrStdout(), "No documents.")
 			}
 			for _, d := range docs {
 				size := models.FormatSize(d.Size)
 				if models.IsImageFormat(d.Format) {
 					size += fmt.Sprintf("  %d×%d", d.Width, d.Height)
 				}
-				fmt.Printf("%s  %s  updated %s (%s)\n  %s\n",
+				fmt.Fprintf(cmd.OutOrStdout(), "%s  %s  updated %s (%s)\n  %s\n",
 					models.DocumentDisplayName(d.Name, d.Format), size,
 					d.UpdatedAt.Local().Format("2006-01-02 15:04"), d.ID, documentURL(store, &d))
 			}
@@ -75,13 +75,13 @@ func documentCommands() *cobra.Command {
 			if models.IsImageFormat(d.Format) {
 				// Never the bytes: a terminal can't show them. doc download
 				// writes the file.
-				fmt.Printf("%s (%s)\n%s image, %d×%d pixels, %s, revision %d, updated %s\n%s\n",
+				fmt.Fprintf(cmd.OutOrStdout(), "%s (%s)\n%s image, %d×%d pixels, %s, revision %d, updated %s\n%s\n",
 					models.DocumentDisplayName(d.Name, d.Format), d.ID,
 					models.ImageFormatName(d.Format), d.Width, d.Height, models.FormatSize(d.Size), d.Revision,
 					d.UpdatedAt.Local().Format("2006-01-02 15:04"), documentURL(store, &d.DocumentMeta))
 				return nil
 			}
-			fmt.Print(d.Content)
+			fmt.Fprint(cmd.OutOrStdout(), d.Content)
 			return nil
 		},
 	}
@@ -149,7 +149,7 @@ func documentCommands() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Printf("Added document %s (%s)\n%s\n",
+			fmt.Fprintf(cmd.OutOrStdout(), "Added document %s (%s)\n%s\n",
 				models.DocumentDisplayName(d.Name, d.Format), d.ID, documentURL(store, &d.DocumentMeta))
 			return nil
 		},
@@ -191,7 +191,7 @@ func documentCommands() *cobra.Command {
 			if d == nil {
 				return fmt.Errorf("document not found: %s", args[0])
 			}
-			fmt.Printf("Saved %s (%s)\n%s\n",
+			fmt.Fprintf(cmd.OutOrStdout(), "Saved %s (%s)\n%s\n",
 				models.DocumentDisplayName(d.Name, d.Format), d.ID, documentURL(store, &d.DocumentMeta))
 			return nil
 		},
@@ -220,7 +220,7 @@ func documentCommands() *cobra.Command {
 			if d == nil {
 				return fmt.Errorf("document not found: %s", args[0])
 			}
-			fmt.Printf("Renamed to %s (%s)\n%s\n",
+			fmt.Fprintf(cmd.OutOrStdout(), "Renamed to %s (%s)\n%s\n",
 				models.DocumentDisplayName(d.Name, d.Format), d.ID, documentURL(store, &d.DocumentMeta))
 			return nil
 		},
@@ -244,7 +244,7 @@ func documentCommands() *cobra.Command {
 			if _, err := store.DeleteDocument(d.ID); err != nil {
 				return err
 			}
-			fmt.Printf("Deleted %s\n", models.DocumentDisplayName(d.Name, d.Format))
+			fmt.Fprintf(cmd.OutOrStdout(), "Deleted %s\n", models.DocumentDisplayName(d.Name, d.Format))
 			return nil
 		},
 	}
@@ -281,7 +281,7 @@ func documentCommands() *cobra.Command {
 			}
 			display := models.DocumentDisplayName(d.Name, d.Format)
 			if downloadOutput == "-" {
-				_, err := os.Stdout.Write(data)
+				_, err := cmd.OutOrStdout().Write(data)
 				return err
 			}
 			path := downloadOutput
@@ -306,7 +306,7 @@ func documentCommands() *cobra.Command {
 			if err := file.Close(); err != nil {
 				return err
 			}
-			fmt.Printf("Downloaded %s to %s (%s)\n", display, path, models.FormatSize(len(data)))
+			fmt.Fprintf(cmd.OutOrStdout(), "Downloaded %s to %s (%s)\n", display, path, models.FormatSize(len(data)))
 			return nil
 		},
 	}

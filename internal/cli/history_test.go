@@ -18,11 +18,11 @@ func TestTicketNotesAndHistory(t *testing.T) {
 
 	run := func(args ...string) string {
 		t.Helper()
-		return captureStdout(t, func() {
-			if _, err := runCLI(t, append([]string{"--db", path}, args...)...); err != nil {
-				t.Fatalf("%v: %v", args, err)
-			}
-		})
+		out, err := runCLI(t, append([]string{"--db", path}, args...)...)
+		if err != nil {
+			t.Fatalf("%v: %v", args, err)
+		}
+		return out
 	}
 	run("project", "create", "Agent control plane", "--prefix", "ACP")
 	run("ticket", "create", "--project", "acp", "--title", "Status history")

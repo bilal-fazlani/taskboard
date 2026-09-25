@@ -36,7 +36,7 @@ func ticketCommands() *cobra.Command {
 				return err
 			}
 			if len(tickets) == 0 {
-				fmt.Println("No tickets found.")
+				fmt.Fprintln(cmd.OutOrStdout(), "No tickets found.")
 				return nil
 			}
 			base := weburl.Base()
@@ -63,7 +63,7 @@ func ticketCommands() *cobra.Command {
 					}
 					line += " depends on " + strings.Join(keys, ", ")
 				}
-				fmt.Printf("%s  (%s)  %s\n", line, t.ID, weburl.Ticket(base, weburl.Ref(t)))
+				fmt.Fprintf(cmd.OutOrStdout(), "%s  (%s)  %s\n", line, t.ID, weburl.Ticket(base, weburl.Ref(t)))
 			}
 			return nil
 		},
@@ -104,9 +104,9 @@ func ticketCommands() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Printf("Created ticket %s: %s (%s)\n  %s\n", t.DisplayKey(), t.Title, t.ID, weburl.Ticket(weburl.Base(), weburl.Ref(*t)))
+			fmt.Fprintf(cmd.OutOrStdout(), "Created ticket %s: %s (%s)\n  %s\n", t.DisplayKey(), t.Title, t.ID, weburl.Ticket(weburl.Base(), weburl.Ref(*t)))
 			if t.Epic != nil {
-				fmt.Printf("  Epic: %s\n", t.Epic.Name)
+				fmt.Fprintf(cmd.OutOrStdout(), "  Epic: %s\n", t.Epic.Name)
 			}
 			return nil
 		},
@@ -143,7 +143,7 @@ func ticketCommands() *cobra.Command {
 			if t == nil {
 				return fmt.Errorf("ticket not found")
 			}
-			fmt.Printf("Moved %s to %s\n", t.DisplayKey(), t.Status)
+			fmt.Fprintf(cmd.OutOrStdout(), "Moved %s to %s\n", t.DisplayKey(), t.Status)
 			return nil
 		},
 	}
@@ -175,7 +175,7 @@ func ticketCommands() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Print(formatHistory(t.DisplayKey(), changes))
+			fmt.Fprint(cmd.OutOrStdout(), formatHistory(t.DisplayKey(), changes))
 			return nil
 		},
 	}
@@ -196,7 +196,7 @@ func ticketCommands() *cobra.Command {
 			if err := store.DeleteTicket(ticketID); err != nil {
 				return err
 			}
-			fmt.Println("Ticket deleted.")
+			fmt.Fprintln(cmd.OutOrStdout(), "Ticket deleted.")
 			return nil
 		},
 	}
@@ -278,9 +278,9 @@ func ticketCommands() *cobra.Command {
 			if t == nil {
 				return fmt.Errorf("ticket not found")
 			}
-			fmt.Printf("Updated %s: %s\n  %s\n", t.DisplayKey(), t.Title, weburl.Ticket(weburl.Base(), weburl.Ref(*t)))
+			fmt.Fprintf(cmd.OutOrStdout(), "Updated %s: %s\n  %s\n", t.DisplayKey(), t.Title, weburl.Ticket(weburl.Base(), weburl.Ref(*t)))
 			if t.Epic != nil {
-				fmt.Printf("  Epic: %s\n", t.Epic.Name)
+				fmt.Fprintf(cmd.OutOrStdout(), "  Epic: %s\n", t.Epic.Name)
 			}
 			return nil
 		},

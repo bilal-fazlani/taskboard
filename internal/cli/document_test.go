@@ -36,30 +36,27 @@ func TestDocCommands(t *testing.T) {
 	if err := os.WriteFile(file, []byte("# Design\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	added := captureStdout(t, func() {
-		if _, err := runCLI(t, "--db", path, "doc", "add", "DOC-1", "--file", file); err != nil {
-			t.Fatalf("doc add: %v", err)
-		}
-	})
+	added, err := runCLI(t, "--db", path, "doc", "add", "DOC-1", "--file", file)
+	if err != nil {
+		t.Fatalf("doc add: %v", err)
+	}
 	if !strings.Contains(added, "Added document api-design_v1 2.md") || !strings.Contains(added, "doc=api-design_v1+2.md") {
 		t.Fatalf("doc add printed %q", added)
 	}
 	docID := lastParenthesized(t, added)
 
-	listed := captureStdout(t, func() {
-		if _, err := runCLI(t, "--db", path, "doc", "list", "DOC-1"); err != nil {
-			t.Fatalf("doc list: %v", err)
-		}
-	})
+	listed, err := runCLI(t, "--db", path, "doc", "list", "DOC-1")
+	if err != nil {
+		t.Fatalf("doc list: %v", err)
+	}
 	if !strings.Contains(listed, "api-design_v1 2.md") || !strings.Contains(listed, "9 B") || !strings.Contains(listed, docID) {
 		t.Fatalf("doc list printed %q", listed)
 	}
 
-	shown := captureStdout(t, func() {
-		if _, err := runCLI(t, "--db", path, "doc", "show", "api-design_v1 2.md", "--ticket", "doc-1"); err != nil {
-			t.Fatalf("doc show: %v", err)
-		}
-	})
+	shown, err := runCLI(t, "--db", path, "doc", "show", "api-design_v1 2.md", "--ticket", "doc-1")
+	if err != nil {
+		t.Fatalf("doc show: %v", err)
+	}
 	if shown != "# Design\n" {
 		t.Fatalf("doc show printed %q", shown)
 	}
@@ -67,20 +64,18 @@ func TestDocCommands(t *testing.T) {
 	if _, err := runCLIWithInput(t, "# Design v2\n", "--db", path, "doc", "write", docID, "--file", "-"); err != nil {
 		t.Fatalf("doc write from stdin: %v", err)
 	}
-	shown = captureStdout(t, func() {
-		if _, err := runCLI(t, "--db", path, "doc", "show", docID); err != nil {
-			t.Fatalf("doc show: %v", err)
-		}
-	})
+	shown, err = runCLI(t, "--db", path, "doc", "show", docID)
+	if err != nil {
+		t.Fatalf("doc show: %v", err)
+	}
 	if shown != "# Design v2\n" {
 		t.Fatalf("after write, doc show printed %q", shown)
 	}
 
-	renamed := captureStdout(t, func() {
-		if _, err := runCLI(t, "--db", path, "doc", "rename", docID, "Plan"); err != nil {
-			t.Fatalf("doc rename: %v", err)
-		}
-	})
+	renamed, err := runCLI(t, "--db", path, "doc", "rename", docID, "Plan")
+	if err != nil {
+		t.Fatalf("doc rename: %v", err)
+	}
 	if !strings.Contains(renamed, "Renamed to Plan.md") || !strings.Contains(renamed, "/?ticket=DOC-1&doc=Plan.md") {
 		t.Fatalf("doc rename printed %q", renamed)
 	}
@@ -88,11 +83,10 @@ func TestDocCommands(t *testing.T) {
 	if _, err := runCLIWithInput(t, "notes", "--db", path, "doc", "add", "DOC-1", "--file", "-", "--name", "Notes"); err != nil {
 		t.Fatalf("doc add from stdin: %v", err)
 	}
-	deleted := captureStdout(t, func() {
-		if _, err := runCLI(t, "--db", path, "doc", "delete", "notes", "--ticket", "DOC-1"); err != nil {
-			t.Fatalf("doc delete: %v", err)
-		}
-	})
+	deleted, err := runCLI(t, "--db", path, "doc", "delete", "notes", "--ticket", "DOC-1")
+	if err != nil {
+		t.Fatalf("doc delete: %v", err)
+	}
 	if !strings.Contains(deleted, "Deleted Notes.md") {
 		t.Fatalf("doc delete printed %q", deleted)
 	}
@@ -101,27 +95,24 @@ func TestDocCommands(t *testing.T) {
 	if err := os.WriteFile(page, []byte("<h1>ok</h1>"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	addedHTML := captureStdout(t, func() {
-		if _, err := runCLI(t, "--db", path, "doc", "add", "DOC-1", "--file", page); err != nil {
-			t.Fatalf("doc add html: %v", err)
-		}
-	})
+	addedHTML, err := runCLI(t, "--db", path, "doc", "add", "DOC-1", "--file", page)
+	if err != nil {
+		t.Fatalf("doc add html: %v", err)
+	}
 	if !strings.Contains(addedHTML, "Added document Load test.html") || !strings.Contains(addedHTML, "doc=Load+test.html") {
 		t.Fatalf("doc add html printed %q", addedHTML)
 	}
-	shownHTML := captureStdout(t, func() {
-		if _, err := runCLI(t, "--db", path, "doc", "show", "Load test.html", "--ticket", "DOC-1"); err != nil {
-			t.Fatalf("doc show html: %v", err)
-		}
-	})
+	shownHTML, err := runCLI(t, "--db", path, "doc", "show", "Load test.html", "--ticket", "DOC-1")
+	if err != nil {
+		t.Fatalf("doc show html: %v", err)
+	}
 	if shownHTML != "<h1>ok</h1>" {
 		t.Fatalf("doc show html printed %q", shownHTML)
 	}
-	namedHTML := captureStdout(t, func() {
-		if _, err := runCLI(t, "--db", path, "doc", "add", "DOC-1", "--file", page, "--name", "Chart"); err != nil {
-			t.Fatalf("doc add html with --name: %v", err)
-		}
-	})
+	namedHTML, err := runCLI(t, "--db", path, "doc", "add", "DOC-1", "--file", page, "--name", "Chart")
+	if err != nil {
+		t.Fatalf("doc add html with --name: %v", err)
+	}
 	if !strings.Contains(namedHTML, "Added document Chart.html") {
 		t.Fatalf("doc add html with --name printed %q", namedHTML)
 	}
@@ -169,38 +160,34 @@ func TestDocCommandsOnEpics(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	added := captureStdout(t, func() {
-		if _, err := runCLIWithInput(t, "# r", "--db", path, "doc", "add", "--epic", "Launch", "--project", "DOC", "--name", "Rollout", "--file", "-"); err != nil {
-			t.Fatalf("doc add on epic: %v", err)
-		}
-	})
+	added, err := runCLIWithInput(t, "# r", "--db", path, "doc", "add", "--epic", "Launch", "--project", "DOC", "--name", "Rollout", "--file", "-")
+	if err != nil {
+		t.Fatalf("doc add on epic: %v", err)
+	}
 	if !strings.Contains(added, "Added document Rollout.md") || !strings.Contains(added, "/epics?project=DOC&epic=Launch&doc=Rollout.md") {
 		t.Fatalf("doc add printed %q", added)
 	}
-	listed := captureStdout(t, func() {
-		if _, err := runCLI(t, "--db", path, "doc", "list", "--epic", "launch", "--project", "doc"); err != nil {
-			t.Fatalf("doc list on epic: %v", err)
-		}
-	})
+	listed, err := runCLI(t, "--db", path, "doc", "list", "--epic", "launch", "--project", "doc")
+	if err != nil {
+		t.Fatalf("doc list on epic: %v", err)
+	}
 	if !strings.Contains(listed, "Rollout.md") || !strings.Contains(listed, "/epics?project=DOC&epic=Launch&doc=Rollout.md") {
 		t.Fatalf("doc list printed %q", listed)
 	}
-	shown := captureStdout(t, func() {
-		if _, err := runCLI(t, "--db", path, "doc", "show", "Rollout", "--epic", "Launch", "--project", "DOC"); err != nil {
-			t.Fatalf("doc show on epic: %v", err)
-		}
-	})
+	shown, err := runCLI(t, "--db", path, "doc", "show", "Rollout", "--epic", "Launch", "--project", "DOC")
+	if err != nil {
+		t.Fatalf("doc show on epic: %v", err)
+	}
 	if shown != "# r" {
 		t.Fatalf("doc show printed %q", shown)
 	}
 	if _, err := runCLIWithInput(t, "# v2", "--db", path, "doc", "write", "rollout.md", "--epic", "Launch", "--project", "DOC", "--file", "-"); err != nil {
 		t.Fatalf("doc write on epic: %v", err)
 	}
-	renamed := captureStdout(t, func() {
-		if _, err := runCLI(t, "--db", path, "doc", "rename", "Rollout", "Go live", "--epic", "Launch", "--project", "DOC"); err != nil {
-			t.Fatalf("doc rename on epic: %v", err)
-		}
-	})
+	renamed, err := runCLI(t, "--db", path, "doc", "rename", "Rollout", "Go live", "--epic", "Launch", "--project", "DOC")
+	if err != nil {
+		t.Fatalf("doc rename on epic: %v", err)
+	}
 	if !strings.Contains(renamed, "Renamed to Go live.md") || !strings.Contains(renamed, "&epic=Launch&doc=Go+live.md") {
 		t.Fatalf("doc rename printed %q", renamed)
 	}
@@ -208,19 +195,17 @@ func TestDocCommandsOnEpics(t *testing.T) {
 	if _, err := runCLIWithInput(t, "t", "--db", path, "doc", "add", "DOC-1", "--name", "Go live", "--file", "-"); err != nil {
 		t.Fatalf("doc add on ticket beside the epic's: %v", err)
 	}
-	deleted := captureStdout(t, func() {
-		if _, err := runCLI(t, "--db", path, "doc", "delete", "go live", "--epic", "Launch", "--project", "DOC"); err != nil {
-			t.Fatalf("doc delete on epic: %v", err)
-		}
-	})
+	deleted, err := runCLI(t, "--db", path, "doc", "delete", "go live", "--epic", "Launch", "--project", "DOC")
+	if err != nil {
+		t.Fatalf("doc delete on epic: %v", err)
+	}
 	if !strings.Contains(deleted, "Deleted Go live.md") {
 		t.Fatalf("doc delete printed %q", deleted)
 	}
-	ticketDocs := captureStdout(t, func() {
-		if _, err := runCLI(t, "--db", path, "doc", "list", "DOC-1"); err != nil {
-			t.Fatalf("doc list on ticket: %v", err)
-		}
-	})
+	ticketDocs, err := runCLI(t, "--db", path, "doc", "list", "DOC-1")
+	if err != nil {
+		t.Fatalf("doc list on ticket: %v", err)
+	}
 	if !strings.Contains(ticketDocs, "Go live.md") {
 		t.Fatalf("deleting the epic's document touched the ticket's: %q", ticketDocs)
 	}
