@@ -1,4 +1,4 @@
-import { Calendar, Check, CheckCircle2, EyeOff, Layers } from "lucide-react";
+import { Calendar, Check, CheckCircle2, EyeOff, Layers, Paperclip } from "lucide-react";
 import type { EpicRef, Ticket } from "../api/client";
 import { attentionClasses } from "../lib/attention";
 import type { GraphNode } from "../lib/graphLayout";
@@ -26,6 +26,31 @@ function SubtaskProgress({ subtasks }: { subtasks: Ticket["subtasks"] }) {
       <span>
         {done}/{subtasks.length}
       </span>
+    </div>
+  );
+}
+
+// Subtask progress and, beside it, a paperclip with how many documents the
+// ticket has. Either can be missing; with neither, nothing shows.
+function CardFooter({ ticket }: { ticket: Ticket }) {
+  const documents = ticket.documentCount ?? 0;
+  const hasSubtasks = (ticket.subtasks?.length ?? 0) > 0;
+  if (!hasSubtasks && documents === 0) return null;
+  return (
+    <div className="flex items-center gap-3">
+      <div className="min-w-0 flex-1">
+        <SubtaskProgress subtasks={ticket.subtasks} />
+      </div>
+      {documents > 0 && (
+        <span
+          data-testid="card-documents"
+          title={`${documents} document${documents === 1 ? "" : "s"}`}
+          className="inline-flex shrink-0 items-center gap-1 text-xs text-slate-500"
+        >
+          <Paperclip aria-hidden="true" className="h-3 w-3" />
+          {documents}
+        </span>
+      )}
     </div>
   );
 }
@@ -174,7 +199,7 @@ export default function TicketCard({
           {new Date(ticket.dueDate).toLocaleDateString()}
         </div>
       )}
-      <SubtaskProgress subtasks={ticket.subtasks} />
+      <CardFooter ticket={ticket} />
     </div>
   );
 }

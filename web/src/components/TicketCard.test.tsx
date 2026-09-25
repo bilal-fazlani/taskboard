@@ -178,3 +178,19 @@ describe("TicketCard's review rounds", () => {
     expect(screen.queryByText(/review ×/)).toBeNull();
   });
 });
+
+describe("TicketCard's documents", () => {
+  it("shows a paperclip with the document count, and nothing without documents", () => {
+    const { unmount } = render(<TicketCard ticket={makeTicket({ documentCount: 2 })} />);
+    expect(screen.getByTestId("card-documents").textContent).toBe("2");
+    expect(screen.getByTestId("card-documents").getAttribute("title")).toBe("2 documents");
+    unmount();
+    render(<TicketCard ticket={makeTicket({ documentCount: 0 })} />);
+    expect(screen.queryByTestId("card-documents")).toBeNull();
+  });
+
+  it("shows on the graph card too", () => {
+    render(<TicketCard ticket={makeTicket({ documentCount: 1 })} graph={GRAPH} />);
+    expect(screen.getByTestId("card-documents").getAttribute("title")).toBe("1 document");
+  });
+});

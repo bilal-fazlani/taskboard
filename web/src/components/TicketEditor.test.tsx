@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { BrowserRouter } from "react-router-dom";
 import type { Project, StatusChange, Subtask, Ticket } from "../api/client";
 
 // The editor and its pickers only talk to the API through this module, so
@@ -21,6 +22,13 @@ const mockApi = vi.hoisted(() => ({
   },
   epics: {
     list: vi.fn(),
+  },
+  documents: {
+    list: vi.fn(),
+    get: vi.fn(),
+    update: vi.fn(),
+    delete: vi.fn(),
+    downloadUrl: (id: string) => `/api/documents/${id}/download`,
   },
 }));
 
@@ -86,6 +94,9 @@ function renderEditor(
       onDirtyChange={onDirtyChange}
       {...extra}
     />,
+    // The editor keeps the open document in the URL. BrowserRouter, like the
+    // app, since the history helpers read window.location.
+    { wrapper: BrowserRouter },
   );
   const rerenderWith = (props: { closeRequested?: boolean; ticket?: Ticket }) =>
     utils.rerender(
@@ -113,6 +124,8 @@ const epicList = (...names: string[]) => ({
 });
 
 beforeEach(() => {
+  window.history.replaceState(null, "", "/");
+  mockApi.documents.list.mockResolvedValue([]);
   mockApi.epics.list.mockResolvedValue(epicList());
   mockApi.tickets.get.mockImplementation((id: string) => Promise.resolve(makeTicket({ id })));
   mockApi.tickets.list.mockResolvedValue([]);
@@ -1278,5 +1291,52 @@ describe("the Activity section", () => {
     await waitFor(() => expect(mockApi.tickets.history).toHaveBeenCalled());
     expect(screen.getByRole("heading", { name: "Activity" })).toBeTruthy();
     expect(screen.queryAllByTestId("activity-entry")).toHaveLength(0);
+  });
+});
+
+describe("documents", () => {
+  const spec = {
+    id: "d1",
+    name: "Design spec",
+    format: "markdown" as const,
+    size: 10,
+    revision: 1,
+    createdAt: "2026-09-25T09:00:00Z",
+    updatedAt: "2026-09-25T09:00:00Z",
+  };
+
+  it("lists the ticket's documents and opens one over the editor", async () => {
+    mockApi.documents.list.mockResolvedValue([spec]);
+    mockApi.documents.get.mockResolvedValue({ ...spec, content: "# Hello" });
+    const { onClose } = renderEditor();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Design spec.md" }));
+    expect(await screen.findByRole("dialog", { name: "Design spec.md" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Hello" })).toBeTruthy();
+    expect(new URLSearchParams(window.location.search).get("doc")).toBe("Design spec.md");
+
+    // Escape closes the document, not the editor.
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Design spec.md" })).toBeNull());
+    expect(onClose).not.toHaveBeenCalled();
+    expect(new URLSearchParams(window.location.search).get("doc")).toBeNull();
+  });
+
+  it("opens the document a link names, and says when a link names none", async () => {
+    mockApi.documents.list.mockResolvedValue([spec]);
+    mockApi.documents.get.mockResolvedValue({ ...spec, content: "x" });
+    window.history.replaceState(null, "", "/?ticket=AUTH-7&doc=Design%20spec.html");
+    renderEditor();
+
+    expect(await screen.findByText("Couldn't find Design spec.html on this ticket.")).toBeTruthy();
+    expect(screen.queryByRole("dialog", { name: "Design spec.md" })).toBeNull();
+  });
+
+  it("puts the Documents section between Subtasks and Activity", async () => {
+    renderEditor();
+    const headings = (await screen.findAllByRole("heading", { level: 3 })).map((h) => h.textContent);
+    const subtasks = headings.indexOf("Subtasks");
+    expect(headings.indexOf("Documents")).toBe(subtasks + 1);
+    expect(headings.indexOf("Activity")).toBe(subtasks + 2);
   });
 });

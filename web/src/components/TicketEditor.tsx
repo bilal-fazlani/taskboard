@@ -11,10 +11,14 @@ import {
   type TicketWrite,
 } from "../api/client";
 import ActivityList from "./ActivityList";
+import DocumentModal from "./DocumentModal";
+import DocumentsSection from "./DocumentsSection";
 import LabelPicker from "./LabelPicker";
 import RepoPicker from "./RepoPicker";
 import DependencyPicker, { TicketRefLabel } from "./DependencyPicker";
 import { activityEntries } from "../lib/activity";
+import { useDocParam } from "../hooks/useDocParam";
+import { useOwnerDocuments } from "../hooks/useOwnerDocuments";
 import { saveErrorMessage } from "../lib/saveError";
 import { STATUSES, STATUS_LABELS, STATUS_STYLES, isStatus } from "../lib/status";
 import {
@@ -210,6 +214,12 @@ export default function TicketEditor({
       cancelled = true;
     };
   }, [ticket.id, ticket.updatedAt]);
+
+  // The ticket's documents, loaded here and refreshed on every live change,
+  // and the one the URL has open over the editor.
+  const { documents, failed: documentsFailed, reload: reloadDocuments } = useOwnerDocuments({ ticketId: ticket.id });
+  const docParam = useDocParam(documents);
+  const docOpen = docParam.selected !== null;
 
   // The full ticket, fetched on open and again whenever the ticket the editor
   // was handed changes — which is how an edit made elsewhere, arriving as a
@@ -454,6 +464,7 @@ export default function TicketEditor({
         aria-labelledby={keyId}
         tabIndex={-1}
         onKeyDown={handleTrapTab}
+        inert={docOpen}
         className="relative mx-auto flex h-full w-full max-w-[96rem] flex-col overflow-hidden rounded-xl border border-slate-700 bg-slate-900 shadow-2xl focus:outline-none"
       >
         <header
@@ -670,6 +681,15 @@ export default function TicketEditor({
               </form>
             </div>
 
+            <DocumentsSection
+              documents={documents}
+              failed={documentsFailed}
+              notice={docParam.notice}
+              onDismissNotice={docParam.dismissNotice}
+              onOpen={docParam.open}
+              onChanged={reloadDocuments}
+            />
+
             {/* Last in this column. Agent requests and comments join this list as more kinds of entry. */}
             <div>
               <h3 className={SECTION_HEADING}>Activity</h3>
@@ -852,6 +872,25 @@ export default function TicketEditor({
           <DiscardConfirm ref={confirmRef} onCancel={cancelDiscard} onDiscard={acceptDiscard} />
         )}
       </div>
+
+      {/* A sibling of the dialog, not inside it, so the editor's Tab trap never
+          sees the document's keys; the editor is inert while it is open. */}
+      {docParam.selected && (
+        <DocumentModal
+          doc={docParam.selected}
+          documents={documents ?? []}
+          ownerLabel={ticketKey}
+          onClose={docParam.close}
+          onRenamed={(doc) => {
+            docParam.renamed(doc);
+            reloadDocuments();
+          }}
+          onDeleted={() => {
+            docParam.close();
+            reloadDocuments();
+          }}
+        />
+      )}
     </div>
   );
 }
