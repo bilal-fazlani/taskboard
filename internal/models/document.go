@@ -8,19 +8,57 @@ import (
 
 // Document formats. The format is chosen when a document is created and never
 // changes; the name carries no extension, and the UI shows one based on this.
+// Markdown and HTML documents hold text; the others are images, whose bytes
+// live apart from the document's details (see the store).
 const (
 	DocumentFormatMarkdown = "markdown"
 	DocumentFormatHTML     = "html"
+	DocumentFormatPNG      = "png"
+	DocumentFormatJPEG     = "jpeg"
+	DocumentFormatGIF      = "gif"
+	DocumentFormatWebP     = "webp"
 )
+
+// ImageFormats are the formats that are images, in the order messages list
+// them.
+var ImageFormats = []string{DocumentFormatPNG, DocumentFormatJPEG, DocumentFormatGIF, DocumentFormatWebP}
+
+// IsImageFormat reports whether format is one of the image formats.
+func IsImageFormat(format string) bool {
+	switch format {
+	case DocumentFormatPNG, DocumentFormatJPEG, DocumentFormatGIF, DocumentFormatWebP:
+		return true
+	}
+	return false
+}
+
+// ImageMediaType is the Content-Type an image format is served with, and ""
+// for a format that is not an image.
+func ImageMediaType(format string) string {
+	if IsImageFormat(format) {
+		return "image/" + format
+	}
+	return ""
+}
 
 // MaxDocumentBytes is the largest content a document may hold, in bytes of
 // UTF-8. A larger save is refused, never truncated.
 const MaxDocumentBytes = 8 << 20
 
 // DocumentExtension is the extension a format is shown and downloaded with.
+// A JPEG shows as ".jpg", however it was named when it was attached.
 func DocumentExtension(format string) string {
-	if format == DocumentFormatHTML {
+	switch format {
+	case DocumentFormatHTML:
 		return ".html"
+	case DocumentFormatPNG:
+		return ".png"
+	case DocumentFormatJPEG:
+		return ".jpg"
+	case DocumentFormatGIF:
+		return ".gif"
+	case DocumentFormatWebP:
+		return ".webp"
 	}
 	return ".md"
 }
@@ -45,8 +83,10 @@ func FormatSize(bytes int) string {
 }
 
 // DocumentMeta is a document without its content: what lists and a ticket's
-// or an epic's details carry. Exactly one of TicketID and EpicID is set. Size is the content's length in bytes. Revision counts
-// content saves, starting at 1; a rename leaves it alone.
+// or an epic's details carry. Exactly one of TicketID and EpicID is set. Size is the content's length in bytes (an image's: its
+// file's). Revision counts content saves, starting at 1; a rename leaves it
+// alone. Width and Height are set for images only: the size in pixels the
+// picture shows at, with its orientation applied.
 type DocumentMeta struct {
 	ID        string    `json:"id"`
 	TicketID  string    `json:"ticketId,omitempty"`
@@ -54,6 +94,8 @@ type DocumentMeta struct {
 	Name      string    `json:"name"`
 	Format    string    `json:"format"`
 	Size      int       `json:"size"`
+	Width     int       `json:"width,omitempty"`
+	Height    int       `json:"height,omitempty"`
 	Revision  int       `json:"revision"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
@@ -63,7 +105,8 @@ type DocumentMeta struct {
 	URL string `json:"url,omitempty"`
 }
 
-// Document is a document with its content.
+// Document is a document with its content. An image's Content is always
+// empty: its bytes are read on their own (the store's GetDocumentImage).
 type Document struct {
 	DocumentMeta
 	Content string `json:"content"`
@@ -78,6 +121,16 @@ type CreateDocumentRequest struct {
 	// Format defaults to markdown when empty.
 	Format  string `json:"format,omitempty"`
 	Content string `json:"content"`
+}
+
+// CreateImageRequest attaches an image: Data is the file as uploaded, which
+// the store checks against Format and stores with its metadata removed.
+type CreateImageRequest struct {
+	TicketID string
+	EpicID   string
+	Name     string
+	Format   string
+	Data     []byte
 }
 
 // UpdateDocumentRequest changes only the fields that are non-nil. Content
