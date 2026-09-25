@@ -1332,6 +1332,26 @@ describe("documents", () => {
     expect(screen.queryByRole("dialog", { name: "Design spec.md" })).toBeNull();
   });
 
+  it("lets Escape cancel the discard question, not a rename open under it", async () => {
+    mockApi.documents.list.mockResolvedValue([spec]);
+    const { onClose } = renderEditor();
+    fireEvent.click(await screen.findByRole("button", { name: "Rename Design spec.md" }));
+    expect(screen.getByRole("textbox", { name: "Document name" })).toBeTruthy();
+    editTitle();
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(confirmDialog()).not.toBeNull();
+
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    expect(confirmDialog()).toBeNull();
+    expect(screen.getByRole("textbox", { name: "Document name" })).toBeTruthy();
+    expect(onClose).not.toHaveBeenCalled();
+
+    // With the question gone, Escape reaches the rename again.
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    expect(screen.queryByRole("textbox", { name: "Document name" })).toBeNull();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
   it("puts the Documents section between Subtasks and Activity", async () => {
     renderEditor();
     const headings = (await screen.findAllByRole("heading", { level: 3 })).map((h) => h.textContent);

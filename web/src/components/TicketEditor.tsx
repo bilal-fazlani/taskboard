@@ -17,6 +17,7 @@ import LabelPicker from "./LabelPicker";
 import RepoPicker from "./RepoPicker";
 import DependencyPicker, { TicketRefLabel } from "./DependencyPicker";
 import { activityEntries } from "../lib/activity";
+import { useEscape } from "../lib/escapeStack";
 import { useDocParam } from "../hooks/useDocParam";
 import { useOwnerDocuments } from "../hooks/useOwnerDocuments";
 import { saveErrorMessage } from "../lib/saveError";
@@ -344,19 +345,19 @@ export default function TicketEditor({
     action?.();
   };
 
-  // Escape asks to close the editor, or cancels the discard confirm while it
-  // is open. A control that handles Escape itself (and calls preventDefault)
-  // keeps it.
+  // Escape asks to close the editor. A layer over it (the discard confirm, a
+  // document, a rename field) takes Escape first through lib/escapeStack,
+  // which marks the event handled, and so does any control that handles
+  // Escape itself; this listener leaves a handled event alone.
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key !== "Escape" || e.defaultPrevented || e.isComposing) return;
+      if (e.key !== "Escape" || e.defaultPrevented || e.isComposing || confirmOpen) return;
       e.preventDefault();
-      if (confirmOpen) cancelDiscard();
-      else requestClose();
+      requestClose();
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [confirmOpen, cancelDiscard, requestClose]);
+  }, [confirmOpen, requestClose]);
 
   // Keep Tab and Shift+Tab inside the dialog, or inside the confirm while it
   // is open.
@@ -896,8 +897,9 @@ export default function TicketEditor({
 }
 
 // "Discard unsaved changes?", shown over the editor. Focus starts on the safe
-// choice; a click beside the box cancels, and so does Escape (handled by the
-// editor, which knows the confirm is open).
+// choice; a click beside the box cancels, and so does Escape: the confirm is
+// the topmost Escape layer while it is open, above a rename field or anything
+// else the editor has open under it.
 function DiscardConfirm({
   ref,
   onCancel,
@@ -909,6 +911,7 @@ function DiscardConfirm({
 }) {
   const ids = useId();
   const cancelRef = useRef<HTMLButtonElement>(null);
+  useEscape(onCancel);
 
   useEffect(() => {
     cancelRef.current?.focus();

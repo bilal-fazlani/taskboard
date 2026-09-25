@@ -1,7 +1,8 @@
 // Escape closes the topmost layer only: a confirm over the document modal,
-// the modal over the ticket editor. Layers register here and one capturing
-// listener calls the newest. It marks the event handled, so the ticket
-// editor's own Escape listener, which skips handled events, leaves it alone.
+// the modal over the ticket editor, the editor's discard confirm over a
+// rename field. Layers register here and one capturing listener calls the
+// newest. It marks the event handled, so the ticket editor's own Escape
+// listener, which skips handled events, leaves it alone.
 import { useEffect, useRef } from "react";
 
 const stack: Array<() => void> = [];
