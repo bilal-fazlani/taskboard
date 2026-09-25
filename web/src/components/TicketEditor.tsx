@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { X, Trash2, CheckCircle2, Circle, Pencil, Eye, Copy, Check, RefreshCw, AlertTriangle } from "lucide-react";
-import Markdown from "react-markdown";
 import {
   api,
   type EpicRef,
@@ -12,6 +11,7 @@ import {
 } from "../api/client";
 import ActivityList from "./ActivityList";
 import DocumentModal from "./DocumentModal";
+import OwnerMarkdown from "./OwnerMarkdown";
 import DocumentsSection from "./DocumentsSection";
 import LabelPicker from "./LabelPicker";
 import RepoPicker from "./RepoPicker";
@@ -631,7 +631,7 @@ export default function TicketEditor({
                   data-testid="description-preview"
                   className="prose-card min-h-[16rem] overflow-y-auto rounded-lg border border-slate-700 bg-slate-800/50 px-3 py-2"
                 >
-                  <Markdown>{description}</Markdown>
+                  <OwnerMarkdown documents={documents}>{description}</OwnerMarkdown>
                 </div>
               ) : (
                 <div

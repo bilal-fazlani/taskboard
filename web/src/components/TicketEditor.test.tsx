@@ -998,6 +998,34 @@ describe("description", () => {
     fireEvent.click(screen.getByText("Add a description…"));
     expect(screen.getByLabelText("Description")).toBeTruthy();
   });
+
+  const shot = {
+    id: "img1", ticketId: "t1", name: "Login screen", format: "png" as const, size: 10, revision: 1,
+    createdAt: "2026-09-25T09:00:00Z", updatedAt: "2026-09-25T09:00:00Z",
+  };
+  const shotSrc = "/api/documents/img1/image?rev=1";
+  const srcs = () => Array.from(screen.getByTestId("description-preview").querySelectorAll("img")).map((i) => i.getAttribute("src"));
+
+  it("shows the ticket's images by name in the read view", async () => {
+    mockApi.documents.list.mockResolvedValue([shot]);
+    const described = makeTicket({ description: "![a](Login screen.png)\n\n![b](<login screen.PNG>)\n\n![c](Login%20screen.png)" });
+    mockApi.tickets.get.mockResolvedValue(described);
+    renderEditor(described);
+    await waitFor(() => expect(srcs()).toEqual([shotSrc, shotSrc, shotSrc]));
+    expect(screen.queryByTestId("missing-image")).toBeNull();
+  });
+
+  it("shows them in Preview as they are typed, and marks an unknown name missing", async () => {
+    mockApi.documents.list.mockResolvedValue([shot]);
+    renderEditor(makeTicket({ description: "" }));
+    await waitFor(() => expect(mockApi.documents.list).toHaveBeenCalled());
+    fireEvent.change(screen.getByLabelText("Description"), {
+      target: { value: "![shot](Login screen.png) ![logo](https://example.com/logo.png) ![x](Elsewhere.png)" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Preview" }));
+    await waitFor(() => expect(srcs()).toEqual([shotSrc, "https://example.com/logo.png"]));
+    expect(screen.getByTestId("missing-image").textContent).toBe("Missing image: Elsewhere.png");
+  });
 });
 
 describe("fields", () => {

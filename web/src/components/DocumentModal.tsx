@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { Download, Eye, Pencil, Trash2, X } from "lucide-react";
-import Markdown from "react-markdown";
 import { api, type DocumentMeta, type DocumentOwnerRef, type DocumentWithContent } from "../api/client";
 import { activityTime } from "../lib/activity";
 import {
@@ -21,6 +20,7 @@ import DeleteDocumentConfirm from "./DeleteDocumentConfirm";
 import DiscardChangesConfirm from "./DiscardChangesConfirm";
 import DocumentRenameField from "./DocumentRenameField";
 import ImageView, { ImageViewerControls, ImageViewerFooter, type ImageZoom } from "./ImageViewer";
+import OwnerMarkdown from "./OwnerMarkdown";
 
 // The HTML document's frame is in the Tab order, so the keyboard can reach
 // and scroll the page.
@@ -355,7 +355,7 @@ export default function DocumentModal({
   } else if (editing && base !== null) {
     body = draft ? (
       <div data-testid="document-preview" className="prose-card">
-        <Markdown>{draft}</Markdown>
+        <OwnerMarkdown documents={documents} ownerNoun={ownerNoun}>{draft}</OwnerMarkdown>
       </div>
     ) : (
       <p className="text-sm text-slate-600">Nothing to preview.</p>
@@ -366,7 +366,7 @@ export default function DocumentModal({
   else
     body = (
       <div data-testid="document-content" className="prose-card">
-        <Markdown>{saved.content}</Markdown>
+        <OwnerMarkdown documents={documents} ownerNoun={ownerNoun}>{saved.content}</OwnerMarkdown>
       </div>
     );
 

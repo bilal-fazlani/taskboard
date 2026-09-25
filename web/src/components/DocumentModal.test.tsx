@@ -101,6 +101,39 @@ describe("DocumentModal", () => {
   });
 });
 
+describe("images in a markdown document", () => {
+  const shot: DocumentMeta = {
+    id: "img1", name: "Login screen", format: "png", size: 10, revision: 4,
+    createdAt: "2026-09-25T09:00:00Z", updatedAt: "2026-09-25T09:00:00Z",
+  };
+  const shotSrc = "/api/documents/img1/image?rev=4";
+  const srcs = (testId: string) =>
+    Array.from(screen.getByTestId(testId).querySelectorAll("img")).map((i) => i.getAttribute("src"));
+
+  it("shows the owner's images by name, and marks others missing", async () => {
+    mockApi.documents.get.mockResolvedValue({
+      ...spec,
+      content: "![a](Login screen.png) ![b](<Login screen.png>) ![c](LOGIN%20SCREEN.png) ![d](Other.png)",
+    });
+    setup(spec, { documents: [spec, shot], owner: { epicId: "e1" }, ownerNoun: "epic" });
+    await waitFor(() => expect(srcs("document-content")).toEqual([shotSrc, shotSrc, shotSrc]));
+    const missing = screen.getByTestId("missing-image");
+    expect(missing.textContent).toBe("Missing image: Other.png");
+    expect(missing.getAttribute("title")).toBe('This epic has no image called "Other.png".');
+  });
+
+  it("shows them in the edit Preview", async () => {
+    mockApi.documents.get.mockResolvedValue({ ...spec, content: "x" });
+    setup(spec, { documents: [spec, shot] });
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    fireEvent.change(await screen.findByRole("textbox", { name: "Document content" }), {
+      target: { value: "![shot](Login screen.png)" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Preview" }));
+    expect(srcs("document-preview")).toEqual([shotSrc]);
+  });
+});
+
 describe("editing", () => {
   const load = (content: string, revision = 1) =>
     mockApi.documents.get.mockResolvedValue({ ...spec, revision, content });
