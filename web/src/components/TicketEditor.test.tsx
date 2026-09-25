@@ -1895,6 +1895,17 @@ describe("image documents", () => {
     expect(docParam()).toBeNull();
   });
 
+  it("keeps focus in the viewer when → from the focused 100% view steps to the next image", async () => {
+    await openFirst();
+    const viewer = screen.getByRole("dialog", { name: "One.png" });
+    fireEvent.click(within(viewer).getByRole("button", { name: "100%" }));
+    const region = within(viewer).getByTestId("image-scroll");
+    region.focus();
+    fireEvent.keyDown(region, { key: "ArrowRight" });
+    expect(await screen.findByRole("dialog", { name: "Two.jpg" })).toBe(viewer);
+    expect(document.activeElement).toBe(viewer);
+  });
+
   it("closes on one Back after stepping", async () => {
     await openFirst();
     fireEvent.keyDown(document.body, { key: "ArrowRight" });

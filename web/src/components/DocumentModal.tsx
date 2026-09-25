@@ -137,6 +137,16 @@ export default function DocumentModal({
   const stepPaused = renaming || deleting || asking;
   useImageStepping(image ? doc : null, images, onStep, stepPaused);
 
+  // A step can take the focused element with it (the 100% view is one per
+  // image, and each image opens fitted): focus then stays in the window.
+  const shownId = useRef(doc.id);
+  useEffect(() => {
+    if (shownId.current === doc.id) return;
+    shownId.current = doc.id;
+    const root = dialogRef.current;
+    if (root && !root.contains(document.activeElement)) root.focus();
+  }, [doc.id]);
+
   // The fetch reads these without re-running on each keystroke.
   const editingRef = useRef(editing);
   const baseRef = useRef(base);
