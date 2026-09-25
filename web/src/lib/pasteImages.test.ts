@@ -27,6 +27,11 @@ describe("pastedImageName", () => {
     expect(pastedImageName(["pasted IMAGE"])).toBe("Pasted image 2");
     expect(pastedImageName(["Pasted image", "Pasted image 2", "pasted image 4"])).toBe("Pasted image 3");
   });
+
+  it("skips a name the text still mentions, such as a failed upload's reference", () => {
+    expect(pastedImageName([], "See ![](pasted image.png)")).toBe("Pasted image 2");
+    expect(pastedImageName(["Pasted image"], "![](Pasted image 2.png) and Pasted image 23.png")).toBe("Pasted image 3");
+  });
 });
 
 describe("prepareImage", () => {

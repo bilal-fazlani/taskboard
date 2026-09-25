@@ -162,6 +162,9 @@ export function usePasteImages({
     ...[...takenByServer.current].map((name) => ({ id: "", name, format: "png" as DocumentFormat })),
   ];
 
+  // The text as it is and as last saved, whose image names a paste avoids.
+  const mentioned = () => `${seen.current}\n${latest.current.savedText?.() ?? ""}`;
+
   // Replaces `text` at `start` with `replacement`, if it is still there, as
   // an edit of the user's own would: natively when the textarea has focus
   // (keeping the caret where it was), through onChange otherwise.
@@ -228,7 +231,7 @@ export function usePasteImages({
         // and its reference says so.
         takenByServer.current.add(image.name);
         claims.current.delete(id);
-        const renamed = prepareImage(image.file, takenNames(), latest.current.ownerNoun, pastedImageName(takenNames().map((d) => d.name)));
+        const renamed = prepareImage(image.file, takenNames(), latest.current.ownerNoun, pastedImageName(takenNames().map((d) => d.name), mentioned()));
         if (!("error" in renamed)) {
           const text = imageReference(renamed.shown);
           const start = ref.start;
@@ -256,7 +259,7 @@ export function usePasteImages({
     const refused: ImageUploadProblem[] = [];
     for (const file of files) {
       const taken = takenNames();
-      const name = pasted ? pastedImageName(taken.map((d) => d.name)) : undefined;
+      const name = pasted ? pastedImageName(taken.map((d) => d.name), mentioned()) : undefined;
       const image = prepareImage(file, taken, ownerNoun, name);
       const id = ++seq.current;
       if ("error" in image) {

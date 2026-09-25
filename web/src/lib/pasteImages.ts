@@ -32,14 +32,19 @@ function extensionForType(type: string): string {
 
 /**
  * The first free "Pasted image", "Pasted image 2", "Pasted image 3"… among
- * `taken` (names without extensions), ignoring case.
+ * `taken` (names without extensions), ignoring case. A name `text` already
+ * mentions with an extension ("Pasted image 2.png", say a reference left by
+ * an upload that failed) is not free either, so a new image never answers
+ * an old reference.
  */
-export function pastedImageName(taken: Iterable<string>): string {
+export function pastedImageName(taken: Iterable<string>, text = ""): string {
   const lower = new Set([...taken].map((n) => n.toLowerCase()));
-  if (!lower.has(PASTED_IMAGE_NAME.toLowerCase())) return PASTED_IMAGE_NAME;
+  const mentioned = text.toLowerCase();
+  const free = (name: string) => !lower.has(name.toLowerCase()) && !mentioned.includes(`${name.toLowerCase()}.`);
+  if (free(PASTED_IMAGE_NAME)) return PASTED_IMAGE_NAME;
   for (let n = 2; ; n++) {
     const name = `${PASTED_IMAGE_NAME} ${n}`;
-    if (!lower.has(name.toLowerCase())) return name;
+    if (free(name)) return name;
   }
 }
 

@@ -358,6 +358,14 @@ describe("usePasteImages: checks and failures", () => {
     expect(textarea().value).toBe("![](Pasted image.png)");
   });
 
+  it("never names a new paste after an image the text or the saved text still refers to", () => {
+    mockApi.documents.createImage.mockReturnValue(new Promise(() => {}));
+    render(<Harness initial="Old ![](Pasted image.png) " saved="![](Pasted image 2.png)" />);
+    place(0);
+    paste([image("image.png")]);
+    expect(textarea().value).toBe("![](Pasted image 3.png)Old ![](Pasted image.png) ");
+  });
+
   it("says images wait for an owner that does not exist yet, and leaves the text alone", () => {
     render(<Harness owner={null} documents={null} initial="New" />);
     place(3);
