@@ -64,8 +64,19 @@ func TestDocumentNameFromFilename(t *testing.T) {
 	wantInvalid(t, err, msgDocExtension)
 	_, _, err = DocumentNameFromFilename("README")
 	wantInvalid(t, err, msgDocExtension)
-	_, _, err = DocumentNameFromFilename("report.html")
-	wantInvalid(t, err, msgDocExtension)
+	for _, tc := range []struct{ file, name string }{
+		{"report.html", "report"},
+		{"Load test.HTM", "Load test"},
+		{"/tmp/x/Report.Html", "Report"},
+	} {
+		name, format, err := DocumentNameFromFilename(tc.file)
+		if err != nil || name != tc.name || format != models.DocumentFormatHTML {
+			t.Errorf("DocumentNameFromFilename(%q) = %q, %q, %v; want %q, html", tc.file, name, format, err, tc.name)
+		}
+	}
+	if msgDocExtension != "Only .md, .html and .htm files can be attached." {
+		t.Errorf("msgDocExtension = %q", msgDocExtension)
+	}
 	// Nothing left once the extension and symbols go.
 	for _, empty := range []string{"%%.md", "...md", ".md"} {
 		_, _, err = DocumentNameFromFilename(empty)
@@ -116,8 +127,15 @@ func TestCreateDocumentRules(t *testing.T) {
 	wantInvalid(t, err, `This ticket already has a document called "Étude.md".`)
 	_, err = s.CreateDocument(models.CreateDocumentRequest{TicketID: tk.ID, Name: "plan.md"})
 	wantInvalid(t, err, msgDocNameChars)
-	_, err = s.CreateDocument(models.CreateDocumentRequest{TicketID: tk.ID, Name: "Report", Format: models.DocumentFormatHTML})
-	wantInvalid(t, err, msgDocFormat)
+	html, err := s.CreateDocument(models.CreateDocumentRequest{TicketID: tk.ID, Name: "Report", Format: models.DocumentFormatHTML, Content: "<h1>x</h1>"})
+	if err != nil || html.Format != models.DocumentFormatHTML || html.Content != "<h1>x</h1>" {
+		t.Fatalf("html create = %+v, %v", html, err)
+	}
+	_, err = s.CreateDocument(models.CreateDocumentRequest{TicketID: tk.ID, Name: "Deck", Format: "pdf"})
+	wantInvalid(t, err, `Format must be "markdown" or "html".`)
+	// A name is taken whatever the format: Report.md cannot join Report.html.
+	_, err = s.CreateDocument(models.CreateDocumentRequest{TicketID: tk.ID, Name: "report"})
+	wantInvalid(t, err, `This ticket already has a document called "Report.html".`)
 	_, err = s.CreateDocument(models.CreateDocumentRequest{TicketID: tk.ID, Name: "Big", Content: strings.Repeat("x", models.MaxDocumentBytes+1)})
 	wantInvalid(t, err, "This document is 8.1 MB. The limit is 8 MB.")
 	_, err = s.CreateDocument(models.CreateDocumentRequest{TicketID: "nope", Name: "Plan"})

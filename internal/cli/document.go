@@ -71,8 +71,9 @@ func documentCommands() *cobra.Command {
 		Use:   "add [ticket]",
 		Short: "Attach a document to a ticket from a file (--file PATH) or standard input (--file -)",
 		Long: "Attach a document to a ticket. Without --name, the name and format come from the file's name: " +
-			"the extension (.md) is removed and other symbols become spaces. Names hold letters, digits, " +
-			"spaces, _ and - only.",
+			"the extension (.md, .html or .htm) is removed and other symbols become spaces. With --name, the " +
+			"format still comes from a .md, .html or .htm extension unless --format is given. Names hold letters, " +
+			"digits, spaces, _ and - only.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name, format := addName, addFormat
@@ -89,6 +90,12 @@ func documentCommands() *cobra.Command {
 				}
 				name = n
 				if format == "" {
+					format = f
+				}
+			} else if format == "" && addFile != "-" {
+				// A typed name still takes the format from a known extension,
+				// so --name Report --file report.html is an HTML document.
+				if f, ok := db.DocumentFormatFromFilename(addFile); ok {
 					format = f
 				}
 			}
@@ -117,7 +124,7 @@ func documentCommands() *cobra.Command {
 	}
 	addCmd.Flags().StringVar(&addFile, "file", "", "file to read, or - for standard input")
 	addCmd.Flags().StringVar(&addName, "name", "", "document name; required with --file -")
-	addCmd.Flags().StringVar(&addFormat, "format", "", "document format (markdown); defaults to the file's extension, else markdown")
+	addCmd.Flags().StringVar(&addFormat, "format", "", "document format (markdown|html); defaults to the file's extension, else markdown")
 
 	var writeTicket, writeFile string
 	writeCmd := &cobra.Command{

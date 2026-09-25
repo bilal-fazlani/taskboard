@@ -89,6 +89,47 @@ func TestDocumentTools(t *testing.T) {
 	}
 }
 
+func TestCreateHTMLDocumentTool(t *testing.T) {
+	t.Setenv(weburl.BaseEnv, "http://board.test")
+	s := newTestServer(t)
+	seedMCPTicket(t, s)
+	got, err := s.callTool("create_document", mustJSON(t, map[string]any{
+		"ticket": "DOC-1", "name": "Report", "format": "html", "content": "<h1>x</h1>",
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := got.(*models.Document)
+	if d.Format != models.DocumentFormatHTML || !strings.HasSuffix(d.URL, "doc=Report.html") {
+		t.Fatalf("created = %+v", d.DocumentMeta)
+	}
+	read, err := s.callTool("get_document", mustJSON(t, map[string]any{"id": "Report.html", "ticket": "DOC-1"}))
+	if err != nil || read.(*models.Document).Content != "<h1>x</h1>" {
+		t.Fatalf("get_document Report.html = %+v, %v", read, err)
+	}
+	_, err = s.callTool("create_document", mustJSON(t, map[string]any{
+		"ticket": "DOC-1", "name": "Deck", "format": "pdf", "content": "x",
+	}))
+	if err == nil || err.Error() != `Format must be "markdown" or "html".` {
+		t.Fatalf("unknown format error = %v", err)
+	}
+}
+
+func TestCreateDocumentToolOffersHTML(t *testing.T) {
+	s := newTestServer(t)
+	for _, def := range s.toolDefinitions() {
+		if def.Name != "create_document" {
+			continue
+		}
+		enum := def.InputSchema.Properties["format"].Enum
+		if len(enum) != 2 || enum[0] != models.DocumentFormatMarkdown || enum[1] != models.DocumentFormatHTML {
+			t.Fatalf("create_document format enum = %v", enum)
+		}
+		return
+	}
+	t.Fatal("create_document not listed")
+}
+
 func TestDocumentToolErrors(t *testing.T) {
 	s := newTestServer(t)
 	seedMCPTicket(t, s)

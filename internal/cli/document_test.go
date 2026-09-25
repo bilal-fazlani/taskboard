@@ -96,6 +96,35 @@ func TestDocCommands(t *testing.T) {
 	if !strings.Contains(deleted, "Deleted Notes.md") {
 		t.Fatalf("doc delete printed %q", deleted)
 	}
+
+	page := filepath.Join(t.TempDir(), "Load test.HTM")
+	if err := os.WriteFile(page, []byte("<h1>ok</h1>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	addedHTML := captureStdout(t, func() {
+		if _, err := runCLI(t, "--db", path, "doc", "add", "DOC-1", "--file", page); err != nil {
+			t.Fatalf("doc add html: %v", err)
+		}
+	})
+	if !strings.Contains(addedHTML, "Added document Load test.html") || !strings.Contains(addedHTML, "doc=Load+test.html") {
+		t.Fatalf("doc add html printed %q", addedHTML)
+	}
+	shownHTML := captureStdout(t, func() {
+		if _, err := runCLI(t, "--db", path, "doc", "show", "Load test.html", "--ticket", "DOC-1"); err != nil {
+			t.Fatalf("doc show html: %v", err)
+		}
+	})
+	if shownHTML != "<h1>ok</h1>" {
+		t.Fatalf("doc show html printed %q", shownHTML)
+	}
+	namedHTML := captureStdout(t, func() {
+		if _, err := runCLI(t, "--db", path, "doc", "add", "DOC-1", "--file", page, "--name", "Chart"); err != nil {
+			t.Fatalf("doc add html with --name: %v", err)
+		}
+	})
+	if !strings.Contains(namedHTML, "Added document Chart.html") {
+		t.Fatalf("doc add html with --name printed %q", namedHTML)
+	}
 }
 
 func TestDocCommandErrors(t *testing.T) {
@@ -119,7 +148,7 @@ func TestDocCommandErrors(t *testing.T) {
 	txt := filepath.Join(t.TempDir(), "notes.txt")
 	os.WriteFile(txt, []byte("x"), 0o644)
 	if _, err := runCLI(t, "--db", path, "doc", "add", "DOC-1", "--file", txt); err == nil ||
-		err.Error() != "Only .md files can be attached." {
+		err.Error() != "Only .md, .html and .htm files can be attached." {
 		t.Fatalf("txt file: %v", err)
 	}
 	if _, err := runCLI(t, "--db", path, "doc", "show", "Plan"); err == nil || !strings.Contains(err.Error(), "--ticket") {

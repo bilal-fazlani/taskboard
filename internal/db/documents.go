@@ -21,17 +21,21 @@ const (
 	msgDocNameTooLong     = "Keep the name to 200 characters or fewer."
 	msgDocRefRequired     = "Enter a document name or id."
 	msgDocNothingToUpdate = "nothing to update: provide a name and/or content"
-	msgDocFormat          = `Format must be "markdown".`
-	msgDocExtension       = "Only .md files can be attached."
+	msgDocFormat          = `Format must be "markdown" or "html".`
+	msgDocExtension       = "Only .md, .html and .htm files can be attached."
 )
 
 const maxDocumentNameRunes = 200
 
 // documentFormats are the formats a document may be created with.
-var documentFormats = []string{models.DocumentFormatMarkdown}
+var documentFormats = []string{models.DocumentFormatMarkdown, models.DocumentFormatHTML}
 
 // formatByExtension maps a filename's extension, lower-cased, to a format.
-var formatByExtension = map[string]string{".md": models.DocumentFormatMarkdown}
+var formatByExtension = map[string]string{
+	".md":   models.DocumentFormatMarkdown,
+	".html": models.DocumentFormatHTML,
+	".htm":  models.DocumentFormatHTML,
+}
 
 // isDocumentNameRune reports whether r may appear in a document name:
 // letters in any script (with their combining marks), decimal digits, space,
@@ -58,6 +62,13 @@ func validateDocumentName(raw string) (string, error) {
 	return name, nil
 }
 
+// DocumentFormatFromFilename returns the format a file's extension names,
+// ignoring case, and false for any other extension.
+func DocumentFormatFromFilename(filename string) (string, bool) {
+	format, ok := formatByExtension[strings.ToLower(filepath.Ext(filename))]
+	return format, ok
+}
+
 // DocumentNameFromFilename turns a file's name into a document name and
 // format: the extension picks the format and is removed, every character the
 // name rules refuse becomes a space, and the result is trimmed and checked.
@@ -65,7 +76,7 @@ func validateDocumentName(raw string) (string, error) {
 func DocumentNameFromFilename(filename string) (name, format string, err error) {
 	base := filepath.Base(filename)
 	ext := filepath.Ext(base)
-	format, ok := formatByExtension[strings.ToLower(ext)]
+	format, ok := DocumentFormatFromFilename(base)
 	if !ok {
 		return "", "", invalidInput(msgDocExtension)
 	}

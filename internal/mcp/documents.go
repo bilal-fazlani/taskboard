@@ -10,7 +10,7 @@ import (
 	"github.com/tcarac/taskboard/internal/weburl"
 )
 
-const documentIDDescription = "Document ID, or its name (with or without its .md extension) together with ticket"
+const documentIDDescription = "Document ID, or its name (with or without its .md or .html extension) together with ticket"
 const documentTicketDescription = "Ticket ID or display key (e.g. BILL-2), case-insensitive; required when id is a name"
 
 func (s *MCPServer) documentToolDefinitions() []toolDef {
@@ -30,7 +30,7 @@ func (s *MCPServer) documentToolDefinitions() []toolDef {
 		},
 		{
 			Name: "create_document",
-			Description: "Attach a markdown document to a ticket, for longer write-ups (plans, research notes, " +
+			Description: "Attach a markdown or HTML document to a ticket, for longer write-ups (plans, research notes, " +
 				"findings, reports) that would clutter the description. Names hold letters, digits, spaces, _ and - " +
 				"only, with no extension, and are unique per ticket ignoring case. Content is at most 8 MB. " +
 				"Returns the document with a url that opens it in the web UI.",
@@ -39,8 +39,10 @@ func (s *MCPServer) documentToolDefinitions() []toolDef {
 				Properties: map[string]schemaProp{
 					"ticket":  {Type: "string", Description: "Ticket ID or display key (e.g. BILL-2), case-insensitive"},
 					"name":    {Type: "string", Description: "Document name: letters, digits, spaces, _ and - only; no extension"},
-					"content": {Type: "string", Description: "The whole document, as markdown"},
-					"format":  {Type: "string", Description: "Document format; defaults to markdown", Enum: []string{models.DocumentFormatMarkdown}},
+					"content": {Type: "string", Description: "The whole document, as markdown or HTML"},
+					"format": {Type: "string", Description: "markdown (default) or html. HTML is shown in a sandboxed frame " +
+						"that may run scripts and load from the internet; people cannot edit it in the web UI.",
+						Enum: []string{models.DocumentFormatMarkdown, models.DocumentFormatHTML}},
 				},
 				Required: []string{"ticket", "name", "content"},
 			},
