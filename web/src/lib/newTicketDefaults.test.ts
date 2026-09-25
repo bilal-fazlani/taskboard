@@ -8,7 +8,7 @@ const PROJECTS = [
   { id: "p-acp", prefix: "ACP" },
 ];
 
-const on = (project: string, epic = "") => ({ ...EMPTY_FILTERS, project, epic });
+const on = (project: string, ...epic: string[]) => ({ ...EMPTY_FILTERS, project, epic });
 const ACP_EPICS = {
   projectId: "p-acp",
   epics: [
@@ -47,6 +47,11 @@ describe("newTicketDefaults", () => {
     expect(newTicketDefaults(on("ACP"), PROJECTS, ACP_EPICS).epicId).toBe("");
     expect(newTicketDefaults(on("ACP", "none"), PROJECTS, ACP_EPICS).epicId).toBe("");
     expect(newTicketDefaults(on("ACP", "NONE"), PROJECTS, ACP_EPICS).epicId).toBe("");
+  });
+
+  it("starts on no epic when the filter names several, which says nothing about one", () => {
+    expect(newTicketDefaults(on("ACP", "Views", "agents"), PROJECTS, ACP_EPICS).epicId).toBe("");
+    expect(newTicketDefaults(on("ACP", "none", "Views"), PROJECTS, ACP_EPICS).epicId).toBe("");
   });
 
   it("starts on no epic until the project's epics have loaded, or when they don't have it", () => {

@@ -6,15 +6,18 @@
 // empty for a reason the user cannot see, with a dropdown offering a value
 // that exists nowhere but in the URL.
 //
-// An epic filter goes the same way once it names no epic of the selected
-// project, which is also what drops it on a switch to another project; its
-// `none` names no record and always stays.
+// An epic goes the same way once it names no epic of the selected project,
+// which is also what drops it on a switch to another project; `none` names no
+// record and always stays.
+//
+// The epic and label filters take several values, and only the values that
+// name nothing are dropped: the filter keeps the others.
 //
 // Only those three are checked. Status and priority are fixed sets, so they can
 // never name something deleted; a repo is a string the tickets themselves
 // carry, and the search is free text, so neither names a record either.
 
-import { isNoEpic, type FilterKey, type Filters } from "./filters";
+import { isNoEpic, type FilterKey, type FilterValue, type Filters } from "./filters";
 
 /** The filters whose value names a record that can be deleted. */
 export const CHECKED_FILTERS: readonly FilterKey[] = ["project", "epic", "label"];
@@ -36,17 +39,22 @@ const names = (known: readonly string[], value: string) =>
   known.some((name) => name.toLowerCase() === value.toLowerCase());
 
 /**
- * The set filters whose value names nothing, compared the way
- * matchesFilters compares them: ignoring case, as `?project=acp` filters the
- * same tickets as `?project=ACP`.
+ * The filter values that name nothing, each as the URL writes it, compared
+ * the way matchesFilters compares them: ignoring case, as `?project=acp`
+ * filters the same tickets as `?project=ACP`.
  */
-export function staleFilters(filters: Filters, known: KnownNames): FilterKey[] {
-  const stale: FilterKey[] = [];
-  const check = (key: FilterKey, loaded: readonly string[] | null) => {
-    if (filters[key] !== "" && loaded !== null && !names(loaded, filters[key])) stale.push(key);
+export function staleFilters(filters: Filters, known: KnownNames): FilterValue[] {
+  const stale: FilterValue[] = [];
+  const check = (key: FilterKey, values: readonly string[], loaded: readonly string[] | null) => {
+    if (loaded === null) return;
+    for (const value of values) if (value !== "" && !names(loaded, value)) stale.push({ key, value });
   };
-  check("project", known.projects);
-  if (!isNoEpic(filters.epic)) check("epic", known.epics ?? null);
-  check("label", known.labels);
+  check("project", [filters.project], known.projects);
+  check(
+    "epic",
+    filters.epic.filter((epic) => !isNoEpic(epic)),
+    known.epics ?? null,
+  );
+  check("label", filters.label, known.labels);
   return stale;
 }

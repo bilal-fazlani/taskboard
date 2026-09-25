@@ -437,7 +437,7 @@ export default function Graph() {
   // it (moveView). The fit is state adjusted while rendering: React renders
   // again before committing, so the unfitted graph is never painted, and the
   // canvas stays invisible while a fit is pending.
-  const hiddenBy = hiding ? NARROWING_KEYS.map((key) => filters[key]).join("\n") : "";
+  const hiddenBy = hiding ? JSON.stringify(NARROWING_KEYS.map((key) => filters[key])) : "";
   const graphKey = `${filters.project.toLowerCase()}\n${unmatched}\n${hiddenBy}`;
   const [laidOut, setLaidOut] = useState(graphKey);
   if (graphKey !== laidOut) {

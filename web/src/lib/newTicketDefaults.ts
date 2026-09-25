@@ -36,7 +36,9 @@ export interface ProjectEpics {
  *
  * The epic is the one the view's epic filter names, matched by name ignoring
  * case among that project's epics, once they have loaded. A filter for tickets
- * without an epic, or none at all, starts the form on no epic.
+ * without an epic, for several epics, or none at all, starts the form on no
+ * epic: only a filter naming exactly one epic says which one a new ticket
+ * belongs to.
  */
 export function newTicketDefaults(
   filters: Pick<Filters, "project" | "epic">,
@@ -46,7 +48,7 @@ export function newTicketDefaults(
   const shown = filters.project.toLowerCase();
   const project = (shown && projects.find((p) => p.prefix.toLowerCase() === shown)) || projects[0];
   const projectId = project?.id ?? "";
-  const wanted = filters.epic.toLowerCase();
+  const wanted = filters.epic.length === 1 ? filters.epic[0].toLowerCase() : "";
   const epic =
     wanted && !isNoEpic(wanted) && epics && epics.projectId === projectId
       ? epics.epics.find((e) => e.name.toLowerCase() === wanted)

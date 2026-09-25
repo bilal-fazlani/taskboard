@@ -1,53 +1,51 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
-import { Search, X } from "lucide-react";
+import { Layers, Search, X } from "lucide-react";
 import { api, type Epic, type Label, type Project } from "../api/client";
 import type { FilterState } from "../hooks/useFilters";
 import { useLiveRefresh } from "../hooks/useLiveRefresh";
 import { CONTROL_BUTTON, fieldClass, segmentClass, segmentedClass } from "./controlStyles";
+import FilterMultiSelect from "./FilterMultiSelect";
+import { PriorityIcon } from "./PriorityBadge";
 import ProjectSelect from "./ProjectSelect";
 import { activeProjects, namedProject, type ActivityTicket } from "../lib/defaultProject";
-import { NO_EPIC, selectOptions, urlValue, type FilterKey, type SelectOption, type UnmatchedMode } from "../lib/filters";
+import { NO_EPIC, urlValue, type MultiFilterKey, type SelectOption, type UnmatchedMode } from "../lib/filters";
 import { PRIORITIES } from "../lib/priority";
 import { staleFilters } from "../lib/staleFilters";
-import { STATUSES, STATUS_LABELS } from "../lib/status";
+import { STATUSES, STATUS_COLORS, STATUS_LABELS, isStatus } from "../lib/status";
 
-function FilterSelect({
-  name,
-  allLabel,
-  value,
-  options,
-  ignoreCase,
-  maxWidth,
-  onChange,
-}: {
-  name: string;
-  /** The label of the empty value, which sets no filter. */
-  allLabel: string;
-  value: string;
-  options: SelectOption[];
-  /** Whether the filter matches ignoring case, so a URL value in another case selects its option. */
-  ignoreCase?: boolean;
-  /** A width class to cap the control at, for options whose names can run long. */
-  maxWidth?: string;
-  onChange: (value: string) => void;
-}) {
-  const shown = selectOptions(options, value, ignoreCase);
-  return (
-    <select
-      aria-label={name}
-      value={shown.value}
-      onChange={(e) => onChange(e.target.value)}
-      className={`${fieldClass(value !== "")}${maxWidth ? ` ${maxWidth} truncate` : ""}`}
-    >
-      <option value="">{allLabel}</option>
-      {shown.options.map((o) => (
-        <option key={o.value} value={o.value}>
-          {o.label}
-        </option>
-      ))}
-    </select>
+const STATUS_OPTIONS: SelectOption[] = STATUSES.map((s) => ({ value: s, label: STATUS_LABELS[s] }));
+const PRIORITY_OPTIONS: SelectOption[] = PRIORITIES.map((p) => ({ value: p, label: p.charAt(0).toUpperCase() + p.slice(1) }));
+
+// How each list draws its options, as the rest of the app draws them: the
+// status's column dot, the priority's icon, the epic's icon ("No epic" plain),
+// the label's colour chip and the repo in monospace. A value the URL names
+// that isn't offered draws as plain text.
+const plain = (o: SelectOption) => <span className="truncate">{o.label}</span>;
+const drawStatus = (o: SelectOption) => (
+  <>
+    <span className={`h-2 w-2 shrink-0 rounded-full ${isStatus(o.value) ? STATUS_COLORS[o.value] : "bg-transparent"}`} />
+    {plain(o)}
+  </>
+);
+const drawPriority = (o: SelectOption) => (
+  <>
+    <PriorityIcon priority={o.value} />
+    {plain(o)}
+  </>
+);
+const drawEpic = (o: SelectOption) =>
+  o.value === NO_EPIC ? (
+    <>
+      <span className="h-3 w-3 shrink-0" />
+      <span className="truncate italic text-slate-400">{o.label}</span>
+    </>
+  ) : (
+    <>
+      <Layers aria-hidden="true" className="h-3 w-3 shrink-0 text-slate-500" />
+      {plain(o)}
+    </>
   );
-}
+const drawRepo = (o: SelectOption) => <span className="truncate font-mono text-[11px]">{o.label}</span>;
 
 const UNMATCHED_MODES: readonly { mode: UnmatchedMode; label: string }[] = [
   { mode: "dim", label: "Dim" },
@@ -118,7 +116,7 @@ export default function FilterPanel({
    */
   unmatched?: { mode: UnmatchedMode; onChange: (mode: UnmatchedMode) => void };
 }) {
-  const { filters, active, latestFilters, setFilter, dropFilters, clearFilters } = state;
+  const { filters, active, latestFilters, setFilter, dropValues, clearFilters } = state;
   // The projects and labels the bar offers, and checks the URL's filters
   // against. The bar loads them itself rather than being handed them, so that
   // an empty list means what it says: deleting the last project has to drop a
@@ -204,18 +202,19 @@ export default function FilterPanel({
     return noActiveProject ? [] : null;
   }, [epics, shownProject, noActiveProject]);
 
-  // An epic filter is dropped once it names no epic of the shown project,
-  // which is also what drops it on a switch to another project. A stale
+  // An epic is dropped from the filter once it names no epic of the shown
+  // project, which is also what drops it on a switch to another project, and a
+  // label once it names no label; the filter keeps its other values. A stale
   // project is ProjectSelect's to replace, or drop when none is left to pick.
   const epicNames = useMemo(() => shownEpics?.map((e) => e.name) ?? null, [shownEpics]);
   const stale = useMemo(
     () =>
       staleFilters(filters, { projects: projectNames, epics: epicNames, labels: labelNames }).filter(
-        (key) => key !== "project",
+        ({ key }) => key !== "project",
       ),
     [filters, projectNames, epicNames, labelNames],
   );
-  useEffect(() => dropFilters(stale), [stale, dropFilters]);
+  useEffect(() => dropValues(stale), [stale, dropValues]);
 
   // "No epic", then the shown project's epics by name.
   const epicOptions = useMemo(
@@ -228,7 +227,22 @@ export default function FilterPanel({
     [shownEpics],
   );
 
-  const set = (key: FilterKey) => (value: string) => setFilter(key, value);
+  const labelOptions = useMemo(() => (labels ?? []).map((l) => ({ value: l.name, label: l.name })), [labels]);
+  const labelColors = useMemo(() => new Map((labels ?? []).map((l) => [l.name, l.color])), [labels]);
+  const drawLabel = (o: SelectOption) => {
+    const color = labelColors.get(o.value);
+    return (
+      <span
+        className={`inline-flex min-w-0 items-center rounded px-1.5 py-0.5 text-[10.5px] font-medium ${color ? "" : "bg-slate-700/40 text-slate-300"}`}
+        style={color ? { backgroundColor: color + "1f", color } : undefined}
+      >
+        <span className="truncate">{o.label}</span>
+      </span>
+    );
+  };
+  const repoList = useMemo(() => repos.map((r) => ({ value: r, label: r })), [repos]);
+
+  const set = (key: MultiFilterKey) => (values: string[]) => setFilter(key, values);
   const clear = () => {
     setSearch("");
     clearFilters();
@@ -241,42 +255,47 @@ export default function FilterPanel({
       className="shrink-0 flex flex-wrap items-center gap-2 px-6 py-3 border-b border-slate-800/50"
     >
       <ProjectSelect state={state} projects={projects} tickets={tickets} />
-      <FilterSelect
+      <FilterMultiSelect
         name="Epic"
         allLabel="All epics"
-        value={filters.epic}
+        values={filters.epic}
         options={epicOptions}
         ignoreCase
-        maxWidth="max-w-[12rem]"
+        divideAfter={NO_EPIC}
+        renderOption={drawEpic}
         onChange={set("epic")}
       />
-      <FilterSelect
+      <FilterMultiSelect
         name="Status"
         allLabel="All statuses"
-        value={filters.status}
-        options={STATUSES.map((s) => ({ value: s, label: STATUS_LABELS[s] }))}
+        values={filters.status}
+        options={STATUS_OPTIONS}
+        renderOption={drawStatus}
         onChange={set("status")}
       />
-      <FilterSelect
+      <FilterMultiSelect
         name="Priority"
         allLabel="All priorities"
-        value={filters.priority}
-        options={PRIORITIES.map((p) => ({ value: p, label: p.charAt(0).toUpperCase() + p.slice(1) }))}
+        values={filters.priority}
+        options={PRIORITY_OPTIONS}
+        renderOption={drawPriority}
         onChange={set("priority")}
       />
-      <FilterSelect
+      <FilterMultiSelect
         name="Label"
         allLabel="All labels"
-        value={filters.label}
-        options={(labels ?? []).map((l) => ({ value: l.name, label: l.name }))}
+        values={filters.label}
+        options={labelOptions}
         ignoreCase
+        renderOption={drawLabel}
         onChange={set("label")}
       />
-      <FilterSelect
+      <FilterMultiSelect
         name="Repo"
         allLabel="All repos"
-        value={filters.repo}
-        options={repos.map((r) => ({ value: r, label: r }))}
+        values={filters.repo}
+        options={repoList}
+        renderOption={drawRepo}
         onChange={set("repo")}
       />
       <div className="relative">
@@ -290,7 +309,7 @@ export default function FilterPanel({
             setSearch(e.target.value);
             setFilter("q", e.target.value);
           }}
-          className={`${fieldClass(filters.q !== "")} w-60 pl-7 placeholder:text-slate-500`}
+          className={`${fieldClass(filters.q !== "")} w-54 pl-7 placeholder:text-slate-500`}
         />
       </div>
       {unmatched && <UnmatchedToggle mode={unmatched.mode} onChange={unmatched.onChange} />}

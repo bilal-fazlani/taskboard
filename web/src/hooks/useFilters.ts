@@ -6,7 +6,9 @@ import {
   parseFilters,
   withFilter,
   withoutFilters,
+  withoutValues,
   type FilterKey,
+  type FilterValue,
   type Filters,
 } from "../lib/filters";
 import { latestLocationState, latestSearchParams } from "../lib/latestSearch";
@@ -20,9 +22,12 @@ export interface FilterState {
   active: boolean;
   /** The filters in the URL right now, which can be ahead of `filters` while a navigation renders. */
   latestFilters: () => Filters;
-  setFilter: (key: FilterKey, value: string) => void;
-  /** Remove several filters at once, for ones that no longer name anything. */
+  /** Set one filter: a value for the project and the search, the values for any other. */
+  setFilter: <K extends FilterKey>(key: K, value: Filters[K]) => void;
+  /** Remove several filters at once. */
   dropFilters: (keys: readonly FilterKey[]) => void;
+  /** Remove single values of filters, for ones that no longer name anything, keeping the filters' other values. */
+  dropValues: (values: readonly FilterValue[]) => void;
   /** Remove every filter but the project, which a view always keeps. */
   clearFilters: () => void;
 }
@@ -37,7 +42,7 @@ export function useFilters(): FilterState {
   const filters = useMemo(() => parseFilters(params), [params]);
   const latestFilters = useCallback(() => parseFilters(latestSearchParams(params)), [params]);
   const setFilter = useCallback(
-    (key: FilterKey, value: string) =>
+    <K extends FilterKey>(key: K, value: Filters[K]) =>
       setParams(withFilter(latestSearchParams(params), key, value), {
         replace: true,
         state: latestLocationState(undefined),
@@ -54,6 +59,16 @@ export function useFilters(): FilterState {
     },
     [params, setParams],
   );
+  const dropValues = useCallback(
+    (values: readonly FilterValue[]) => {
+      if (values.length === 0) return;
+      setParams(withoutValues(latestSearchParams(params), values), {
+        replace: true,
+        state: latestLocationState(undefined),
+      });
+    },
+    [params, setParams],
+  );
   const clearFilters = useCallback(
     () =>
       setParams(withoutFilters(latestSearchParams(params), NARROWING_KEYS), {
@@ -62,5 +77,13 @@ export function useFilters(): FilterState {
       }),
     [params, setParams],
   );
-  return { filters, active: hasFilters(filters, NARROWING_KEYS), latestFilters, setFilter, dropFilters, clearFilters };
+  return {
+    filters,
+    active: hasFilters(filters, NARROWING_KEYS),
+    latestFilters,
+    setFilter,
+    dropFilters,
+    dropValues,
+    clearFilters,
+  };
 }

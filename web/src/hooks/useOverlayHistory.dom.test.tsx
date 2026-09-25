@@ -143,7 +143,7 @@ describe("useOverlayHistory under BrowserRouter", () => {
   it("keeps the depth through filter changes", async () => {
     await mount("/kanban");
     await act(async () => overlays.push(params("ticket=ACP-7")));
-    await act(async () => filters.setFilter("status", "todo"));
+    await act(async () => filters.setFilter("status", ["todo"]));
     expect(overlays.depth).toBe(1);
     await act(async () => filters.dropFilters(["status"]));
     expect(overlays.depth).toBe(1);

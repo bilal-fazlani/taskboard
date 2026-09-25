@@ -137,6 +137,36 @@ const search = () => decodeURIComponent(window.location.search);
 const box = () => container.querySelector<HTMLInputElement>('input[type="search"]')!;
 const select = (name: string) => container.querySelector<HTMLSelectElement>(`select[aria-label="${name}"]`)!;
 
+// A multi-value filter control (FilterMultiSelect): its button, what the
+// button reads, and its list's rows once open.
+const control = (name: string) => container.querySelector<HTMLElement>(`[role="group"][aria-label="${name}"]`)!;
+const trigger = (name: string) => control(name).querySelector<HTMLButtonElement>("button[aria-haspopup]")!;
+const reads = (name: string) => trigger(name).querySelector("span")!.textContent;
+const rows = (name: string) => [...control(name).querySelectorAll<HTMLElement>('[role="option"]')];
+const isOpen = (name: string) => trigger(name).getAttribute("aria-expanded") === "true";
+async function openList(name: string) {
+  if (!isOpen(name)) await act(async () => trigger(name).click());
+}
+/** The list's rows, opening it first. */
+async function rowLabels(name: string) {
+  await openList(name);
+  return rows(name).map((r) => r.textContent);
+}
+/** The ticked rows, opening the list first. */
+async function ticked(name: string) {
+  await openList(name);
+  return rows(name)
+    .filter((r) => r.getAttribute("aria-selected") === "true")
+    .map((r) => r.textContent);
+}
+/** Ticks or unticks the row with the given text, opening the list first. */
+async function choose(name: string, label: string) {
+  await openList(name);
+  const row = rows(name).find((r) => r.textContent === label);
+  if (!row) throw new Error(`no ${label} in ${name}: ${rows(name).map((r) => r.textContent)}`);
+  await act(async () => row.click());
+}
+
 // Types into the box the way a browser does, so React's onChange fires.
 function type(value: string) {
   const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
@@ -149,11 +179,11 @@ describe("useFilters under BrowserRouter", () => {
     await mount("/kanban?ticket=ACP-7");
     const before = state;
     await act(async () => {
-      before.setFilter("status", "todo");
-      before.setFilter("label", "web");
+      before.setFilter("status", ["todo"]);
+      before.setFilter("label", ["web", "api"]);
     });
-    expect(search()).toBe("?ticket=ACP-7&status=todo&label=web");
-    expect(state.filters).toMatchObject({ status: "todo", label: "web" });
+    expect(search()).toBe("?ticket=ACP-7&status=todo&label=web&label=api");
+    expect(state.filters).toMatchObject({ status: ["todo"], label: ["web", "api"] });
   });
 
   it("keeps the ticket and other unknown parameters when setting and removing filters", async () => {
@@ -169,7 +199,7 @@ describe("useFilters under BrowserRouter", () => {
     await mount("/?project=ALP&ticket=ACP-7&status=todo&zoom=2");
     const before = state;
     await act(async () => {
-      before.setFilter("label", "web");
+      before.setFilter("label", ["web"]);
       before.clearFilters();
     });
     expect(search()).toBe("?project=ALP&ticket=ACP-7&zoom=2");
@@ -187,7 +217,7 @@ describe("useFilters under BrowserRouter", () => {
   it("replaces the history entry rather than adding one", async () => {
     await mount("/kanban");
     const length = window.history.length;
-    await act(async () => state.setFilter("status", "done"));
+    await act(async () => state.setFilter("status", ["done"]));
     expect(window.history.length).toBe(length);
   });
 });
@@ -269,10 +299,11 @@ describe("filter panel search box", () => {
 });
 
 describe("filter panel dropdowns", () => {
-  it("selects the matching option for a URL value in another case, without a duplicate", async () => {
+  it("ticks the matching option for a URL value in another case, without a duplicate", async () => {
     await mount("/?label=WEB&project=alp", true);
-    expect(select("Label").value).toBe("web");
-    expect([...select("Label").options].map((o) => o.value)).toEqual(["", "web"]);
+    expect(reads("Label")).toBe("web");
+    expect(await rowLabels("Label")).toEqual(["web"]);
+    expect(await ticked("Label")).toEqual(["web"]);
     expect(select("Project").value).toBe("ALP");
     expect([...select("Project").options].map((o) => o.value)).toEqual(["ALP"]);
   });
@@ -281,20 +312,160 @@ describe("filter panel dropdowns", () => {
     // A repo is a string the tickets carry rather than a record that can be
     // deleted, so it is never dropped and has to show whatever the URL says.
     await mount("/?project=ALP&repo=a%2Fb", true);
-    expect(select("Repo").value).toBe("a/b");
+    expect(reads("Repo")).toBe("a/b");
+    expect(await ticked("Repo")).toEqual(["a/b"]);
   });
 
   it("offers every status, agent_review included, in board column order", async () => {
     await mount("/?project=ALP&status=agent_review", true);
-    expect([...select("Status").options].map((o) => o.value)).toEqual([
-      "",
-      "todo",
-      "in_progress",
-      "agent_review",
-      "done",
-    ]);
-    expect([...select("Status").options].map((o) => o.textContent)).toContain("Agent Review");
-    expect(select("Status").value).toBe("agent_review");
+    expect(await rowLabels("Status")).toEqual(["Todo", "In Progress", "Agent Review", "Done"]);
+    expect(await ticked("Status")).toEqual(["Agent Review"]);
+    expect(reads("Status")).toBe("Agent Review");
+  });
+});
+
+describe("multi-value filters", () => {
+  const priorities = [["Urgent"], ["Urgent", "High"], ["Urgent", "High", "Low"]];
+
+  it("reads the all label with nothing chosen, as a field that is not set", async () => {
+    await mount("/?project=ALP", true);
+    for (const [name, all] of [
+      ["Epic", "All epics"],
+      ["Status", "All statuses"],
+      ["Priority", "All priorities"],
+      ["Label", "All labels"],
+      ["Repo", "All repos"],
+    ]) {
+      expect(reads(name), name).toBe(all);
+      expect(trigger(name).className, name).toContain("border-slate-700");
+      expect(trigger(name).title, name).toBe("");
+      expect(isOpen(name), name).toBe(false);
+    }
+  });
+
+  it("writes each choice at once as repeated parameters in option order, keeping the list open", async () => {
+    await mount("/kanban?project=ALP&ticket=ACP-7", true);
+    await choose("Priority", "Low");
+    expect(search()).toBe("?project=ALP&ticket=ACP-7&priority=low");
+    await choose("Priority", "Urgent");
+    await choose("Priority", "High");
+    expect(search()).toBe("?project=ALP&ticket=ACP-7&priority=urgent&priority=high&priority=low");
+    expect(isOpen("Priority")).toBe(true);
+    expect(state.filters.priority).toEqual(["urgent", "high", "low"]);
+    expect(state.active).toBe(true);
+    await choose("Priority", "Urgent");
+    expect(search()).toBe("?project=ALP&ticket=ACP-7&priority=high&priority=low");
+  });
+
+  it.each(priorities)("reads one value alone and several comma-joined with a count: %s", async (...chosen) => {
+    const qs = chosen.map((p) => `priority=${p.toLowerCase()}`).join("&");
+    await mount(`/?project=ALP&${qs}`, true);
+    expect(reads("Priority")).toBe(chosen.join(", "));
+    const badge = trigger("Priority").querySelectorAll("span")[1];
+    if (chosen.length === 1) expect(badge).toBeUndefined();
+    else expect(badge.textContent).toBe(String(chosen.length));
+    expect(trigger("Priority").title).toBe(`Priority: ${chosen.join(", ")}`);
+    expect(trigger("Priority").className).toContain("border-blue-500/60");
+  });
+
+  it("shows the values of a URL in any order in option order", async () => {
+    await mount("/?project=ALP&status=done&status=todo", true);
+    expect(reads("Status")).toBe("Todo, Done");
+  });
+
+  it("clears only its own filter from the footer, which shows how many are chosen", async () => {
+    await mount("/?project=ALP&status=todo&status=done&label=web", true);
+    await openList("Status");
+    const footer = control("Status").querySelector<HTMLElement>(".border-t")!;
+    expect(footer.textContent).toContain("2 selected");
+    const clear = [...footer.querySelectorAll("button")].find((b) => b.textContent === "Clear")!;
+    await act(async () => clear.click());
+    expect(search()).toBe("?project=ALP&label=web");
+    expect(isOpen("Status")).toBe(true);
+    // Nothing left to clear.
+    expect(control("Status").querySelector(".border-t")).toBeNull();
+  });
+
+  it("is cleared with every other filter by Clear filters", async () => {
+    await mount("/?project=ALP&status=todo&status=done&label=web&priority=low", true);
+    const clear = [...container.querySelectorAll("button")].find((b) => b.textContent?.includes("Clear filters"))!;
+    await act(async () => clear.click());
+    expect(search()).toBe("?project=ALP");
+    expect(reads("Status")).toBe("All statuses");
+  });
+
+  it("closes on Escape, and only the list, giving the button its focus back", async () => {
+    await mount("/?project=ALP", true);
+    const below = vi.fn();
+    const { pushEscape } = await import("../lib/escapeStack");
+    const pop = pushEscape(below);
+    await openList("Status");
+    expect(document.activeElement?.getAttribute("role")).toBe("listbox");
+    await act(async () => {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+    });
+    expect(isOpen("Status")).toBe(false);
+    expect(document.activeElement).toBe(trigger("Status"));
+    expect(below).not.toHaveBeenCalled();
+    // With the list gone, Escape reaches the layer below.
+    await act(async () => {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+    });
+    expect(below).toHaveBeenCalledTimes(1);
+    pop();
+  });
+
+  it("moves with the arrow keys and ticks with Space or Enter", async () => {
+    await mount("/?project=ALP", true);
+    await act(async () => {
+      trigger("Status").focus();
+      trigger("Status").dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    });
+    expect(isOpen("Status")).toBe(true);
+    const list = control("Status").querySelector<HTMLElement>('[role="listbox"]')!;
+    const key = (k: string) =>
+      act(async () => {
+        list.dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true }));
+      });
+    const activeRow = () => document.getElementById(list.getAttribute("aria-activedescendant")!)!.textContent;
+    expect(activeRow()).toBe("Todo");
+    await key("ArrowDown");
+    await key("ArrowDown");
+    expect(activeRow()).toBe("Agent Review");
+    await key(" ");
+    expect(search()).toBe("?project=ALP&status=agent_review");
+    await key("End");
+    await key("Enter");
+    expect(search()).toBe("?project=ALP&status=agent_review&status=done");
+    await key("Home");
+    await key("ArrowUp");
+    expect(activeRow()).toBe("Todo");
+  });
+
+  it("closes on a press outside, and when the focus leaves it", async () => {
+    await mount("/?project=ALP", true);
+    await openList("Label");
+    await act(async () => {
+      document.body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    });
+    expect(isOpen("Label")).toBe(false);
+    await openList("Label");
+    await act(async () => box().focus());
+    expect(isOpen("Label")).toBe(false);
+    // A press inside the list keeps it open.
+    await openList("Label");
+    await act(async () => {
+      rows("Label")[0].dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    });
+    expect(isOpen("Label")).toBe(true);
+  });
+
+  it("toggles the list from its button", async () => {
+    await mount("/?project=ALP", true);
+    await act(async () => trigger("Repo").click());
+    expect(isOpen("Repo")).toBe(true);
+    await act(async () => trigger("Repo").click());
+    expect(isOpen("Repo")).toBe(false);
   });
 });
 
@@ -305,7 +476,32 @@ describe("filters that no longer name anything", () => {
   it("drops a label that no longer exists, keeping every other filter", async () => {
     await mount("/table?project=ALP&status=todo&priority=high&label=gone&repo=a%2Fb&q=hook&ticket=ACP-7", true);
     expect(search()).toBe("?project=ALP&status=todo&priority=high&repo=a/b&q=hook&ticket=ACP-7");
-    expect(select("Label").value).toBe("");
+    expect(reads("Label")).toBe("All labels");
+  });
+
+  it("drops only the labels that no longer exist, keeping the filter's other values", async () => {
+    labelList.mockResolvedValue([label("web"), label("api")]);
+    await mount("/table?project=ALP&label=gone&label=WEB&status=todo&label=old&label=api&ticket=ACP-7", true);
+    expect(search()).toBe("?project=ALP&label=WEB&status=todo&label=api&ticket=ACP-7");
+    // In the order the labels are offered.
+    expect(reads("Label")).toBe("web, api");
+  });
+
+  it("drops a label deleted elsewhere on a live change, keeping the others", async () => {
+    (globalThis as unknown as { EventSource?: unknown }).EventSource = FakeEvents;
+    try {
+      labelList.mockResolvedValue([label("web"), label("api")]);
+      await mount("/?project=ALP&label=web&label=api", true);
+      expect(search()).toBe("?project=ALP&label=web&label=api");
+      labelList.mockResolvedValue([label("web")]);
+      await act(async () => {
+        FakeEvents.opened[FakeEvents.opened.length - 1].emit("changed");
+        await new Promise((resolve) => setTimeout(resolve, DEBOUNCE_MS + 20));
+      });
+      expect(search()).toBe("?project=ALP&label=web");
+    } finally {
+      delete (globalThis as unknown as { EventSource?: unknown }).EventSource;
+    }
   });
 
   it("replaces a project that no longer exists, keeping the label", async () => {
@@ -623,7 +819,7 @@ describe("the epic filter", () => {
       select(name).value = value;
       select(name).dispatchEvent(new Event("change", { bubbles: true }));
     });
-  const labels = () => [...select("Epic").options].map((o) => o.textContent);
+  const labels = () => rowLabels("Epic");
 
   beforeEach(() => {
     projectList.mockResolvedValue([project("ALP"), project("BET", "Beta")]);
@@ -634,33 +830,43 @@ describe("the epic filter", () => {
 
   it("comes right after Project", async () => {
     await mount("/?project=ALP", true);
-    const names = [...container.querySelectorAll("select")].map((el) => el.getAttribute("aria-label"));
-    expect(names.slice(0, 3)).toEqual(["Project", "Epic", "Status"]);
+    const names = [...container.querySelectorAll('select, [role="group"]')].map((el) => el.getAttribute("aria-label"));
+    expect(names).toEqual(["Project", "Epic", "Status", "Priority", "Label", "Repo"]);
   });
 
   it("offers All epics, No epic, then the shown project's epics by name", async () => {
     await mount("/?project=ALP", true);
     expect(epicList).toHaveBeenCalledWith("ALP");
-    expect(labels()).toEqual(["All epics", "No epic", "agents", "Realtime", "Views"]);
-    expect([...select("Epic").options].map((o) => o.value)).toEqual(["", "none", "agents", "Realtime", "Views"]);
-    expect(select("Epic").value).toBe("");
+    expect(await labels()).toEqual(["No epic", "agents", "Realtime", "Views"]);
+    expect(reads("Epic")).toBe("All epics");
   });
 
-  it("writes the chosen epic, or none, to the URL, and All epics removes it", async () => {
+  it("writes the chosen epics, none among them, to the URL in option order, and unticking removes them", async () => {
     await mount("/?project=ALP", true);
-    await change("Epic", "Views");
+    await choose("Epic", "Views");
     expect(search()).toBe("?project=ALP&epic=Views");
     expect(state.active).toBe(true);
-    await change("Epic", "none");
-    expect(search()).toBe("?project=ALP&epic=none");
-    await change("Epic", "");
+    await choose("Epic", "No epic");
+    expect(search()).toBe("?project=ALP&epic=none&epic=Views");
+    expect(reads("Epic")).toBe("No epic, Views");
+    await choose("Epic", "Views");
+    await choose("Epic", "No epic");
     expect(search()).toBe("?project=ALP");
+  });
+
+  it("draws a divider under No epic only", async () => {
+    await mount("/?project=ALP", true);
+    await openList("Epic");
+    const list = control("Epic").querySelector('[role="listbox"]')!;
+    const divider = list.querySelector('[aria-hidden="true"].h-px')!;
+    expect(divider.previousElementSibling!.textContent).toBe("No epic");
+    expect(list.querySelectorAll('[aria-hidden="true"].h-px')).toHaveLength(1);
   });
 
   it("selects the epic a URL names in another case, without a duplicate", async () => {
     await mount("/?project=ALP&epic=VIEWS", true);
-    expect(select("Epic").value).toBe("Views");
-    expect(labels()).toEqual(["All epics", "No epic", "agents", "Realtime", "Views"]);
+    expect(reads("Epic")).toBe("Views");
+    expect(await labels()).toEqual(["No epic", "agents", "Realtime", "Views"]);
     expect(search()).toBe("?project=ALP&epic=VIEWS");
   });
 
@@ -669,7 +875,7 @@ describe("the epic filter", () => {
     const clear = [...container.querySelectorAll("button")].find((b) => b.textContent?.includes("Clear filters"))!;
     await act(async () => clear.click());
     expect(search()).toBe("?project=ALP");
-    expect(select("Epic").value).toBe("");
+    expect(reads("Epic")).toBe("All epics");
   });
 
   it("drops an epic the shown project doesn't have, keeping the other filters", async () => {
@@ -677,11 +883,17 @@ describe("the epic filter", () => {
     expect(search()).toBe("?project=ALP&status=todo");
   });
 
+  it("drops only the epics the shown project doesn't have, keeping No epic and the others", async () => {
+    await mount("/?project=ALP&epic=Fleet&epic=views&epic=none&epic=Gone&status=todo", true);
+    expect(search()).toBe("?project=ALP&epic=views&epic=none&status=todo");
+    expect(reads("Epic")).toBe("No epic, Views");
+  });
+
   it("keeps No epic whatever the project's epics are", async () => {
     epicList.mockResolvedValue(epicListOf([]));
     await mount("/?project=ALP&epic=none", true);
     expect(search()).toBe("?project=ALP&epic=none");
-    expect(select("Epic").value).toBe("none");
+    expect(reads("Epic")).toBe("No epic");
   });
 
   it("is dropped by a switch to a project without that epic, once its epics have loaded", async () => {
@@ -695,7 +907,7 @@ describe("the epic filter", () => {
     expect(search()).toBe("?project=BET&epic=Views&status=todo");
     await act(async () => load(epicListOf(["Billing"], "BET")));
     expect(search()).toBe("?project=BET&status=todo");
-    expect(labels()).toEqual(["All epics", "No epic", "Billing"]);
+    expect(await labels()).toEqual(["No epic", "Billing"]);
   });
 
   it("keeps No epic across a switch of project", async () => {
@@ -714,17 +926,17 @@ describe("the epic filter", () => {
     await mount("/?project=ALP&epic=Billing", true);
     await change("Project", "BET");
     expect(search()).toBe("?project=BET&epic=Billing");
-    expect(labels()).toEqual(["All epics", "No epic", "Billing", "Invoices"]);
+    expect(await labels()).toEqual(["No epic", "Billing", "Invoices"]);
     await act(async () => loadAlp(epicListOf(["Views"])));
     // BET's epics are still the ones offered: Invoices, which the URL doesn't
     // name, would be gone had ALP's late answer replaced them.
     expect(search()).toBe("?project=BET&epic=Billing");
-    expect(labels()).toEqual(["All epics", "No epic", "Billing", "Invoices"]);
+    expect(await labels()).toEqual(["No epic", "Billing", "Invoices"]);
   });
 
   it("keeps an epic a URL names for another project while that project's epics load", async () => {
     await mount("/?project=ALP", true);
-    expect(labels()).toEqual(["All epics", "No epic", "agents", "Realtime", "Views"]);
+    expect(await labels()).toEqual(["No epic", "agents", "Realtime", "Views"]);
     let loadBet!: (list: ReturnType<typeof epicListOf>) => void;
     epicList.mockImplementation(() => new Promise((resolve) => (loadBet = resolve)));
     await act(async () => navigate("/?project=BET&epic=Billing"));
@@ -733,7 +945,7 @@ describe("the epic filter", () => {
     expect(search()).toBe("?project=BET&epic=Billing");
     await act(async () => loadBet(epicListOf(["Billing"], "BET")));
     expect(search()).toBe("?project=BET&epic=Billing");
-    expect(select("Epic").value).toBe("Billing");
+    expect(reads("Epic")).toBe("Billing");
   });
 
   it("keeps an epic until the epics have loaded, and one they could not load", async () => {
@@ -742,7 +954,7 @@ describe("the epic filter", () => {
     await act(async () => {});
     expect(search()).toBe("?project=ALP&epic=Views");
     // A value naming no epic the bar knows still shows, as written.
-    expect(select("Epic").value).toBe("Views");
+    expect(reads("Epic")).toBe("Views");
   });
 
   it("drops an epic deleted elsewhere on a live change", async () => {

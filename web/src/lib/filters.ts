@@ -5,20 +5,22 @@
 // parameters apply on every view, so switching views carries them over.
 // Every other query parameter (a `ticket` one, for example) is left alone.
 //
-// Each filter takes a single value. The project is named by its prefix rather
-// than its id so the URL reads well: /kanban?project=ACP&status=todo&label=web.
+// The project and the search take a single value. Every other filter takes
+// several, as a repeated parameter, and a ticket matches it when it has any of
+// them: /kanban?project=ACP&status=todo&status=in_progress&label=web.
+// The project is named by its prefix rather than its id so the URL reads well.
 // The epic is named by its name, or `none` for tickets without one.
-// Values are kept as written: dropping ones that no longer name a project or
-// label is a separate concern.
+// Values are kept as written: dropping ones that no longer name a project,
+// epic or label is a separate concern (see staleFilters.ts).
 
 export interface Filters {
   project: string;
-  /** An epic of the project by name, or NO_EPIC for tickets without one. */
-  epic: string;
-  status: string;
-  priority: string;
-  label: string;
-  repo: string;
+  /** Epics of the project by name, or NO_EPIC for tickets without one. */
+  epic: string[];
+  status: string[];
+  priority: string[];
+  label: string[];
+  repo: string[];
   /**
    * Free text, matched against the ticket's key, title and description, and
    * through the server against its documents' names and readable text.
@@ -27,6 +29,22 @@ export interface Filters {
 }
 
 export type FilterKey = keyof Filters;
+
+/** The filters that take several values, each written as a repeated parameter. */
+export type MultiFilterKey = "epic" | "status" | "priority" | "label" | "repo";
+
+export const MULTI_FILTER_KEYS: readonly MultiFilterKey[] = ["epic", "status", "priority", "label", "repo"];
+
+/** Whether a filter takes several values. */
+export function isMultiFilter(key: FilterKey): key is MultiFilterKey {
+  return (MULTI_FILTER_KEYS as readonly FilterKey[]).includes(key);
+}
+
+/** One value of one filter, as the URL writes it. */
+export interface FilterValue {
+  key: FilterKey;
+  value: string;
+}
 
 /** The query parameter names, which are also the Filters fields, in display order. */
 export const FILTER_KEYS: readonly FilterKey[] = ["project", "epic", "status", "priority", "label", "repo", "q"];
@@ -47,7 +65,15 @@ export const isNoEpic = (value: string) => value.toLowerCase() === NO_EPIC;
  */
 export const NARROWING_KEYS: readonly FilterKey[] = FILTER_KEYS.filter((key) => key !== "project");
 
-export const EMPTY_FILTERS: Filters = { project: "", epic: "", status: "", priority: "", label: "", repo: "", q: "" };
+export const EMPTY_FILTERS: Filters = {
+  project: "",
+  epic: [],
+  status: [],
+  priority: [],
+  label: [],
+  repo: [],
+  q: "",
+};
 
 /** The fields of a ticket that filtering reads. */
 export interface FilterableTicket {
@@ -66,15 +92,24 @@ export interface FilterableTicket {
   epic?: { name: string } | null;
 }
 
+/** The values, without empty ones and without repeats, in their order. */
+const distinct = (values: readonly string[]) => [...new Set(values.filter((v) => v !== ""))];
+
 export function parseFilters(params: URLSearchParams): Filters {
-  const filters = { ...EMPTY_FILTERS };
-  for (const key of FILTER_KEYS) filters[key] = params.get(key) ?? "";
+  const filters: Filters = { ...EMPTY_FILTERS, project: params.get("project") ?? "", q: params.get("q") ?? "" };
+  for (const key of MULTI_FILTER_KEYS) filters[key] = distinct(params.getAll(key));
   return filters;
+}
+
+/** Whether a filter is set: a value, or at least one value for a multi-value filter. */
+export function isSet(filters: Filters, key: FilterKey): boolean {
+  const value = filters[key];
+  return typeof value === "string" ? value !== "" : value.length > 0;
 }
 
 /** Whether any of the given filters (every filter by default) is set. */
 export function hasFilters(filters: Filters, keys: readonly FilterKey[] = FILTER_KEYS): boolean {
-  return keys.some((key) => filters[key] !== "");
+  return keys.some((key) => isSet(filters, key));
 }
 
 /** What a filter control's value stores in the URL: nothing for blank text. */
@@ -84,13 +119,35 @@ export function urlValue(value: string): string {
 
 /**
  * The params with one filter set, or removed when the value is empty (or only
- * spaces, for the search). Other parameters and their order are kept.
+ * spaces, for the search). A multi-value filter is written as one parameter
+ * per value, in the order given, where its first parameter was; with no values
+ * it is removed. Other parameters and their order are kept.
  */
-export function withFilter(params: URLSearchParams, key: FilterKey, value: string): URLSearchParams {
-  const next = new URLSearchParams(params);
-  const stored = urlValue(value);
-  if (stored === "") next.delete(key);
-  else next.set(key, stored);
+export function withFilter<K extends FilterKey>(params: URLSearchParams, key: K, value: Filters[K]): URLSearchParams {
+  const values = typeof value === "string" ? distinct([urlValue(value)]) : distinct(value);
+  const next = new URLSearchParams();
+  let placed = false;
+  for (const [k, v] of params) {
+    if (k !== key) next.append(k, v);
+    else if (!placed) {
+      placed = true;
+      for (const stored of values) next.append(key, stored);
+    }
+  }
+  if (!placed) for (const stored of values) next.append(key, stored);
+  return next;
+}
+
+/**
+ * The params without the given values, each removed only from its own
+ * filter and only where the URL has it exactly so; the filters' other values
+ * and every other parameter are kept.
+ */
+export function withoutValues(params: URLSearchParams, drop: readonly FilterValue[]): URLSearchParams {
+  const next = new URLSearchParams();
+  for (const [k, v] of params) {
+    if (!drop.some((d) => d.key === k && d.value === v)) next.append(k, v);
+  }
   return next;
 }
 
@@ -147,8 +204,8 @@ export function filterSearch(search: string): string {
   const params = new URLSearchParams(search);
   const kept = new URLSearchParams();
   for (const key of FILTER_KEYS) {
-    const value = params.get(key);
-    if (value) kept.set(key, value);
+    const values = isMultiFilter(key) ? distinct(params.getAll(key)) : [params.get(key) ?? ""];
+    for (const value of values) if (value) kept.append(key, value);
   }
   if (parseUnmatched(params) === "hide") kept.set(UNMATCHED_PARAM, "hide");
   const qs = kept.toString();
@@ -161,8 +218,12 @@ export function ticketKey(ticket: Pick<FilterableTicket, "projectPrefix" | "numb
 
 const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 
+/** Whether a filter with the given values lets a ticket through: it's unset, or the ticket has any of them. */
+const anyOf = (chosen: readonly string[], has: (value: string) => boolean) => chosen.length === 0 || chosen.some(has);
+
 /**
- * Whether a ticket passes every filter. Project, epic, label and the search
+ * Whether a ticket passes every filter that is set, and a multi-value filter
+ * when it has any of its values. Project, epic, label and the search
  * compare case-insensitively; status and priority are fixed lowercase sets;
  * repos are matched exactly, as they are everywhere else. The epic filter's
  * NO_EPIC matches the tickets without an epic.
@@ -176,13 +237,12 @@ export function matchesFilters(
   docMatches?: ReadonlySet<string> | null,
 ): boolean {
   if (filters.project && !same(ticket.projectPrefix, filters.project)) return false;
-  if (filters.epic) {
-    if (isNoEpic(filters.epic) ? ticket.epic : !ticket.epic || !same(ticket.epic.name, filters.epic)) return false;
-  }
-  if (filters.status && ticket.status !== filters.status) return false;
-  if (filters.priority && ticket.priority !== filters.priority) return false;
-  if (filters.label && !(ticket.labels ?? []).some((l) => same(l.name, filters.label))) return false;
-  if (filters.repo && !(ticket.repos ?? []).includes(filters.repo)) return false;
+  const { epic } = ticket;
+  if (!anyOf(filters.epic, (e) => (isNoEpic(e) ? !epic : !!epic && same(epic.name, e)))) return false;
+  if (!anyOf(filters.status, (s) => ticket.status === s)) return false;
+  if (!anyOf(filters.priority, (p) => ticket.priority === p)) return false;
+  if (!anyOf(filters.label, (name) => (ticket.labels ?? []).some((l) => same(l.name, name)))) return false;
+  if (!anyOf(filters.repo, (r) => (ticket.repos ?? []).includes(r))) return false;
   const q = filters.q.trim().toLowerCase();
   if (q) {
     const haystacks = [ticketKey(ticket), ticket.title, ticket.description ?? ""];
@@ -210,10 +270,10 @@ export interface SelectOption {
 }
 
 /**
- * A dropdown's options and the value to show selected for a filter value from
- * the URL. With `ignoreCase` (for filters that match ignoring case, project and
- * label) a value in another case selects the option it matches; any value that
- * matches no option is added as one, so it still shows.
+ * A dropdown's options and the value to show selected for a single-value
+ * filter from the URL, the project. With `ignoreCase` (the project matches
+ * ignoring case) a value in another case selects the option it matches; any
+ * value that matches no option is added as one, so it still shows.
  */
 export function selectOptions(
   options: SelectOption[],
@@ -229,12 +289,49 @@ export function selectOptions(
 }
 
 /**
- * The repos to offer: every repo on the given tickets, sorted, plus the
- * selected one if no ticket carries it, so the control still shows it.
+ * A multi-value control's options and the ones to show chosen for a filter's
+ * values from the URL. With `ignoreCase` (for filters that match ignoring
+ * case, epic and label) a value in another case chooses the option it
+ * matches; a value that matches no option is added as one, so it still shows.
+ * The chosen ones are in option order.
  */
-export function repoOptions(tickets: readonly Pick<FilterableTicket, "repos">[], selected = ""): string[] {
+export function multiSelectOptions(
+  options: readonly SelectOption[],
+  chosen: readonly string[],
+  ignoreCase = false,
+): { options: SelectOption[]; chosen: string[] } {
+  const all = [...options];
+  const picked = new Set<string>();
+  for (const value of chosen) {
+    const match = all.find((o) => (ignoreCase ? o.value.toLowerCase() === value.toLowerCase() : o.value === value));
+    if (match) picked.add(match.value);
+    else {
+      all.push({ value, label: value });
+      picked.add(value);
+    }
+  }
+  return { options: all, chosen: all.filter((o) => picked.has(o.value)).map((o) => o.value) };
+}
+
+/**
+ * The values a multi-value control writes after one option is ticked or
+ * unticked: the chosen ones with that one flipped, in option order, so the
+ * same choice always makes the same URL.
+ */
+export function toggleValue(options: readonly SelectOption[], chosen: readonly string[], value: string): string[] {
+  const next = new Set(chosen);
+  if (next.has(value)) next.delete(value);
+  else next.add(value);
+  return options.filter((o) => next.has(o.value)).map((o) => o.value);
+}
+
+/**
+ * The repos to offer: every repo on the given tickets, sorted, plus the
+ * selected ones no ticket carries, so the control still shows them.
+ */
+export function repoOptions(tickets: readonly Pick<FilterableTicket, "repos">[], selected: readonly string[] = []): string[] {
   const repos = new Set<string>();
   for (const t of tickets) for (const r of t.repos ?? []) repos.add(r);
-  if (selected) repos.add(selected);
+  for (const r of selected) if (r) repos.add(r);
   return [...repos].sort((a, b) => a.localeCompare(b));
 }

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen, within } from "@testing-library/react";
 import { BrowserRouter } from "react-router-dom";
 import type { Board as BoardData, Project, Ticket, TicketRef } from "../api/client";
 import { LAST_PROJECT_KEY } from "../lib/defaultProject";
@@ -26,6 +26,24 @@ import Board from "./Board";
 import Graph from "./Graph";
 import Tickets from "./Tickets";
 import { AppRoutes } from "../App";
+
+// Opens a multi-value filter's list (FilterMultiSelect), unless it's open.
+async function openFilter(name: string) {
+  const button = within(screen.getByRole("group", { name })).getByRole("button", { expanded: false, hidden: false });
+  await act(async () => button.click());
+}
+// The Repo filter's options, opening its list first.
+async function repoRows() {
+  await openFilter("Repo");
+  return within(screen.getByRole("listbox", { name: "Repo" }))
+    .getAllByRole("option")
+    .map((o) => o.textContent);
+}
+// Ticks or unticks one of a multi-value filter's options, opening its list first.
+async function toggleFilter(name: string, option: string) {
+  if (!screen.queryByRole("listbox", { name })) await openFilter(name);
+  await act(async () => within(screen.getByRole("listbox", { name })).getByRole("option", { name: option }).click());
+}
 
 // jsdom has no ResizeObserver; this one reports every observed element when
 // a test says the browser has laid the page out.
@@ -231,11 +249,7 @@ describe.each(views)("%s without a project in its URL", (_name, page, path, empt
   it("counts only the project's tickets", async () => {
     await mount(page(), `${path}?project=ACP`);
     expect(count()).toBe("3 tickets");
-    await act(async () => {
-      const status = screen.getByLabelText("Status") as HTMLSelectElement;
-      status.value = "todo";
-      status.dispatchEvent(new Event("change", { bubbles: true }));
-    });
+    await toggleFilter("Status", "Todo");
     expect(count()).toBe("2 of 3 tickets");
   });
 
@@ -364,8 +378,7 @@ describe("Dependencies for one project", () => {
   it("offers only the project's repos", async () => {
     serves([...TICKETS, ticket("LDR", 3, { repos: ["other/repo"] })], PROJECTS);
     await mount(<Graph />, "/?project=ACP");
-    const repos = [...(screen.getByLabelText("Repo") as HTMLSelectElement).options].map((o) => o.value);
-    expect(repos).toEqual(["", "acme/api", "acme/web"]);
+    expect(await repoRows()).toEqual(["acme/api", "acme/web"]);
   });
 
   it("dims the cards the other filters don't match, within the project", async () => {
@@ -453,8 +466,16 @@ describe("Kanban for one project", () => {
   it("offers only the project's repos", async () => {
     serves([...TICKETS, ticket("LDR", 3, { repos: ["other/repo"] })], PROJECTS);
     await mount(<Board />, "/kanban?project=ACP");
-    const repos = [...(screen.getByLabelText("Repo") as HTMLSelectElement).options].map((o) => o.value);
-    expect(repos).toEqual(["", "acme/api", "acme/web"]);
+    expect(await repoRows()).toEqual(["acme/api", "acme/web"]);
+  });
+
+  it("offers only the project's repos with several chosen, keeping a chosen one it doesn't have", async () => {
+    // A repo is a string the tickets carry, never dropped from the URL; one
+    // named there still shows, while the other projects' repos stay out.
+    serves([...TICKETS, ticket("LDR", 3, { repos: ["other/repo", "more/repo"] })], PROJECTS);
+    await mount(<Board />, "/kanban?project=ACP&repo=acme%2Fweb&repo=other%2Frepo");
+    expect(await repoRows()).toEqual(["acme/api", "acme/web", "other/repo"]);
+    expect(window.location.search).toBe("?project=ACP&repo=acme%2Fweb&repo=other%2Frepo");
   });
 });
 
@@ -462,8 +483,16 @@ describe("Table for one project", () => {
   it("offers only the project's repos", async () => {
     serves([...TICKETS, ticket("LDR", 3, { repos: ["other/repo"] })], PROJECTS);
     await mount(<Tickets />, "/table?project=ACP");
-    const repos = [...(screen.getByLabelText("Repo") as HTMLSelectElement).options].map((o) => o.value);
-    expect(repos).toEqual(["", "acme/api", "acme/web"]);
+    expect(await repoRows()).toEqual(["acme/api", "acme/web"]);
+  });
+
+  it("offers only the project's repos with several chosen, keeping a chosen one it doesn't have", async () => {
+    // A repo is a string the tickets carry, never dropped from the URL; one
+    // named there still shows, while the other projects' repos stay out.
+    serves([...TICKETS, ticket("LDR", 3, { repos: ["other/repo", "more/repo"] })], PROJECTS);
+    await mount(<Tickets />, "/table?project=ACP&repo=acme%2Fweb&repo=other%2Frepo");
+    expect(await repoRows()).toEqual(["acme/api", "acme/web", "other/repo"]);
+    expect(window.location.search).toBe("?project=ACP&repo=acme%2Fweb&repo=other%2Frepo");
   });
 });
 
@@ -479,12 +508,6 @@ describe("Dependencies dimming or hiding the cards the filters don't match", () 
   const radio = (name: "Dim" | "Hide") => screen.getByRole("radio", { name }) as HTMLInputElement;
   const urlMode = () => new URLSearchParams(window.location.search).get("unmatched");
   const urlHas = (key: string) => new URLSearchParams(window.location.search).has(key);
-  const pick = (name: string, value: string) =>
-    act(async () => {
-      const select = screen.getByLabelText(name) as HTMLSelectElement;
-      select.value = value;
-      select.dispatchEvent(new Event("change", { bubbles: true }));
-    });
   const wheel = () =>
     act(async () => {
       canvas()!.parentElement!.dispatchEvent(new WheelEvent("wheel", { deltaY: 300, bubbles: true }));
@@ -629,7 +652,7 @@ describe("Dependencies dimming or hiding the cards the filters don't match", () 
     await layout();
     await wheel();
     const panned = canvas()!.style.transform;
-    await pick("Priority", "");
+    await toggleFilter("Priority", "High");
     await layout();
     expect(card("ACP-1")).toBeTruthy();
     expect(canvas()!.style.transform).not.toBe(panned);
@@ -638,7 +661,7 @@ describe("Dependencies dimming or hiding the cards the filters don't match", () 
     await layout();
     await wheel();
     const pannedInDim = canvas()!.style.transform;
-    await pick("Priority", "high");
+    await toggleFilter("Priority", "High");
     await layout();
     expect(canvas()!.style.transform).toBe(pannedInDim);
   });

@@ -372,7 +372,7 @@ describe("the selected view across a refetch", () => {
     // Nothing navigated: the view, and the filters in its URL, are the
     // user's, and a change to the data is no reason to move either.
     expect(screen.getByRole("heading", { name: heading })).toBeTruthy();
-    expect((screen.getByLabelText("Status") as HTMLSelectElement).value).toBe("todo");
+    expect(screen.getByRole("group", { name: "Status" }).querySelector("button")!.textContent).toBe("Todo");
     expect((screen.getByLabelText("Search") as HTMLInputElement).value).toBe("ticket");
   });
 });

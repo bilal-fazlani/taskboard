@@ -99,24 +99,42 @@ function selectedOption(html: string, name: string): string | undefined {
   return /<option value="([^"]*)" selected="">/.exec(select[1])?.[1];
 }
 
+// What the multi-value filter control with the given name reads, or
+// undefined when there is none.
+function filterReads(html: string, name: string): string | undefined {
+  const control = new RegExp(`<div role="group" aria-label="${name}"[^>]*><button[^>]*><span class="truncate">([^<]*)</span>`);
+  return control.exec(html)?.[1];
+}
+
 describe("filter panel", () => {
   const views = viewItems.map((i) => [i.label, i.to]);
 
   it.each(views)("renders on %s with every filter and no other project selector", (_name, path) => {
     const html = render(path);
     expect(html).toContain('role="search"');
-    for (const name of ["Epic", "Status", "Priority", "Label", "Repo"]) {
-      expect(selectedOption(html, name), name).toBe("");
+    for (const [name, all] of [
+      ["Epic", "All epics"],
+      ["Status", "All statuses"],
+      ["Priority", "All priorities"],
+      ["Label", "All labels"],
+      ["Repo", "All repos"],
+    ]) {
+      expect(filterReads(html, name), name).toBe(all);
     }
     // Every view always has a project: there is no "All projects", only a
     // placeholder that can't be picked until the bar has picked one.
     expect(html).toMatch(/<select aria-label="Project"[^>]*><option value="" disabled="" selected="">Project<\/option><\/select>/);
     expect(html).toContain('<input type="search" aria-label="Search"');
-    expect(html.match(/<select/g)).toHaveLength(6);
+    // The project is the one select; every other filter takes several values.
+    expect(html.match(/<select/g)).toHaveLength(1);
     // The epic comes right after the project, since epics belong to it.
-    expect(html.match(/<select aria-label="(\w+)"/g)!.slice(0, 2)).toEqual([
+    expect(html.match(/<(?:select|div role="group") aria-label="(\w+)"/g)!.slice(0, 6)).toEqual([
       '<select aria-label="Project"',
-      '<select aria-label="Epic"',
+      '<div role="group" aria-label="Epic"',
+      '<div role="group" aria-label="Status"',
+      '<div role="group" aria-label="Priority"',
+      '<div role="group" aria-label="Label"',
+      '<div role="group" aria-label="Repo"',
     ]);
     expect(html).not.toMatch(/All projects/i);
     // Nothing to clear.
@@ -126,12 +144,21 @@ describe("filter panel", () => {
   it.each(views)("reads its state from the URL on %s", (_name, path) => {
     const html = render(`${path}?project=ACP&epic=none&status=in_progress&priority=high&label=web&repo=a%2Fb&q=live+%26+hook&ticket=ACP-7`);
     expect(selectedOption(html, "Project")).toBe("ACP");
-    expect(selectedOption(html, "Epic")).toBe("none");
-    expect(selectedOption(html, "Status")).toBe("in_progress");
-    expect(selectedOption(html, "Priority")).toBe("high");
-    expect(selectedOption(html, "Label")).toBe("web");
-    expect(selectedOption(html, "Repo")).toBe("a/b");
+    expect(filterReads(html, "Epic")).toBe("No epic");
+    expect(filterReads(html, "Status")).toBe("In Progress");
+    expect(filterReads(html, "Priority")).toBe("High");
+    expect(filterReads(html, "Label")).toBe("web");
+    expect(filterReads(html, "Repo")).toBe("a/b");
     expect(html).toMatch(/aria-label="Search"[^>]*value="live &amp; hook"/);
+    expect(html).toContain("Clear filters");
+  });
+
+  it.each(views)("reads several values of a filter from repeated parameters on %s", (_name, path) => {
+    const html = render(`${path}?project=ACP&status=in_progress&status=todo&label=web&label=api&epic=none&epic=Views`);
+    expect(filterReads(html, "Status")).toBe("Todo, In Progress");
+    expect(filterReads(html, "Label")).toBe("web, api");
+    expect(filterReads(html, "Epic")).toBe("No epic, Views");
+    expect(html).toContain('title="Status: Todo, In Progress"');
     expect(html).toContain("Clear filters");
   });
 

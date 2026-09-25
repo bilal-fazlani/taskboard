@@ -104,7 +104,7 @@ describe("useTicketParam under BrowserRouter", () => {
     });
     expect(url()).toBe("/table?project=ACP&status=todo&q=url");
     expect(state.selected).toBeNull();
-    expect(filters.filters).toMatchObject({ project: "ACP", status: "todo", q: "url" });
+    expect(filters.filters).toMatchObject({ project: "ACP", status: ["todo"], q: "url" });
   });
 
   it("opens the ticket the URL names on load, by key or by id", async () => {
@@ -132,7 +132,7 @@ describe("useTicketParam under BrowserRouter", () => {
     await mount("/kanban");
     const before = state;
     await act(async () => {
-      filters.setFilter("status", "todo");
+      filters.setFilter("status", ["todo"]);
       before.open(tickets[0]);
     });
     expect(url()).toBe("/kanban?status=todo&ticket=ACP-7");
@@ -468,7 +468,7 @@ describe("useTicketParam under BrowserRouter", () => {
     await mount("/kanban");
     await act(async () => navigate("/table"));
     await act(async () => state.open(tickets[0]));
-    await act(async () => filters.setFilter("status", "todo"));
+    await act(async () => filters.setFilter("status", ["todo"]));
     expect(url()).toBe("/table?ticket=ACP-7&status=todo");
 
     await act(async () => {

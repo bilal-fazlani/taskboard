@@ -18,3 +18,11 @@ export default function PriorityBadge({ priority }: { priority: string }) {
     </span>
   );
 }
+
+/** Just the priority's icon, in its colour, for places that write the name themselves. */
+export function PriorityIcon({ priority, className = "" }: { priority: string; className?: string }) {
+  const config = PRIORITY_CONFIG[priority];
+  if (!config) return null;
+  const Icon = config.icon;
+  return <Icon aria-hidden="true" className={`w-3 h-3 shrink-0 ${config.color} ${className}`} />;
+}
