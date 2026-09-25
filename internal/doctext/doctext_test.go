@@ -64,7 +64,9 @@ func TestMarkdownKeepsRenderedText(t *testing.T) {
 		{"table", "| Name | Status |\n| --- | --- |\n| Alpha | done |", "Name\nStatus\nAlpha\ndone"},
 		{"entities and escapes", "Fish &amp; chips, caf&eacute;, \\*not emphasis\\*", "Fish & chips, café, *not emphasis*"},
 		{"autolink shows its address", "<https://example.com/a>", "https://example.com/a"},
-		{"raw html is not rendered", "<div class=\"x\">\nhidden block\n</div>\n\nshown <span class=\"y\">inline</span>", "shown inline"},
+		// react-markdown shows raw HTML as literal text, so it reads as written.
+		{"raw html reads as written", "before\n\n<div class=\"x\">\nblock\n</div>\n\nshown <span class=\"y\">inline</span>", "before\n<div class=\"x\"> block </div>\nshown <span class=\"y\">inline</span>"},
+		{"html comment reads as written", "a <!-- note --> b", "a <!-- note --> b"},
 		{"thematic break", "a\n\n---\n\nb", "a\nb"},
 		{"hard break", "one  \ntwo", "one\ntwo"},
 		{"soft break", "one\ntwo", "one two"},

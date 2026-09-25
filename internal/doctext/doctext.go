@@ -1,7 +1,8 @@
 // Package doctext works out the readable text of a document: the words a
 // person sees when the document is shown, which is what the search matches.
 // HTML keeps only its visible text; markdown keeps its rendered text, with
-// link text, image alt text and code, but no markup and no addresses.
+// link text, image alt text and code, but no markup and no addresses. Raw
+// HTML inside markdown reads as written, as the web shows it.
 package doctext
 
 import (
@@ -12,15 +13,56 @@ import (
 
 	"github.com/tcarac/taskboard/internal/models"
 	"github.com/yuin/goldmark"
+	"github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/extension"
+	"github.com/yuin/goldmark/renderer"
+	"github.com/yuin/goldmark/util"
 	"golang.org/x/net/html"
 	"golang.org/x/net/html/atom"
 )
 
 // markdown renders CommonMark with GFM tables. Raw HTML inside markdown is
-// left out (goldmark's safe default), as the web's react-markdown leaves it
-// out too.
-var markdown = goldmark.New(goldmark.WithExtensions(extension.Table))
+// written out as literal text, since that is how the web's react-markdown
+// shows it: "<span>" appears on screen as those six characters.
+var markdown = goldmark.New(
+	goldmark.WithExtensions(extension.Table),
+	goldmark.WithRendererOptions(renderer.WithNodeRenderers(util.Prioritized(literalHTML{}, 100))),
+)
+
+// literalHTML renders raw HTML blocks and inline raw HTML escaped, as text,
+// in place of goldmark's default, which omits them. A block goes in a div of
+// its own so it doesn't run into the blocks either side.
+type literalHTML struct{}
+
+func (literalHTML) RegisterFuncs(reg renderer.NodeRendererFuncRegisterer) {
+	reg.Register(ast.KindHTMLBlock, func(w util.BufWriter, source []byte, n ast.Node, entering bool) (ast.WalkStatus, error) {
+		if !entering {
+			w.WriteString("</div>")
+			return ast.WalkContinue, nil
+		}
+		w.WriteString("<div>")
+		block := n.(*ast.HTMLBlock)
+		lines := block.Lines()
+		for i := 0; i < lines.Len(); i++ {
+			seg := lines.At(i)
+			w.WriteString(html.EscapeString(string(seg.Value(source))))
+		}
+		if block.HasClosure() {
+			w.WriteString(html.EscapeString(string(block.ClosureLine.Value(source))))
+		}
+		return ast.WalkContinue, nil
+	})
+	reg.Register(ast.KindRawHTML, func(w util.BufWriter, source []byte, n ast.Node, entering bool) (ast.WalkStatus, error) {
+		if entering {
+			segs := n.(*ast.RawHTML).Segments
+			for i := 0; i < segs.Len(); i++ {
+				seg := segs.At(i)
+				w.WriteString(html.EscapeString(string(seg.Value(source))))
+			}
+		}
+		return ast.WalkSkipChildren, nil
+	})
+}
 
 // ReadableText returns content's readable text for its format. Block
 // elements (paragraphs, headings, list items, table cells, line breaks) end
