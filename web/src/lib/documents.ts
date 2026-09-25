@@ -1,7 +1,14 @@
 // The document rules the web UI checks before it asks the server, worded
 // exactly as the server words them (internal/db/documents.go), plus the `doc`
 // query parameter that names the open document.
-import type { DocumentFormat, DocumentMeta, DocumentOwnerRef, DocumentWithContent, TextDocumentFormat } from "../api/client";
+import type {
+  DocumentFormat,
+  DocumentMeta,
+  DocumentOwnerRef,
+  DocumentWithContent,
+  ImageDocumentFormat,
+  TextDocumentFormat,
+} from "../api/client";
 
 /** The query parameter naming the open document by its display name. */
 export const DOC_PARAM = "doc";
@@ -30,6 +37,30 @@ export function extensionFor(format: DocumentFormat): string {
 /** Whether a format holds text (markdown or HTML) rather than an image. */
 export function isTextFormat(format: DocumentFormat): format is TextDocumentFormat {
   return format === "markdown" || format === "html";
+}
+
+/** Whether a format is an image (PNG, JPEG, GIF or WebP). */
+export function isImageFormat(format: DocumentFormat): format is ImageDocumentFormat {
+  return !isTextFormat(format);
+}
+
+/** An owner's images, in the order its documents are listed. */
+export function imagesOf<T extends Pick<DocumentMeta, "format">>(docs: readonly T[]): T[] {
+  return docs.filter((d) => isImageFormat(d.format));
+}
+
+/** An image's size in pixels as shown, "1280×800", or "" when it is not known. */
+export function imageDimensions(doc: Pick<DocumentMeta, "width" | "height">): string {
+  return doc.width && doc.height ? `${doc.width}×${doc.height}` : "";
+}
+
+/**
+ * The key the document window is mounted under. Every image shares one, so
+ * stepping from image to image with ← and → keeps the window (and its focus)
+ * rather than opening a new one.
+ */
+export function documentWindowKey(doc: Pick<DocumentMeta, "id" | "format">): string {
+  return isImageFormat(doc.format) ? "images" : doc.id;
 }
 
 /** How a document is shown, linked and downloaded: "Design spec.md". */
@@ -92,8 +123,19 @@ export function ownerKey(owner: DocumentOwnerRef): string {
   return "ticketId" in owner ? `ticket:${owner.ticketId}` : `epic:${owner.epicId}`;
 }
 
-const FORMAT_BY_EXTENSION: Record<string, TextDocumentFormat> = { ".md": "markdown", ".html": "html", ".htm": "html" };
-const EXTENSION_MESSAGE = "Only .md, .html and .htm files can be attached.";
+const FORMAT_BY_EXTENSION: Record<string, DocumentFormat> = {
+  ".md": "markdown",
+  ".html": "html",
+  ".htm": "html",
+  ".png": "png",
+  ".jpg": "jpeg",
+  ".jpeg": "jpeg",
+  ".gif": "gif",
+  ".webp": "webp",
+};
+// The server's words (msgDocExtension and msgDocSVG in internal/db/documents.go).
+const EXTENSION_MESSAGE = "Only .md, .html, .htm, .png, .jpg, .jpeg, .gif and .webp files can be attached.";
+const SVG_MESSAGE = "SVG images can't be attached. Use PNG, JPEG, GIF or WebP.";
 
 /** What the upload's file picker offers. */
 export const UPLOAD_ACCEPT = Object.keys(FORMAT_BY_EXTENSION).join(",");
@@ -112,11 +154,12 @@ export const DOCUMENT_SANDBOX = "allow-scripts";
  * (DocumentNameFromFilename): the extension picks the format and goes, and
  * every character the name rules refuse becomes a space.
  */
-export function nameFromFilename(filename: string): { name: string; format: TextDocumentFormat } | { error: string } {
+export function nameFromFilename(filename: string): { name: string; format: DocumentFormat } | { error: string } {
   const base = filename.split(/[\\/]/).pop() ?? "";
   const dot = base.lastIndexOf(".");
-  const format = dot >= 0 ? FORMAT_BY_EXTENSION[base.slice(dot).toLowerCase()] : undefined;
-  if (!format) return { error: EXTENSION_MESSAGE };
+  const extension = dot >= 0 ? base.slice(dot).toLowerCase() : "";
+  const format = FORMAT_BY_EXTENSION[extension];
+  if (!format) return { error: extension === ".svg" ? SVG_MESSAGE : EXTENSION_MESSAGE };
   const name = [...base.slice(0, dot)].map((c) => (NAME_CHAR.test(c) ? c : " ")).join("").trim();
   const error = documentNameError(name);
   return error ? { error } : { name, format };
@@ -153,7 +196,8 @@ export function contentTooLarge(content: string): string | null {
   return bytes > MAX_DOCUMENT_BYTES ? tooLargeMessage(bytes) : null;
 }
 
-/** The server's words for a document of `bytes` over the limit. */
-export function tooLargeMessage(bytes: number): string {
-  return `This document is ${formatSize(bytes)}. The limit is 8 MB.`;
+/** The server's words for a document of `bytes` over the limit, or an image's (ImageTooLargeMessage). */
+export function tooLargeMessage(bytes: number, format?: DocumentFormat): string {
+  const what = format && isImageFormat(format) ? "image" : "document";
+  return `This ${what} is ${formatSize(bytes)}. The limit is 8 MB.`;
 }

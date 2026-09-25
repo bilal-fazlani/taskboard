@@ -6,12 +6,17 @@ import {
   displayName,
   DOCUMENT_SANDBOX,
   documentNameError,
+  documentWindowKey,
   findDocument,
   formatSize,
+  imageDimensions,
+  imagesOf,
+  isImageFormat,
   isNotFound,
   isTextFormat,
   nameFromFilename,
   ownerKey,
+  tooLargeMessage,
   withDoc,
   withoutDoc,
 } from "./documents";
@@ -137,10 +142,45 @@ describe("nameFromFilename", () => {
   });
 
   it("refuses other types and names that clean to nothing", () => {
-    expect(nameFromFilename("notes.txt")).toEqual({ error: "Only .md, .html and .htm files can be attached." });
-    expect(nameFromFilename("README")).toEqual({ error: "Only .md, .html and .htm files can be attached." });
+    const refused = "Only .md, .html, .htm, .png, .jpg, .jpeg, .gif and .webp files can be attached.";
+    expect(nameFromFilename("notes.txt")).toEqual({ error: refused });
+    expect(nameFromFilename("README")).toEqual({ error: refused });
     expect(nameFromFilename(".md")).toEqual({ error: "Enter a name" });
     expect(nameFromFilename("%%.md")).toEqual({ error: "Enter a name" });
+  });
+});
+
+describe("image files", () => {
+  it("takes .png, .jpg, .jpeg, .gif and .webp as images, in any case, a .jpg and .jpeg as JPEG", () => {
+    expect(nameFromFilename("Login screen.png")).toEqual({ name: "Login screen", format: "png" });
+    expect(nameFromFilename("dir/Holiday photo.JPG")).toEqual({ name: "Holiday photo", format: "jpeg" });
+    expect(nameFromFilename("scan.jpeg")).toEqual({ name: "scan", format: "jpeg" });
+    expect(nameFromFilename("spinner.gif")).toEqual({ name: "spinner", format: "gif" });
+    expect(nameFromFilename("mock-v2.webp")).toEqual({ name: "mock-v2", format: "webp" });
+  });
+
+  it("refuses an SVG in the server's words", () => {
+    expect(nameFromFilename("logo.SVG")).toEqual({ error: "SVG images can't be attached. Use PNG, JPEG, GIF or WebP." });
+  });
+
+  it("says an image, not a document, is over the limit", () => {
+    expect(tooLargeMessage(9 * 1024 * 1024, "png")).toBe("This image is 9.0 MB. The limit is 8 MB.");
+    expect(tooLargeMessage(9 * 1024 * 1024, "markdown")).toBe("This document is 9.0 MB. The limit is 8 MB.");
+    expect(tooLargeMessage(9 * 1024 * 1024)).toBe("This document is 9.0 MB. The limit is 8 MB.");
+  });
+
+  it("lists an owner's images in order, with their size in pixels", () => {
+    const docs = [doc("1", "Plan"), doc("2", "Shot", "png"), doc("3", "Page", "html"), doc("4", "Photo", "jpeg")];
+    expect(imagesOf(docs).map((d) => d.id)).toEqual(["2", "4"]);
+    expect(isImageFormat("webp")).toBe(true);
+    expect(isImageFormat("html")).toBe(false);
+    expect(imageDimensions({ width: 1280, height: 800 })).toBe("1280×800");
+    expect(imageDimensions({})).toBe("");
+  });
+
+  it("keeps one document window for every image, and one per text document", () => {
+    expect(documentWindowKey(doc("2", "Shot", "png"))).toBe(documentWindowKey(doc("4", "Photo", "gif")));
+    expect(documentWindowKey(doc("1", "Plan"))).toBe("1");
   });
 });
 

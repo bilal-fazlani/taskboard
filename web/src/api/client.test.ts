@@ -28,6 +28,28 @@ describe("api.documents", () => {
     expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({ epicId: "e1", name: "Rollout", format: "html", content: "<p>x</p>" });
   });
 
+  it("uploads an image file as it is, named by its filename, to a ticket or an epic", async () => {
+    const fetch = vi.fn().mockImplementation(async () => new Response(JSON.stringify({ id: "d9", format: "png" }), { status: 201 }));
+    vi.stubGlobal("fetch", fetch);
+    const file = new File([new Uint8Array([137, 80, 78, 71])], "Login screen.png", { type: "image/png" });
+    expect(await api.documents.createImage({ ticketId: "t1" }, file)).toEqual({ id: "d9", format: "png" });
+    const [url, init] = fetch.mock.calls[0];
+    expect(url).toBe("/api/documents/images?ticket=t1&filename=Login+screen.png");
+    expect(init.method).toBe("POST");
+    expect(init.body).toBe(file);
+    expect(init.headers["Content-Type"]).toBe("image/png");
+
+    await api.documents.createImage({ epicId: "e1" }, new File(["x"], "a.webp"));
+    const [epicUrl, epicInit] = fetch.mock.calls[1];
+    expect(epicUrl).toBe("/api/documents/images?epic=e1&filename=a.webp");
+    expect(epicInit.headers["Content-Type"]).toBe("application/octet-stream");
+  });
+
+  it("points an image and its thumbnail at the revision shown", () => {
+    expect(api.documents.imageUrl("d1", 4)).toBe("/api/documents/d1/image?rev=4");
+    expect(api.documents.thumbnailUrl("d1", 4)).toBe("/api/documents/d1/thumbnail?rev=4");
+  });
+
   it("lists a ticket's documents or an epic's", async () => {
     const fetch = vi.fn().mockImplementation(async () => new Response("[]", { status: 200 }));
     vi.stubGlobal("fetch", fetch);

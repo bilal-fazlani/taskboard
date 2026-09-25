@@ -299,6 +299,25 @@ export const api = {
     /** The page itself, served sandboxed; a new revision is a new URL, so the frame reloads. */
     rawUrl: (id: string, revision: number) => `/api/documents/${encodeURIComponent(id)}/raw?rev=${revision}`,
     /**
+     * Add an image from its file, sent as it is. The server takes the format
+     * and the name from `filename`; a refused file is a 400 with the store's
+     * message.
+     */
+    createImage: (owner: DocumentOwnerRef, file: File) => {
+      const q = new URLSearchParams(
+        "ticketId" in owner ? { ticket: owner.ticketId, filename: file.name } : { epic: owner.epicId, filename: file.name },
+      );
+      return request<DocumentMeta>(`/api/documents/images?${q.toString()}`, {
+        method: "POST",
+        headers: { "Content-Type": file.type || "application/octet-stream" },
+        body: file,
+      });
+    },
+    /** An image's file; a new revision is a new URL, so an agent's replace shows at once. */
+    imageUrl: (id: string, revision: number) => `/api/documents/${encodeURIComponent(id)}/image?rev=${revision}`,
+    /** An image's small thumbnail, by revision as imageUrl is. */
+    thumbnailUrl: (id: string, revision: number) => `/api/documents/${encodeURIComponent(id)}/thumbnail?rev=${revision}`,
+    /**
      * The ids of the project's tickets that have a document whose display
      * name or readable text contains `q`, ignoring case. Epic documents are
      * not searched.

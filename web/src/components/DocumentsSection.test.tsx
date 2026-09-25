@@ -1,14 +1,16 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { DocumentMeta } from "../api/client";
 
 const mockApi = vi.hoisted(() => ({
   documents: {
     create: vi.fn(),
+    createImage: vi.fn(),
     update: vi.fn(),
     delete: vi.fn(),
     downloadUrl: (id: string) => `/api/documents/${id}/download`,
+    thumbnailUrl: (id: string, revision: number) => `/api/documents/${id}/thumbnail?rev=${revision}`,
   },
 }));
 vi.mock("../api/client", () => ({ api: mockApi }));
@@ -208,9 +210,9 @@ describe("DocumentsSection", () => {
     expect(screen.getByRole("link", { name: "Download Report.html" }).getAttribute("href")).toBe("/api/documents/d2/download");
   });
 
-  it("accepts .md, .html and .htm uploads", () => {
+  it("accepts .md, .html and .htm uploads, and PNG, JPEG, GIF and WebP images", () => {
     setup();
-    expect(screen.getByLabelText("Upload a document").getAttribute("accept")).toBe(".md,.html,.htm");
+    expect(screen.getByLabelText("Upload a document").getAttribute("accept")).toBe(".md,.html,.htm,.png,.jpg,.jpeg,.gif,.webp");
   });
 
   it("uploads an .HTM file as an HTML document named from its filename", async () => {
@@ -228,7 +230,7 @@ describe("DocumentsSection", () => {
     const txt = new File(["x"], "notes.txt");
     const readTxt = vi.spyOn(txt, "text");
     fireEvent.change(screen.getByLabelText("Upload a document"), { target: { files: [txt] } });
-    expect(await screen.findByText("Only .md, .html and .htm files can be attached.")).toBeTruthy();
+    expect(await screen.findByText("Only .md, .html, .htm, .png, .jpg, .jpeg, .gif and .webp files can be attached.")).toBeTruthy();
 
     const big = new File(["x"], "big.md");
     Object.defineProperty(big, "size", { value: 8 * 1024 * 1024 + 1 });
@@ -245,5 +247,93 @@ describe("DocumentsSection", () => {
     setup();
     fireEvent.change(screen.getByLabelText("Upload a document"), { target: { files: [new File(["x"], "notes.md")] } });
     expect(await screen.findByText('This ticket already has a document called "Notes.md".')).toBeTruthy();
+  });
+  describe("images", () => {
+    const shot: DocumentMeta = {
+      ...spec, id: "d5", name: "Login screen", format: "png", size: 240 * 1024, revision: 3, width: 1280, height: 800,
+    };
+
+    it("shows an image row with its thumbnail and its size in pixels, and opens it", () => {
+      const { onOpen } = setup([spec, shot]);
+      const [textRow, imageRow] = screen.getAllByTestId("document-row");
+      const thumb = within(imageRow).getByTestId("document-thumbnail");
+      expect(thumb.getAttribute("src")).toBe("/api/documents/d5/thumbnail?rev=3");
+      expect(thumb.getAttribute("alt")).toBe("");
+      expect(within(imageRow).queryByTestId("document-icon-markdown")).toBeNull();
+      expect(within(imageRow).getByText("240 KB · 1280×800")).toBeTruthy();
+      // A text row keeps its icon and when it changed.
+      expect(within(textRow).queryByTestId("document-thumbnail")).toBeNull();
+      expect(within(textRow).getByTestId("document-icon-markdown")).toBeTruthy();
+      fireEvent.click(screen.getByRole("button", { name: "Login screen.png" }));
+      expect(onOpen).toHaveBeenCalledWith(shot);
+    });
+
+    it("downloads, renames and deletes an image as any other document", async () => {
+      mockApi.documents.update.mockResolvedValue({ ...shot, name: "Sign in" });
+      mockApi.documents.delete.mockResolvedValue(undefined);
+      const { onChanged } = setup([shot]);
+      expect(screen.getByRole("link", { name: "Download Login screen.png" }).getAttribute("download")).toBe("Login screen.png");
+
+      fireEvent.click(screen.getByRole("button", { name: "Rename Login screen.png" }));
+      expect(screen.getByText(".png")).toBeTruthy();
+      const input = screen.getByRole("textbox", { name: "Document name" });
+      fireEvent.change(input, { target: { value: "Sign in" } });
+      fireEvent.submit(input);
+      await waitFor(() => expect(mockApi.documents.update).toHaveBeenCalledWith("d5", { name: "Sign in" }));
+      await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1));
+
+      fireEvent.click(screen.getByRole("button", { name: "Delete Login screen.png" }));
+      fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Delete" }));
+      await waitFor(() => expect(mockApi.documents.delete).toHaveBeenCalledWith("d5"));
+      await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(2));
+    });
+
+    it.each([
+      ["Login screen.png", "image/png"],
+      ["Holiday photo.JPG", "image/jpeg"],
+      ["Holiday photo.jpeg", "image/jpeg"],
+      ["Spinner.gif", "image/gif"],
+      ["Mock.webp", "image/webp"],
+    ])("uploads %s as an image file, without reading it here", async (filename, type) => {
+      const created = { ...shot, id: "d9" };
+      mockApi.documents.createImage.mockResolvedValue(created);
+      const { onCreated } = setup();
+      const file = new File([new Uint8Array([1, 2, 3])], filename, { type });
+      const read = vi.spyOn(file, "text");
+      fireEvent.change(screen.getByLabelText("Upload a document"), { target: { files: [file] } });
+      await waitFor(() => expect(onCreated).toHaveBeenCalledWith(created, false));
+      expect(mockApi.documents.createImage).toHaveBeenCalledWith({ ticketId: "t1" }, file);
+      expect(mockApi.documents.create).not.toHaveBeenCalled();
+      expect(read).not.toHaveBeenCalled();
+    });
+
+    it("uploads an image to an epic", async () => {
+      mockApi.documents.createImage.mockResolvedValue({ ...shot, id: "d9", ticketId: undefined, epicId: "e1" });
+      const { onCreated } = setup([], { owner: { epicId: "e1" }, ownerNoun: "epic" });
+      const file = new File(["x"], "Plan.png", { type: "image/png" });
+      fireEvent.change(screen.getByLabelText("Upload a document"), { target: { files: [file] } });
+      await waitFor(() => expect(onCreated).toHaveBeenCalled());
+      expect(mockApi.documents.createImage).toHaveBeenCalledWith({ epicId: "e1" }, file);
+    });
+
+    it("refuses an SVG, and an image over 8 MB, before reading it or asking the server", async () => {
+      setup();
+      const svg = new File(["<svg/>"], "logo.svg", { type: "image/svg+xml" });
+      fireEvent.change(screen.getByLabelText("Upload a document"), { target: { files: [svg] } });
+      expect(await screen.findByText("SVG images can't be attached. Use PNG, JPEG, GIF or WebP.")).toBeTruthy();
+
+      const big = new File(["x"], "big.png", { type: "image/png" });
+      Object.defineProperty(big, "size", { value: 9 * 1024 * 1024 });
+      fireEvent.change(screen.getByLabelText("Upload a document"), { target: { files: [big] } });
+      expect(await screen.findByText("This image is 9.0 MB. The limit is 8 MB.")).toBeTruthy();
+      expect(mockApi.documents.createImage).not.toHaveBeenCalled();
+    });
+
+    it("shows the server's reason when an image is refused", async () => {
+      mockApi.documents.createImage.mockRejectedValue(new Error('API error 400: {"error":"This file isn\'t a PNG image."}'));
+      setup();
+      fireEvent.change(screen.getByLabelText("Upload a document"), { target: { files: [new File(["x"], "fake.png")] } });
+      expect(await screen.findByText("This file isn't a PNG image.")).toBeTruthy();
+    });
   });
 });

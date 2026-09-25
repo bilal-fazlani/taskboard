@@ -2,7 +2,16 @@ import { useRef, useState } from "react";
 import { Download, FileCode, FileText, Pencil, Plus, Trash2, Upload, X } from "lucide-react";
 import { api, type DocumentMeta, type DocumentOwnerRef } from "../api/client";
 import { activityTime } from "../lib/activity";
-import { displayName, formatSize, MAX_DOCUMENT_BYTES, nameFromFilename, tooLargeMessage, UPLOAD_ACCEPT } from "../lib/documents";
+import {
+  displayName,
+  formatSize,
+  imageDimensions,
+  isImageFormat,
+  MAX_DOCUMENT_BYTES,
+  nameFromFilename,
+  tooLargeMessage,
+  UPLOAD_ACCEPT,
+} from "../lib/documents";
 import { serverMessage } from "../lib/epics";
 import DeleteDocumentConfirm from "./DeleteDocumentConfirm";
 import DocumentRenameField from "./DocumentRenameField";
@@ -16,8 +25,10 @@ const ICON_BUTTON = "shrink-0 text-slate-500 transition-colors hover:text-slate-
 // A ticket's documents, in the order they were added: each opens in the
 // document modal, and can be downloaded, renamed in place or deleted. New
 // creates an empty markdown document by name; Upload adds a .md, .html or
-// .htm file, named from its filename (the extension sets the format),
-// checking its type and size before reading it. HTML rows get a code icon.
+// .htm file, or a .png, .jpg, .jpeg, .gif or .webp image, named from its
+// filename (the extension sets the format), checking its type and size
+// before reading it. HTML rows get a code icon; an image row shows its
+// thumbnail, and its size in pixels where the others show when they changed.
 export default function DocumentsSection({
   documents,
   failed,
@@ -56,11 +67,16 @@ export default function DocumentsSection({
       return;
     }
     if (file.size > MAX_DOCUMENT_BYTES) {
-      setUploadError(tooLargeMessage(file.size));
+      setUploadError(tooLargeMessage(file.size, parsed.format));
       return;
     }
     setUploading(true);
     try {
+      if (isImageFormat(parsed.format)) {
+        // The server reads the file itself, and names it from its filename.
+        onCreated(await api.documents.createImage(owner, file), false);
+        return;
+      }
       const content = await file.text();
       onCreated(await api.documents.create({ ...owner, name: parsed.name, format: parsed.format, content }), false);
     } catch (err) {
@@ -82,7 +98,15 @@ export default function DocumentsSection({
           const shown = displayName(doc);
           return (
             <li key={doc.id} data-testid="document-row" className="flex items-center gap-2.5 px-3 py-2">
-              {doc.format === "html" ? (
+              {isImageFormat(doc.format) ? (
+                <img
+                  src={api.documents.thumbnailUrl(doc.id, doc.revision)}
+                  alt=""
+                  data-testid="document-thumbnail"
+                  loading="lazy"
+                  className="h-8 w-8 shrink-0 rounded border border-slate-700 bg-slate-800 object-cover"
+                />
+              ) : doc.format === "html" ? (
                 <FileCode aria-hidden="true" data-testid="document-icon-html" className="h-4 w-4 shrink-0 text-slate-500" />
               ) : (
                 <FileText aria-hidden="true" data-testid="document-icon-markdown" className="h-4 w-4 shrink-0 text-slate-500" />
@@ -108,7 +132,9 @@ export default function DocumentsSection({
                     {shown}
                   </button>
                   <span className="shrink-0 whitespace-nowrap text-xs text-slate-500">
-                    {formatSize(doc.size)} · {activityTime(doc.updatedAt)}
+                    {[formatSize(doc.size), isImageFormat(doc.format) ? imageDimensions(doc) : activityTime(doc.updatedAt)]
+                      .filter(Boolean)
+                      .join(" · ")}
                   </span>
                   <a href={api.documents.downloadUrl(doc.id)} download={shown} aria-label={`Download ${shown}`} title="Download" className={ICON_BUTTON}>
                     <Download className="h-3.5 w-3.5" />
@@ -135,7 +161,7 @@ export default function DocumentsSection({
         <button type="button" onClick={() => setCreating(true)} aria-label="New document" title="New document" className={HEADER_BUTTON}>
           <Plus aria-hidden="true" className="h-3 w-3" /> New
         </button>
-        <button type="button" onClick={() => fileRef.current?.click()} disabled={uploading} title="Upload a .md, .html or .htm file" className={`${HEADER_BUTTON} disabled:opacity-60`}>
+        <button type="button" onClick={() => fileRef.current?.click()} disabled={uploading} title="Upload a .md, .html or .htm file, or a PNG, JPEG, GIF or WebP image" className={`${HEADER_BUTTON} disabled:opacity-60`}>
           <Upload aria-hidden="true" className="h-3 w-3" /> Upload
         </button>
         <input
