@@ -4,13 +4,14 @@ import { ownerKey } from "../lib/documents";
 import { useLiveRefresh } from "./useLiveRefresh";
 
 /**
- * An owner's documents, loaded on mount and again on every live change, so
+ * An owner's documents (a ticket's or an epic's), loaded on mount and again on every live change, so
  * an agent's new document shows up without a reload. Each load keeps only
  * its newest reply. Null until the first load; a failed first load sets
  * `failed`, and a failed reload keeps what is on screen.
  */
 export function useOwnerDocuments(owner: DocumentOwnerRef) {
-  const { ticketId } = owner;
+  const ticketId = "ticketId" in owner ? owner.ticketId : undefined;
+  const epicId = "epicId" in owner ? owner.epicId : undefined;
   const key = ownerKey(owner);
   const [loaded, setLoaded] = useState<{ key: string; documents: DocumentMeta[] } | null>(null);
   const [failedKey, setFailedKey] = useState<string | null>(null);
@@ -21,7 +22,7 @@ export function useOwnerDocuments(owner: DocumentOwnerRef) {
     // Through a promise so a test's API mock without `documents` fails the
     // load rather than the render.
     Promise.resolve()
-      .then(() => api.documents.list({ ticketId }))
+      .then(() => api.documents.list(ticketId !== undefined ? { ticketId } : { epicId: epicId ?? "" }))
       .then((docs) => {
         if (n !== seq.current) return;
         setLoaded({ key, documents: Array.isArray(docs) ? docs : [] });
@@ -30,7 +31,7 @@ export function useOwnerDocuments(owner: DocumentOwnerRef) {
       .catch(() => {
         if (n === seq.current) setFailedKey(key);
       });
-  }, [key, ticketId]);
+  }, [key, ticketId, epicId]);
 
   useEffect(() => {
     reload();

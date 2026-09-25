@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, useEffect } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import type { DocumentMeta } from "../api/client";
+import type { DocumentMeta, DocumentOwnerRef } from "../api/client";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -26,19 +26,19 @@ let container: HTMLDivElement;
 
 const spec: DocumentMeta = { id: "d1", name: "Design spec", format: "markdown", size: 1, revision: 1, createdAt: "", updatedAt: "" };
 
-function Harness({ ticketId }: { ticketId: string }) {
-  const s = useOwnerDocuments({ ticketId });
+function Harness({ owner }: { owner: DocumentOwnerRef }) {
+  const s = useOwnerDocuments(owner);
   useEffect(() => {
     state = s;
   });
   return null;
 }
 
-async function mount(ticketId: string) {
+async function mount(ticketId: string | DocumentOwnerRef) {
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
-  await act(async () => root.render(<Harness ticketId={ticketId} />));
+  await act(async () => root.render(<Harness owner={typeof ticketId === "string" ? { ticketId } : ticketId} />));
 }
 
 afterEach(() => {
@@ -83,6 +83,22 @@ describe("useOwnerDocuments", () => {
     mockApi.documents.list.mockResolvedValueOnce([spec]);
     await act(async () => state.reload());
     await act(async () => answerFirst([]));
+    expect(state.documents).toEqual([spec]);
+  });
+
+  it("loads an epic's documents, and a different owner's list never shows for another", async () => {
+    const plan: DocumentMeta = { ...spec, id: "d2", ticketId: undefined, epicId: "e1", name: "Rollout" };
+    mockApi.documents.list.mockResolvedValueOnce([plan]);
+    await mount({ epicId: "e1" });
+    expect(mockApi.documents.list).toHaveBeenCalledWith({ epicId: "e1" });
+    expect(state.documents).toEqual([plan]);
+
+    let answer: (docs: DocumentMeta[]) => void = () => {};
+    mockApi.documents.list.mockReturnValueOnce(new Promise((resolve) => (answer = resolve)));
+    await act(async () => root.render(<Harness owner={{ ticketId: "e1" }} />));
+    expect(mockApi.documents.list).toHaveBeenLastCalledWith({ ticketId: "e1" });
+    expect(state.documents).toBeNull();
+    await act(async () => answer([spec]));
     expect(state.documents).toEqual([spec]);
   });
 });

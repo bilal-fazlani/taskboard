@@ -22,6 +22,20 @@ describe("api.documents", () => {
     expect(JSON.parse(init.body)).toEqual({ ticketId: "t1", name: "Notes", format: "markdown", content: "" });
   });
 
+  it("creates an epic's document with its epicId", async () => {
+    const fetch = stubFetch(201, { id: "d9" });
+    await api.documents.create({ epicId: "e1", name: "Rollout", format: "html", content: "<p>x</p>" });
+    expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({ epicId: "e1", name: "Rollout", format: "html", content: "<p>x</p>" });
+  });
+
+  it("lists a ticket's documents or an epic's", async () => {
+    const fetch = vi.fn().mockImplementation(async () => new Response("[]", { status: 200 }));
+    vi.stubGlobal("fetch", fetch);
+    await api.documents.list({ ticketId: "t1" });
+    await api.documents.list({ epicId: "e1" });
+    expect(fetch.mock.calls.map((c) => c[0])).toEqual(["/api/tickets/t1/documents", "/api/epics/e1/documents"]);
+  });
+
   it("saves content with the revision it started from", async () => {
     const fetch = stubFetch(200, { id: "d1", revision: 3 });
     await api.documents.update("d1", { content: "mine", expectedRevision: 2 });

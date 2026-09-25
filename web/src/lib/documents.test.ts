@@ -87,6 +87,11 @@ describe("ownerKey", () => {
   it("names the owner", () => {
     expect(ownerKey({ ticketId: "t1" })).toBe("ticket:t1");
   });
+
+  it("tells tickets and epics apart", () => {
+    expect(ownerKey({ epicId: "e1" })).toBe("epic:e1");
+    expect(ownerKey({ epicId: "x" })).not.toBe(ownerKey({ ticketId: "x" }));
+  });
 });
 
 describe("nameFromFilename", () => {

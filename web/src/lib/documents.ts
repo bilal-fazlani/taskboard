@@ -74,7 +74,7 @@ export function withoutDoc(params: URLSearchParams): URLSearchParams {
 
 /** A stable key for an owner, for effects and caches. */
 export function ownerKey(owner: DocumentOwnerRef): string {
-  return `ticket:${owner.ticketId}`;
+  return "ticketId" in owner ? `ticket:${owner.ticketId}` : `epic:${owner.epicId}`;
 }
 
 const FORMAT_BY_EXTENSION: Record<string, DocumentFormat> = { ".md": "markdown", ".html": "html", ".htm": "html" };

@@ -38,6 +38,10 @@ export interface Epic extends EpicProgress {
   description?: string;
   createdAt: string;
   updatedAt: string;
+  /** How many documents the epic has. */
+  documentCount?: number;
+  /** Its documents, without content; only a single epic carries them. */
+  documents?: DocumentMeta[];
 }
 
 export interface EpicList {
@@ -103,7 +107,9 @@ export type DocumentFormat = "markdown" | "html";
 /** A document without its content, as lists carry it. size is in bytes. */
 export interface DocumentMeta {
   id: string;
+  /** Exactly one of ticketId and epicId is set: the document's owner. */
   ticketId?: string;
+  epicId?: string;
   name: string;
   format: DocumentFormat;
   size: number;
@@ -117,8 +123,8 @@ export interface DocumentWithContent extends DocumentMeta {
   content: string;
 }
 
-/** What a document belongs to. */
-export type DocumentOwnerRef = { ticketId: string };
+/** What a document belongs to: one ticket or one epic. */
+export type DocumentOwnerRef = { ticketId: string } | { epicId: string };
 
 /**
  * Fields accepted when creating or updating a ticket. Deliberately NOT
@@ -263,10 +269,13 @@ export const api = {
   },
 
   documents: {
-    list: (owner: DocumentOwnerRef) => request<DocumentMeta[]>(`/api/tickets/${owner.ticketId}/documents`),
+    list: (owner: DocumentOwnerRef) =>
+      request<DocumentMeta[]>(
+        "ticketId" in owner ? `/api/tickets/${owner.ticketId}/documents` : `/api/epics/${owner.epicId}/documents`,
+      ),
     get: (id: string) => request<DocumentWithContent>(`/api/documents/${encodeURIComponent(id)}`),
     /** Add a document; a refused name or an unknown owner is a 400 with the store's message. */
-    create: (data: { ticketId: string; name: string; format: DocumentFormat; content: string }) =>
+    create: (data: DocumentOwnerRef & { name: string; format: DocumentFormat; content: string }) =>
       request<DocumentWithContent>("/api/documents", { method: "POST", body: JSON.stringify(data) }),
     /**
      * Rename and/or replace the content. With `expectedRevision`, a content
