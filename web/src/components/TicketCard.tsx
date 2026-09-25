@@ -155,10 +155,10 @@ export default function TicketCard({
     >
       <div className="flex items-start justify-between gap-2">
         {ticket.epic ? (
-          <span className="inline-flex min-w-0 items-center gap-1.5 text-[11px] text-slate-500">
+          <span className="inline-flex min-w-0 items-center gap-1.5 text-[11px] text-slate-400">
             {graph && <StatusDot status={ticket.status} attention={attention.dot} />}
             <EpicCrumb epic={ticket.epic} />
-            <span aria-hidden="true" className="shrink-0 text-slate-600">
+            <span aria-hidden="true" className="shrink-0 text-slate-500">
               /
             </span>
             <span className="shrink-0 whitespace-nowrap font-mono">
@@ -166,12 +166,12 @@ export default function TicketCard({
             </span>
           </span>
         ) : graph ? (
-          <span className="inline-flex items-center gap-1.5 text-[11px] font-mono text-slate-500">
+          <span className="inline-flex items-center gap-1.5 text-[11px] font-mono text-slate-400">
             <StatusDot status={ticket.status} attention={attention.dot} />
             {ticket.projectPrefix}-{ticket.number}
           </span>
         ) : (
-          <span className="text-[11px] font-mono text-slate-500">
+          <span className="text-[11px] font-mono text-slate-400">
             {ticket.projectPrefix}-{ticket.number}
           </span>
         )}

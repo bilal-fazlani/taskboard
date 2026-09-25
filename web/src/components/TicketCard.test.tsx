@@ -88,7 +88,7 @@ describe("TicketCard's header", () => {
 
   it("keeps the epic grey like the key: no colour of its own", () => {
     const { container } = render(<TicketCard ticket={headerTicket({ epic: epic("Views") })} />);
-    expect(left(container).className).toContain("text-slate-500");
+    expect(left(container).className).toContain("text-slate-400");
     const crumb = screen.getByTestId("card-epic");
     expect(crumb.getAttribute("style")).toBeNull();
     expect(crumb.querySelector("[style]")).toBeNull();
@@ -97,14 +97,14 @@ describe("TicketCard's header", () => {
   it("is exactly as before without an epic", () => {
     const { container } = render(<TicketCard ticket={headerTicket()} />);
     expect(screen.queryByTestId("card-epic")).toBeNull();
-    expect(left(container).outerHTML).toBe('<span class="text-[11px] font-mono text-slate-500">ACP-67</span>');
+    expect(left(container).outerHTML).toBe('<span class="text-[11px] font-mono text-slate-400">ACP-67</span>');
   });
 
   it("is exactly as before on the graph without an epic: the dot, then the key", () => {
     const { container } = render(<TicketCard ticket={headerTicket()} graph={GRAPH} />);
     expect(screen.queryByTestId("card-epic")).toBeNull();
     const side = left(container);
-    expect(side.className).toBe("inline-flex items-center gap-1.5 text-[11px] font-mono text-slate-500");
+    expect(side.className).toBe("inline-flex items-center gap-1.5 text-[11px] font-mono text-slate-400");
     expect(side.children).toHaveLength(1);
     expect(side.firstElementChild!.getAttribute("title")).toBe("In Progress");
     expect(side.textContent).toBe("ACP-67");
