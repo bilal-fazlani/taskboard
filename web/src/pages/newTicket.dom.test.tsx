@@ -137,8 +137,7 @@ const views = [
 ] as const;
 
 const form = () => screen.getByRole("heading", { name: "New Ticket" }).closest("form")!;
-// The form's first select is its project.
-const projectSelect = () => form().querySelector("select")!;
+const projectSelect = () => within(form()).getByLabelText("Project") as HTMLSelectElement;
 
 beforeEach(() => {
   mockApi.epics.list.mockResolvedValue({ epics: [], noEpic: { counts: {}, total: 0, complete: false, lastActivityAt: null } });
@@ -183,7 +182,7 @@ describe.each(views)("%s's new-ticket form", (_name, page, path, newTicketButton
     await act(async () => newTicketButton().click());
     fireEvent.change(projectSelect(), { target: { value: "p-ACP" } });
     expect(projectSelect().value).toBe("p-ACP");
-    fireEvent.change(screen.getByPlaceholderText("What needs to be done?"), { target: { value: "Elsewhere" } });
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Elsewhere" } });
     await act(async () => screen.getByRole("button", { name: "Create Ticket" }).click());
     expect(mockApi.tickets.create).toHaveBeenCalledWith(
       expect.objectContaining({ projectId: "p-ACP", title: "Elsewhere" }),
@@ -203,11 +202,29 @@ describe.each(views)("%s's new-ticket form", (_name, page, path, newTicketButton
   it("creates the ticket in the view's project when left alone", async () => {
     await mount(page(), `${path}?project=LDR`);
     await act(async () => newTicketButton().click());
-    fireEvent.change(screen.getByPlaceholderText("What needs to be done?"), { target: { value: "Here" } });
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Here" } });
     await act(async () => screen.getByRole("button", { name: "Create Ticket" }).click());
     expect(mockApi.tickets.create).toHaveBeenCalledWith(
       expect.objectContaining({ projectId: "p-LDR", title: "Here" }),
     );
+  });
+});
+
+describe.each(views)("%s's new-ticket form accessibility", (_name, page, path, newTicketButton) => {
+  it("is a dialog with an accessible name, and every field labelled", async () => {
+    await mount(page(), `${path}?project=LDR`);
+    await act(async () => newTicketButton().click());
+
+    const dialog = screen.getByRole("dialog", { name: "New Ticket" });
+    expect(dialog.getAttribute("aria-modal")).toBe("true");
+
+    expect(within(dialog).getByLabelText("Project")).toBeInstanceOf(HTMLSelectElement);
+    expect(within(dialog).getByLabelText("Epic")).toBeInstanceOf(HTMLSelectElement);
+    expect(within(dialog).getByLabelText("Title")).toBeInstanceOf(HTMLInputElement);
+    expect(within(dialog).getByLabelText("Description")).toBeInstanceOf(HTMLTextAreaElement);
+    expect(within(dialog).getByLabelText("Priority")).toBeInstanceOf(HTMLSelectElement);
+    expect(within(dialog).getByLabelText("Due Date")).toBeInstanceOf(HTMLInputElement);
+    expect(within(dialog).getByLabelText("Labels")).toBeInstanceOf(HTMLInputElement);
   });
 });
 
@@ -261,7 +278,7 @@ function servesEpics() {
 describe.each(views)("%s's new-ticket form epic", (_name, page, path, newTicketButton) => {
   const epicSelect = () => within(form()).getByLabelText("Epic") as HTMLSelectElement;
   const create = async (title = "Here") => {
-    fireEvent.change(screen.getByPlaceholderText("What needs to be done?"), { target: { value: title } });
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: title } });
     await act(async () => screen.getByRole("button", { name: "Create Ticket" }).click());
     return mockApi.tickets.create.mock.calls[0][0];
   };

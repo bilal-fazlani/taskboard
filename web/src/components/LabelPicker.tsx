@@ -3,9 +3,12 @@ import { X } from "lucide-react";
 import { api, type Label } from "../api/client";
 
 export default function LabelPicker({
+  id,
   value,
   onChange,
 }: {
+  /** Applied to the add-label input, so an outer label's htmlFor can name it. */
+  id?: string;
   value: string[];
   onChange: (names: string[]) => void;
 }) {
@@ -58,6 +61,7 @@ export default function LabelPicker({
         ))}
       </div>
       <input
+        id={id}
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
         onKeyDown={(e) => {
