@@ -60,6 +60,18 @@ func TestPrepareChecksContent(t *testing.T) {
 	_, err = Prepare(models.DocumentFormatPNG, pngFile[:len(pngFile)/2])
 	wantRefusal(t, err, "This PNG image can't be read. It may be damaged.")
 
+	// A private critical chunk (here one holding a script) makes the file
+	// damaged: browsers refuse unknown critical chunks, and it must not be
+	// stored.
+	ihdrEnd := 8 + 12 + 13
+	withHTML := append(append([]byte{}, pngFile[:ihdrEnd]...), appendPNGChunk(nil, "HTML", []byte("<script>alert(1)</script>"))...)
+	withHTML = append(withHTML, pngFile[ihdrEnd:]...)
+	_, err = Prepare(models.DocumentFormatPNG, withHTML)
+	wantRefusal(t, err, "This PNG image can't be read. It may be damaged.")
+	if _, err := Strip(models.DocumentFormatPNG, withHTML); err == nil {
+		t.Error("Strip kept a private critical chunk")
+	}
+
 	// A header claiming a huge picture is refused before anything is
 	// decoded.
 	ihdr := make([]byte, 13)

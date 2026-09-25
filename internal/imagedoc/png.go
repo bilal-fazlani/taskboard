@@ -13,9 +13,14 @@ var errPNG = errors.New("malformed PNG")
 // pngKeep are the ancillary chunks a PNG keeps: the ones that change how its
 // pixels are shown (transparency, colour space and profile, gamma, HDR
 // levels, background, pixel density, significant bits, histogram) and APNG
-// animation. Every critical chunk is kept too. Everything else goes: tEXt,
+// animation. Everything else goes: tEXt,
 // zTXt and iTXt (which carry XMP and other text), tIME, eXIf (but see
 // stripPNG), and private chunks.
+// pngCritical are the critical chunks PNG defines. A file with any other
+// critical chunk (an uppercase first letter) is refused: a browser will not
+// show it, and it could carry anything.
+var pngCritical = map[string]bool{"IHDR": true, "PLTE": true, "IDAT": true, "IEND": true}
+
 var pngKeep = map[string]bool{
 	"tRNS": true, "cHRM": true, "gAMA": true, "iCCP": true, "sBIT": true, "sRGB": true,
 	"cICP": true, "mDCv": true, "cLLi": true, "bKGD": true, "hIST": true, "pHYs": true,
@@ -25,7 +30,7 @@ var pngKeep = map[string]bool{
 // stripPNG copies a PNG's chunks as they are, leaving out the metadata ones
 // (see pngKeep). An eXIf chunk becomes a minimal one holding the
 // orientation, or goes when the orientation is 1. Anything after IEND is
-// dropped.
+// dropped. An unknown critical chunk makes the file malformed.
 func stripPNG(b []byte) ([]byte, int, error) {
 	if len(b) < len(pngSignature) || string(b[:len(pngSignature)]) != string(pngSignature) {
 		return nil, 0, errPNG
@@ -48,14 +53,16 @@ func stripPNG(b []byte) ([]byte, int, error) {
 		data := b[i+8 : i+8+n]
 		i = end
 
-		critical := typ[0] >= 'A' && typ[0] <= 'Z'
+		if typ[0] >= 'A' && typ[0] <= 'Z' && !pngCritical[typ] {
+			return nil, 0, errPNG
+		}
 		switch {
 		case typ == "eXIf":
 			if o := tiffOrientation(data); o > 1 {
 				orientation = o
 				out = appendPNGChunk(out, "eXIf", orientationTIFF(o))
 			}
-		case critical || pngKeep[typ]:
+		case pngCritical[typ] || pngKeep[typ]:
 			out = append(out, chunk...)
 		}
 		if typ == "IEND" {
