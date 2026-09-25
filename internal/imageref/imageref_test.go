@@ -84,6 +84,9 @@ func TestRenameMarkdownForms(t *testing.T) {
 		{name: "a leading BOM is skipped, as the web skips it", in: "\uFEFF```\n![a](<Login screen.png>)\n```\n\nShown: ![b](Login%20screen.png)\n", want: "\uFEFF```\n![a](<Login screen.png>)\n```\n\nShown: ![b](Home%20page.png)\n", uses: 1, rewritten: 1},
 		{name: "a BOM before an indented code block and a list", in: "\uFEFF    ![a](Login%20screen.png)\n\n- ![b](<Login screen.png>)\n", want: "\uFEFF    ![a](Login%20screen.png)\n\n- ![b](<Home page.png>)\n", uses: 1, rewritten: 1},
 		{name: "a BOM before a spaced reference", in: "\uFEFF![a](Login screen.png)", want: "\uFEFF![a](Home page.png)", uses: 1, rewritten: 1},
+		{name: "spaced form with a character reference is text, as on the web", in: "![a&amp;b](Login screen.png) ![c](Login&#32;x screen.png)", want: "![a&amp;b](Login screen.png) ![c](Login&#32;x screen.png)", uses: 0},
+		{name: "spaced form with a backslash escape is text, as on the web", img: Image{Name: "Login _screen", Format: "png"}, in: `![a](Login \_screen.png) ![b\*](Login _screen.png)`, want: `![a](Login \_screen.png) ![b\*](Login _screen.png)`, uses: 0},
+		{name: "spaced form beside one with a character reference", in: "![a&amp;b](Login screen.png) and ![c](Login screen.png)", want: "![a&amp;b](Login screen.png) and ![c](Home page.png)", uses: 1, rewritten: 1},
 		{name: "empty text", in: "", want: "", uses: 0},
 	})
 }

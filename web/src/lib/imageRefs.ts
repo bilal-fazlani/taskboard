@@ -20,7 +20,9 @@
 //                                        with or without a title
 // In any of these, whitespace or a line break inside the parentheses,
 // character references (Login&#32;screen.png) and backslash escapes
-// (login\_screen.png) are kept in step too.
+// (login\_screen.png) are kept in step too, except in the bare form with
+// spaces, which is shown as text when spelled with either. A leading byte
+// order mark is skipped, by the parser here and by the server alike.
 // Absolute http(s) URLs are shown as they are. Anything else, including
 // ./Login screen.png, a path on this server or another owner's image name,
 // is a missing image.
@@ -106,6 +108,8 @@ interface MdNode {
 // is left alone.
 const SPACED_IMAGE_REF = /!\[([^\]\n]*)\]\(\s*([^()<>\n]*?\S\.(?:png|jpe?g|gif|webp))\s*\)/gi;
 
+// (internal/imageref mirrors this: a spaced reference spelled with a
+// backslash escape or a character reference is text on both sides.)
 // Whether the n-th copy of `text` in the markdown a text node came from is
 // escaped (\![alt](…)), or cannot be found as written there (!\[alt](…)):
 // either way the author did not write an image. Without the source, nothing
@@ -164,6 +168,11 @@ function rewrite(node: MdNode, source: string | undefined): void {
  * escaped.
  */
 export function remarkSpacedImageRefs() {
-  return (tree: unknown, file?: { value?: unknown }) =>
-    rewrite(tree as MdNode, typeof file?.value === "string" ? file.value : undefined);
+  return (tree: unknown, file?: { value?: unknown }) => {
+    let source = typeof file?.value === "string" ? file.value : undefined;
+    // The parser drops a leading byte order mark and counts positions from
+    // after it, so the source they point into must drop it too.
+    if (source?.startsWith("\uFEFF")) source = source.slice(1);
+    rewrite(tree as MdNode, source);
+  };
 }

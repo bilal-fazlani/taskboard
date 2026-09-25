@@ -226,6 +226,15 @@ func (s *scan) definition(source []byte, n *ast.LinkReferenceDefinition, img Ima
 	s.targets = append(s.targets, t)
 }
 
+func allLiteral(units []unit) bool {
+	for _, u := range units {
+		if u.kind != literal {
+			return false
+		}
+	}
+	return true
+}
+
 // findSpaced looks for the spaced form in a run of adjacent text nodes, as
 // the web's plugin looks in a text node, skipping one whose "!" the author
 // escaped.
@@ -242,6 +251,13 @@ func (s *scan) findSpaced(content string, run []*ast.Text, img Image) {
 			slashes++
 		}
 		if slashes%2 == 1 {
+			continue
+		}
+		// The web matches the decoded text and then looks for it, as
+		// written, in the source: a match spelled with a backslash escape or
+		// a character reference (![a&amp;b](Login screen.png)) is not found
+		// there, so the web shows it as text, and so it is text here.
+		if !allLiteral(decodedUnits(content, at, start+m[1], true)) {
 			continue
 		}
 		t, ok := nameTarget(decodedUnits(content, start+m[4], start+m[5], true), img, true, false, true)

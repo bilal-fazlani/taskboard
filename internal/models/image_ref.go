@@ -21,7 +21,9 @@ import "strings"
 //     has no spaces) gives the name, with or without a title
 //   - in any of these, whitespace or a line break inside the parentheses,
 //     character references (Login&#32;screen.png) and backslash escapes
-//     (login\_screen.png)
+//     (login\_screen.png), except in the bare form with spaces, which the
+//     web shows as text when it is spelled with either
+//   - after a leading byte order mark, which is skipped as the web skips it
 //
 // HTML: src attributes, each URL in a srcset attribute, and CSS url() in a
 // style attribute or <style> element, quoted or not, where the URL is the

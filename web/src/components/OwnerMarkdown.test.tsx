@@ -68,6 +68,20 @@ describe("OwnerMarkdown images", () => {
     expect(container.textContent).toBe("![a](Login screen.png) and  and ![b](Login screen.png)");
   });
 
+  it("finds a spaced reference after a byte order mark, as the server does", () => {
+    const md = "\uFEFF![a](Login screen.png)\n\n```\n![b](Login screen.png)\n```\n\nShown: ![c](Login screen.png)";
+    const { container } = render(<OwnerMarkdown documents={docs}>{md}</OwnerMarkdown>);
+    expect(images(container).map((i) => i.getAttribute("alt"))).toEqual(["a", "c"]);
+    expect(container.textContent).toContain("![b](Login screen.png)");
+  });
+
+  it("leaves a spaced reference spelled with an escape or a character reference as text, as the server does", () => {
+    const md = "![a&amp;b](Login screen.png) and ![c](Login &#115;creen.png) and ![d\\*](Login screen.png)";
+    const { container } = render(<OwnerMarkdown documents={docs}>{md}</OwnerMarkdown>);
+    expect(images(container)).toHaveLength(0);
+    expect(container.textContent).toBe("![a&b](Login screen.png) and ![c](Login screen.png) and ![d*](Login screen.png)");
+  });
+
   it("keeps absolute URLs as they are", () => {
     const { container } = render(<OwnerMarkdown documents={docs}>{"![logo](https://example.com/logo.png)"}</OwnerMarkdown>);
     expect(images(container)[0].getAttribute("src")).toBe("https://example.com/logo.png");
