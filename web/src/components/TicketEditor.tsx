@@ -52,6 +52,7 @@ export default function TicketEditor({
   ticket,
   projects,
   ticketUrl,
+  deleted = false,
   closeRequested = false,
   onCloseCancelled,
   onDirtyChange,
@@ -65,10 +66,15 @@ export default function TicketEditor({
   // The ticket's shareable URL, from useTicketParam. Without one the header
   // shows no link or copy button.
   ticketUrl?: string;
+  // The ticket left the loaded tickets: it was deleted elsewhere. Every
+  // field, control and Save turn off, a notice says so, and Close is the
+  // only action left — it never asks, whatever is unsaved.
+  deleted?: boolean;
   // A close asked for from outside the editor: the browser's Back button, or
   // anything else that drops the `ticket` parameter. It goes through the same
   // discard question as the close button, and cancelling it calls
-  // onCloseCancelled, which puts the parameter back.
+  // onCloseCancelled, which puts the parameter back. Never set once `deleted`
+  // is: a read-only editor has nothing left to ask about.
   closeRequested?: boolean;
   onCloseCancelled?: () => void;
   // Reports unsaved edits, so whoever owns the URL knows the editor cannot
@@ -193,8 +199,9 @@ export default function TicketEditor({
   const [asking, setAsking] = useState(false);
   // While the open document holds unsaved text, the document asks first,
   // whichever Back dropped what: the editor's own question waits until the
-  // document's is answered.
-  const urlAsking = closeRequested && dirty && !docParam.dirty;
+  // document's is answered. `closeRequested` is never set once the ticket is
+  // deleted, but the extra guard here costs nothing and says so plainly.
+  const urlAsking = !deleted && closeRequested && dirty && !docParam.dirty;
   const confirmOpen = asking || urlAsking;
   const pendingActionRef = useRef<(() => void) | null>(null);
   const focusBeforeConfirmRef = useRef<HTMLElement | null>(null);
@@ -299,10 +306,12 @@ export default function TicketEditor({
   // path inside the editor goes through here, and so can anything else that
   // drops edits. While the question is already on screen it does nothing, so
   // the pending action and the element to give focus back to stay as they were.
+  // A deleted ticket never asks: nothing can be saved, so there is nothing to
+  // confirm losing.
   const confirmDiscardThen = useCallback(
     (action: () => void) => {
       if (confirmOpen) return;
-      if (!dirty) {
+      if (deleted || !dirty) {
         action();
         return;
       }
@@ -311,7 +320,7 @@ export default function TicketEditor({
       pendingActionRef.current = action;
       setAsking(true);
     },
-    [dirty, confirmOpen],
+    [deleted, dirty, confirmOpen],
   );
 
   const requestClose = useCallback(() => confirmDiscardThen(onClose), [confirmDiscardThen, onClose]);
@@ -354,6 +363,18 @@ export default function TicketEditor({
     if (closeRequested && !holding) onCloseRef.current();
   }, [closeRequested, holding]);
 
+  // Review 1: a discard question already on screen (Close, Escape or the
+  // scrim asked while the ticket still existed) has nothing left to ask
+  // about once it is deleted: dismiss it, leaving only the read-only
+  // notice, and give focus back to the dialog the way cancelling it does.
+  useEffect(() => {
+    if (!deleted) return;
+    pendingActionRef.current = null;
+    setAsking(false);
+    const dialog = dialogRef.current;
+    setTimeout(() => dialog?.focus());
+  }, [deleted]);
+
   const cancelDiscard = useCallback(() => {
     // Cancelling a close the URL asked for has to undo it as well, or the
     // editor would be left sitting on a URL that no longer names its ticket.
@@ -394,11 +415,16 @@ export default function TicketEditor({
   }, [confirmOpen, requestClose]);
 
   // Keep Tab and Shift+Tab inside the dialog, or inside the confirm while it
-  // is open.
+  // is open. A deleted ticket's fields, subtasks and documents sit under an
+  // `inert` ancestor (see `deleted` below): querySelectorAll still finds
+  // them, since `inert` is only a browser interaction rule, so they are
+  // filtered out here or Tab would land on a control that does nothing.
   const handleTrapTab = (e: React.KeyboardEvent<HTMLDivElement>) => {
     const root = confirmOpen ? confirmRef.current : dialogRef.current;
     if (e.key !== "Tab" || !root) return;
-    const focusable = Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE));
+    const focusable = Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(
+      (el) => !el.closest("[inert]"),
+    );
     if (focusable.length === 0) return;
     const first = focusable[0];
     const last = focusable[focusable.length - 1];
@@ -438,6 +464,9 @@ export default function TicketEditor({
   // A note goes with the save only when the save changes the status; it never
   // holds the save up.
   const handleSave = async () => {
+    // The Save button is hidden once the ticket is deleted; this guards the
+    // same case defensively.
+    if (deleted) return;
     const current = currentFields();
     const editsAtSave = editsRef.current;
     const write = editedWrite(baseRef.current, current);
@@ -525,7 +554,7 @@ export default function TicketEditor({
           <div className="min-w-0 flex-1">
             {ticketUrl && <TicketLink url={ticketUrl} />}
           </div>
-          {dirty && (
+          {dirty && !deleted && (
             <button
               type="button"
               onClick={handleSave}
@@ -535,18 +564,20 @@ export default function TicketEditor({
               Save Changes
             </button>
           )}
-          <button
-            type="button"
-            aria-label="Delete ticket"
-            title="Delete ticket"
-            onClick={() => {
-              onDelete(ticket.id);
-              onClose();
-            }}
-            className="shrink-0 text-slate-500 transition-colors hover:text-red-400"
-          >
-            <Trash2 className="h-4 w-4" />
-          </button>
+          {!deleted && (
+            <button
+              type="button"
+              aria-label="Delete ticket"
+              title="Delete ticket"
+              onClick={() => {
+                onDelete(ticket.id);
+                onClose();
+              }}
+              className="shrink-0 text-slate-500 transition-colors hover:text-red-400"
+            >
+              <Trash2 className="h-4 w-4" />
+            </button>
+          )}
           <button
             type="button"
             aria-label="Close"
@@ -558,7 +589,17 @@ export default function TicketEditor({
           </button>
         </header>
 
-        {saveError && (
+        {deleted && (
+          <div
+            role="status"
+            data-testid="ticket-deleted-notice"
+            className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-amber-500/30 bg-amber-500/10 px-4 py-2 text-xs text-amber-200 sm:px-6"
+          >
+            <span>This ticket was deleted. It is shown read-only.</span>
+          </div>
+        )}
+
+        {!deleted && saveError && (
           <div
             inert={confirmOpen}
             role="alert"
@@ -570,7 +611,7 @@ export default function TicketEditor({
           </div>
         )}
 
-        {changed && (
+        {!deleted && changed && (
           <div
             inert={confirmOpen}
             role="status"
@@ -602,7 +643,9 @@ export default function TicketEditor({
             <input
               aria-label="Title"
               value={title}
+              readOnly={deleted}
               onChange={(e) => {
+                if (deleted) return;
                 setTitle(e.target.value);
                 markDirty();
               }}
@@ -643,8 +686,10 @@ export default function TicketEditor({
                   ref={descriptionRef}
                   aria-label="Description"
                   value={description}
-                  {...pasteImages.textareaProps}
+                  readOnly={deleted}
+                  {...(deleted ? {} : pasteImages.textareaProps)}
                   onChange={(e) => {
+                    if (deleted) return;
                     setDescription(e.target.value);
                     markDirty();
                   }}
@@ -675,7 +720,7 @@ export default function TicketEditor({
               />
             </div>
 
-            <div>
+            <div inert={deleted} className={deleted ? "opacity-60" : ""}>
               <h3 className={SECTION_HEADING}>Subtasks</h3>
               <ul className="space-y-1.5">
                 {subtasks.map((sub) => (
@@ -731,24 +776,26 @@ export default function TicketEditor({
               </form>
             </div>
 
-            <DocumentsSection
-              documents={documents}
-              failed={documentsFailed}
-              notice={docParam.notice}
-              onDismissNotice={docParam.dismissNotice}
-              onOpen={docParam.open}
-              onChanged={reloadDocuments}
-              owner={{ ticketId: ticket.id }}
-              onCreated={(doc, edit) => {
-                // New opens it, in edit mode, once the list carries it: this
-                // reload or a live refresh, whichever lands first with it.
-                if (edit) {
-                  setEditOnOpen({ id: doc.id, opened: false });
-                  docParam.openWhenListed(doc);
-                }
-                reloadDocuments();
-              }}
-            />
+            <div inert={deleted} className={deleted ? "opacity-60" : ""}>
+              <DocumentsSection
+                documents={documents}
+                failed={documentsFailed}
+                notice={docParam.notice}
+                onDismissNotice={docParam.dismissNotice}
+                onOpen={docParam.open}
+                onChanged={reloadDocuments}
+                owner={{ ticketId: ticket.id }}
+                onCreated={(doc, edit) => {
+                  // New opens it, in edit mode, once the list carries it: this
+                  // reload or a live refresh, whichever lands first with it.
+                  if (edit) {
+                    setEditOnOpen({ id: doc.id, opened: false });
+                    docParam.openWhenListed(doc);
+                  }
+                  reloadDocuments();
+                }}
+              />
+            </div>
 
             {/* Last in this column. Agent requests and comments join this list as more kinds of entry. */}
             <div>
@@ -759,7 +806,10 @@ export default function TicketEditor({
 
           <aside
             aria-label="Ticket fields"
-            className="space-y-6 border-t border-slate-800 p-4 sm:p-6 lg:overflow-y-auto lg:border-l lg:border-t-0"
+            inert={deleted}
+            className={`space-y-6 border-t border-slate-800 p-4 sm:p-6 lg:overflow-y-auto lg:border-l lg:border-t-0 ${
+              deleted ? "opacity-60" : ""
+            }`}
           >
             <div className="grid grid-cols-2 gap-4">
               <div>
@@ -944,6 +994,7 @@ export default function TicketEditor({
           ownerLabel={ticketKey}
           startEditing={editOnOpen?.id === docParam.selected.id}
           deleted={docParam.deleted}
+          ticketDeleted={deleted}
           closeRequested={docParam.closeRequested || (docParam.dirty && !!closeRequested)}
           onCloseCancelled={() => {
             // Keep editing undoes every Back the question stood for: the

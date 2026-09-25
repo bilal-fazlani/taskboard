@@ -77,6 +77,7 @@ export default function DocumentModal({
   ownerNoun = "ticket",
   startEditing = false,
   deleted = false,
+  ticketDeleted = false,
   closeRequested = false,
   onClose,
   onCloseCancelled,
@@ -96,6 +97,13 @@ export default function DocumentModal({
   startEditing?: boolean;
   /** The document was deleted while this held unsaved edits. */
   deleted?: boolean;
+  /**
+   * The document's own ticket was deleted (not the document by itself): it
+   * behaves like the ticket's other fields, read-only with a notice, whatever
+   * unsaved text there is left visible and copyable, and no Save, discard
+   * question, rename or delete — Close is the only action, and it never asks.
+   */
+  ticketDeleted?: boolean;
   /** Back dropped the document while this held unsaved edits: ask. */
   closeRequested?: boolean;
   onClose: () => void;
@@ -135,7 +143,10 @@ export default function DocumentModal({
   const shown = displayName(doc);
 
   const dirty = editing && base !== null && draft !== base.content;
-  const urlAsking = closeRequested && dirty;
+  // Never true once the owning ticket is deleted: there is nothing left to
+  // ask about, and Back closes the modal outright instead (see the effect
+  // below).
+  const urlAsking = !ticketDeleted && closeRequested && dirty;
   const pasteImages = usePasteImages({
     owner,
     documents,
@@ -235,18 +246,45 @@ export default function DocumentModal({
     setSaveError(null);
   }, []);
 
-  // Runs `action` now, or once the user agrees to lose unsaved text.
+  // Runs `action` now, or once the user agrees to lose unsaved text. A
+  // deleted ticket never asks: nothing here can be saved either way.
   const confirmDiscardThen = useCallback(
     (action: () => void) => {
+      if (ticketDeleted) {
+        action();
+        return;
+      }
       if (asking) return;
       if (!dirty) action();
       else setPending(() => action);
     },
-    [asking, dirty],
+    [ticketDeleted, asking, dirty],
   );
 
   const requestClose = useCallback(() => confirmDiscardThen(onClose), [confirmDiscardThen, onClose]);
   useEscape(requestClose);
+
+  // Back dropped the document while its ticket is read-only: close straight
+  // away, the same as × or Escape, rather than leaving the modal sitting on
+  // a URL that no longer names it.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+  useEffect(() => {
+    if (ticketDeleted && closeRequested) onCloseRef.current();
+  }, [ticketDeleted, closeRequested]);
+
+  // Review 1: a discard question already on screen (× or Escape asked while
+  // the ticket still existed) has nothing left to ask about once it is
+  // deleted: dismiss it, leaving only the read-only notice, and give focus
+  // back to the dialog the way cancelling it does.
+  useEffect(() => {
+    if (!ticketDeleted) return;
+    setPending(null);
+    const dialog = dialogRef.current;
+    setTimeout(() => dialog?.focus());
+  }, [ticketDeleted]);
 
   const acceptDiscard = () => {
     const action = pending ?? (urlAsking ? onClose : null);
@@ -347,9 +385,36 @@ export default function DocumentModal({
     }
   };
 
-  const writing = editing && base !== null && mode === "write";
+  // An unsaved draft over a deleted ticket has nowhere else to show its raw
+  // text; a clean one just goes on showing the normal rendered view below,
+  // which is still selectable and copyable.
+  const showingUnsavedDraft = ticketDeleted && editable && dirty;
+  const writing = (editing && base !== null && mode === "write") || showingUnsavedDraft;
   let body: React.ReactNode;
-  if (image) {
+  if (showingUnsavedDraft) {
+    // The draft that was unsaved when the ticket went stays visible and
+    // selectable, but not editable: there is nothing left to save it to.
+    body = (
+      <textarea
+        aria-label="Document content"
+        readOnly
+        value={draft}
+        className="min-h-[20rem] w-full flex-1 resize-none rounded-lg border border-slate-700 bg-slate-800/50 px-3 py-2 font-mono text-sm text-slate-200 focus:outline-none"
+      />
+    );
+  } else if (ticketDeleted && editable) {
+    // Nothing unsaved: the normal rendered view, still read-only since
+    // there is no Edit button to reach anything else.
+    if (failed) body = <p className="text-sm text-slate-500">This document could not be loaded.</p>;
+    else if (saved === null) body = <p className="text-sm text-slate-600">Loading…</p>;
+    else if (saved.content === "") body = <p className="text-sm text-slate-600">This document is empty.</p>;
+    else
+      body = (
+        <div data-testid="document-content" className="prose-card">
+          <OwnerMarkdown documents={documents} ownerNoun={ownerNoun}>{saved.content}</OwnerMarkdown>
+        </div>
+      );
+  } else if (image) {
     body = <ImageView doc={doc} zoom={zoom} images={images} onStep={onStep} paused={stepPaused} />;
   } else if (!editable) {
     body = (
@@ -429,7 +494,9 @@ export default function DocumentModal({
               {shown}
             </h2>
           )}
-          {editing ? (
+          {ticketDeleted ? (
+            image && <ImageViewerControls doc={doc} images={images} zoom={zoom} onZoom={(z) => setZoomed({ id: doc.id, zoom: z })} />
+          ) : editing ? (
             <>
               {dirty && (
                 <span className="shrink-0 rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-medium text-amber-300">
@@ -507,7 +574,12 @@ export default function DocumentModal({
           </button>
         </header>
 
-        {editing && gone && (
+        {ticketDeleted && (
+          <div role="status" className={NOTICE}>
+            <span className="flex-1">This ticket was deleted. This document is shown read-only.</span>
+          </div>
+        )}
+        {!ticketDeleted && editing && gone && (
           <div role="status" className={NOTICE}>
             <span className="flex-1">This document was deleted while you were editing. Your text isn't saved yet.</span>
             <button type="button" onClick={saveAsNew} disabled={saving} className={`${NOTICE_BUTTON} disabled:opacity-60`}>
@@ -518,7 +590,7 @@ export default function DocumentModal({
             </button>
           </div>
         )}
-        {editing && !gone && conflict && (
+        {!ticketDeleted && editing && !gone && conflict && (
           <div role="status" className={NOTICE}>
             <span className="flex-1">This document changed while you were editing. Your text isn't saved yet.</span>
             <button type="button" onClick={keepMine} className={NOTICE_BUTTON}>
@@ -529,7 +601,7 @@ export default function DocumentModal({
             </button>
           </div>
         )}
-        {saveError && (
+        {!ticketDeleted && saveError && (
           <p role="alert" className="border-b border-red-500/40 bg-red-500/10 px-4 py-2 text-xs text-red-200 sm:px-6">
             {saveError}
           </p>
@@ -542,7 +614,7 @@ export default function DocumentModal({
         >
           {body}
         </div>
-        {(editing || imageStatus) && (
+        {!ticketDeleted && (editing || imageStatus) && (
           // Below the text, and kept after Save or Cancel while an image is
           // still on its way or one failed.
           <div className={`shrink-0 px-4 sm:px-8 ${imageStatus ? "pb-3" : ""}`}>

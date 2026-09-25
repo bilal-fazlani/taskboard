@@ -106,7 +106,12 @@ function makeTicket(overrides: Partial<Ticket> = {}): Ticket {
 
 function renderEditor(
   ticket = makeTicket(),
-  extra: { ticketUrl?: string; closeRequested?: boolean; onOpenTicket?: (id: string) => void } = {},
+  extra: {
+    ticketUrl?: string;
+    closeRequested?: boolean;
+    deleted?: boolean;
+    onOpenTicket?: (id: string) => void;
+  } = {},
 ) {
   const onClose = vi.fn();
   const onUpdate = vi.fn();
@@ -128,7 +133,7 @@ function renderEditor(
     // app, since the history helpers read window.location.
     { wrapper: BrowserRouter },
   );
-  const rerenderWith = (props: { closeRequested?: boolean; ticket?: Ticket }) =>
+  const rerenderWith = (props: { closeRequested?: boolean; deleted?: boolean; ticket?: Ticket }) =>
     utils.rerender(
       <TicketEditor
         ticket={props.ticket ?? ticket}
@@ -140,6 +145,7 @@ function renderEditor(
         onDirtyChange={onDirtyChange}
         {...extra}
         closeRequested={props.closeRequested ?? extra.closeRequested}
+        deleted={props.deleted ?? extra.deleted}
       />,
     );
   return { ...utils, rerenderWith, onClose, onUpdate, onDelete, onCloseCancelled, onDirtyChange };
@@ -1183,6 +1189,140 @@ describe("deleting", () => {
     const { onDelete, onClose } = renderEditor();
     fireEvent.click(screen.getByRole("button", { name: "Delete ticket" }));
     expect(onDelete).toHaveBeenCalledWith("t1");
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+});
+
+// Bilal 2026-09-17: whenever the open ticket is deleted elsewhere, the editor
+// stays open and turns read-only with a notice, whether or not it holds
+// unsaved edits — no close prompt, no Save, no Reload.
+describe("read-only once the ticket is deleted", () => {
+  it("shows a notice with no Reload, clean", () => {
+    renderEditor(makeTicket(), { deleted: true });
+    const notice = screen.getByTestId("ticket-deleted-notice");
+    expect(notice.getAttribute("role")).toBe("status");
+    expect(notice.textContent).toContain("This ticket was deleted. It is shown read-only.");
+    expect(within(notice).queryByRole("button", { name: "Reload" })).toBeNull();
+    expect(within(notice).queryByRole("button")).toBeNull();
+  });
+
+  it("makes the title and description read-only but still shows edits typed before the delete landed", () => {
+    const { rerenderWith } = renderEditor();
+    editTitle("Typed before the delete landed");
+    fireEvent.click(screen.getByRole("button", { name: "Write" }));
+    rerenderWith({ deleted: true });
+    const title = screen.getByLabelText("Title") as HTMLInputElement;
+    const description = screen.getByLabelText("Description") as HTMLTextAreaElement;
+    expect(title.readOnly).toBe(true);
+    expect(title.value).toBe("Typed before the delete landed");
+    expect(description.readOnly).toBe(true);
+  });
+
+  it("makes the status, priority, due date, epic, labels, repos, depends on and subtasks inert and visibly dimmed", () => {
+    const { container } = renderEditor(makeTicket(), { deleted: true });
+    const fields = container.querySelector('[aria-label="Ticket fields"]');
+    expect(fields?.hasAttribute("inert")).toBe(true);
+    expect(fields?.className).toContain("opacity-60");
+
+    const subtaskToggle = screen.getByRole("button", { name: "Mark done: Write tests" });
+    const subtasksSection = subtaskToggle.closest("div[inert]");
+    expect(subtasksSection).not.toBeNull();
+    expect(subtasksSection?.className).toContain("opacity-60");
+
+    const documentsSection = screen.getByText("Documents").closest("div[inert]");
+    expect(documentsSection).not.toBeNull();
+    expect(documentsSection?.className).toContain("opacity-60");
+  });
+
+  it("hides Save even for edits made just before the delete landed", () => {
+    const { rerenderWith } = renderEditor();
+    editTitle("Racing the delete");
+    expect(saveButton()).not.toBeNull();
+    rerenderWith({ deleted: true });
+    expect(saveButton()).toBeNull();
+    expect(screen.getByLabelText("Title")).toHaveProperty("value", "Racing the delete");
+  });
+
+  it("hides the Delete ticket button", () => {
+    renderEditor(makeTicket(), { deleted: true });
+    expect(screen.queryByRole("button", { name: "Delete ticket" })).toBeNull();
+  });
+
+  // Review 1 (major): querySelectorAll still finds controls under an inert
+  // ancestor, so the tab trap has to filter them out itself, or Tab lands on
+  // a control that does nothing and focus gets stuck.
+  it("skips the inert sections in the tab order, wrapping between Description and Copy link", () => {
+    // An empty description opens in Write mode, so the textarea is on
+    // screen without an extra click.
+    renderEditor(makeTicket({ description: "" }), { ticketUrl: "http://x/?ticket=AUTH-7", deleted: true });
+    const dialog = screen.getByRole("dialog");
+    const copyLink = screen.getByRole("button", { name: "Copy link" });
+    const description = screen.getByLabelText("Description");
+
+    copyLink.focus();
+    fireEvent.keyDown(dialog, { key: "Tab", shiftKey: true });
+    expect(document.activeElement).toBe(description);
+
+    fireEvent.keyDown(dialog, { key: "Tab" });
+    expect(document.activeElement).toBe(copyLink);
+
+    // The Status select sits in the inert fields aside: it must never be
+    // where Tab lands, even though querySelectorAll still finds it.
+    expect(screen.getByLabelText("Status").matches(":focus")).toBe(false);
+  });
+
+  it("closes on the Close button without a discard prompt, dirty or not", () => {
+    const { rerenderWith, onClose } = renderEditor();
+    editTitle("Unsaved when it went");
+    rerenderWith({ deleted: true });
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(confirmDialog()).toBeNull();
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("closes on Escape without a discard prompt", () => {
+    const { rerenderWith, onClose } = renderEditor();
+    editTitle("Unsaved when it went");
+    rerenderWith({ deleted: true });
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(confirmDialog()).toBeNull();
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("closes on the scrim without a discard prompt", () => {
+    const { rerenderWith, onClose } = renderEditor();
+    editTitle("Unsaved when it went");
+    rerenderWith({ deleted: true });
+    fireEvent.click(screen.getByTestId("ticket-editor-scrim"));
+    expect(confirmDialog()).toBeNull();
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("never asks even if the URL also requests a close alongside the delete", () => {
+    // useTicketParam never sets both at once in practice — deleted takes
+    // over instead of closeRequested — but the editor stays safe either way.
+    const { rerenderWith } = renderEditor();
+    editTitle("Unsaved when it went");
+    rerenderWith({ deleted: true, closeRequested: true });
+    expect(confirmDialog()).toBeNull();
+  });
+
+  // Review 1 (minor): a discard question already on screen when the delete
+  // lands must not survive it — the ticket becoming deleted takes over.
+  it("dismisses an already-open discard question, leaving only the read-only notice", () => {
+    const { rerenderWith, onClose } = renderEditor();
+    editTitle("Unsaved when it went");
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(confirmDialog()).toBeTruthy();
+
+    rerenderWith({ deleted: true });
+    expect(confirmDialog()).toBeNull();
+    expect(screen.getByTestId("ticket-deleted-notice")).toBeTruthy();
+    expect(onClose).not.toHaveBeenCalled();
+
+    // Close now works in one click, without the question coming back.
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(confirmDialog()).toBeNull();
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 });

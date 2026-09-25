@@ -38,13 +38,6 @@ export function withTicket(params: URLSearchParams, ticket: TicketIdentity): URL
   return next;
 }
 
-/** The params without the ticket parameter; every other parameter is kept. */
-export function withoutTicket(params: URLSearchParams): URLSearchParams {
-  const next = new URLSearchParams(params);
-  next.delete(TICKET_PARAM);
-  return next;
-}
-
 /**
  * How a ticket names itself in a URL: the display key, which reads far better
  * than an id, or the id when the ticket carries no project prefix.

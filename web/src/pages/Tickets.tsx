@@ -94,6 +94,7 @@ export default function Tickets() {
   // The open ticket comes from the URL, so ?ticket=KEY opens it on load.
   const {
     selected: selectedTicket,
+    deleted: ticketDeleted,
     closeRequested,
     open: openTicket,
     switchTo: switchTicket,
@@ -315,6 +316,7 @@ export default function Tickets() {
           ticket={selectedTicket}
           projects={projects}
           ticketUrl={ticketUrl}
+          deleted={ticketDeleted}
           closeRequested={closeRequested}
           onCloseCancelled={cancelClose}
           onDirtyChange={onDirtyChange}

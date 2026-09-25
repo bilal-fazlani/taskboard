@@ -463,6 +463,95 @@ describe("editing", () => {
     expect(screen.queryByRole("alertdialog")).toBeNull();
   });
 
+  // Bilal 2026-09-25: an open document whose ticket (not the document itself)
+  // is deleted behaves like the ticket's other fields — read-only with a
+  // notice, unsaved text still visible, no Save, no discard question, Close
+  // is the only action and it never asks.
+  describe("its ticket deleted", () => {
+    it("shows a read-only notice instead of the deleted-document one, clean", async () => {
+      load("old");
+      const { rerender } = setup();
+      await screen.findByText("old");
+      rerender({ ticketDeleted: true });
+      const notice = await screen.findByRole("status");
+      expect(notice.textContent).toBe("This ticket was deleted. This document is shown read-only.");
+      expect(screen.queryByRole("button", { name: "Save as a new document" })).toBeNull();
+    });
+
+    it("keeps showing the normal rendered view, not a raw textarea, when there is nothing unsaved", async () => {
+      load("# Old\n\nSome body text.");
+      const { rerender } = setup();
+      await screen.findByRole("heading", { name: "Old" });
+      rerender({ ticketDeleted: true });
+      expect(await screen.findByTestId("document-content")).toBeTruthy();
+      expect(screen.getByRole("heading", { name: "Old" })).toBeTruthy();
+      expect(screen.queryByRole("textbox", { name: "Document content" })).toBeNull();
+    });
+
+    it("keeps unsaved text visible, read-only, with no Save, Edit, Rename, Delete or Download", async () => {
+      load("old");
+      const { rerender } = setup();
+      fireEvent.change(await startEditing(), { target: { value: "mine, unsaved" } });
+      rerender({ ticketDeleted: true });
+
+      const content = screen.getByRole("textbox", { name: "Document content" }) as HTMLTextAreaElement;
+      expect(content.readOnly).toBe(true);
+      expect(content.value).toBe("mine, unsaved");
+      expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Edit" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Rename Design spec.md" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Delete Design spec.md" })).toBeNull();
+      expect(screen.queryByLabelText("Download Design spec.md")).toBeNull();
+    });
+
+    it("closes without asking from ×, Escape or the scrim, dirty or not", async () => {
+      load("old");
+      const { rerender, onClose } = setup();
+      fireEvent.change(await startEditing(), { target: { value: "mine, unsaved" } });
+      rerender({ ticketDeleted: true });
+
+      fireEvent.click(screen.getByRole("button", { name: "Close document" }));
+      expect(screen.queryByRole("alertdialog")).toBeNull();
+      expect(onClose).toHaveBeenCalledTimes(1);
+
+      fireEvent.keyDown(document.body, { key: "Escape" });
+      expect(screen.queryByRole("alertdialog")).toBeNull();
+      expect(onClose).toHaveBeenCalledTimes(2);
+    });
+
+    it("closes as soon as Back drops it, without asking", async () => {
+      load("old");
+      const { rerender, onClose } = setup();
+      fireEvent.change(await startEditing(), { target: { value: "mine, unsaved" } });
+      rerender({ ticketDeleted: true });
+      expect(onClose).not.toHaveBeenCalled();
+
+      rerender({ ticketDeleted: true, closeRequested: true });
+      expect(screen.queryByRole("alertdialog")).toBeNull();
+      expect(onClose).toHaveBeenCalledTimes(1);
+    });
+
+    it("dismisses an already-open discard question, leaving only the read-only notice", async () => {
+      load("old");
+      const { rerender, onClose } = setup();
+      fireEvent.change(await startEditing(), { target: { value: "mine, unsaved" } });
+      fireEvent.click(screen.getByRole("button", { name: "Close document" }));
+      expect(screen.getByRole("alertdialog", { name: "Discard your changes?" })).toBeTruthy();
+
+      rerender({ ticketDeleted: true });
+      expect(screen.queryByRole("alertdialog")).toBeNull();
+      expect((await screen.findByRole("status")).textContent).toBe(
+        "This ticket was deleted. This document is shown read-only.",
+      );
+      expect(onClose).not.toHaveBeenCalled();
+
+      fireEvent.click(screen.getByRole("button", { name: "Close document" }));
+      expect(screen.queryByRole("alertdialog")).toBeNull();
+      expect(onClose).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it("offers the same choices when a save finds the document gone", async () => {
     load("old");
     mockApi.documents.update.mockRejectedValueOnce(new Error('API error 404: {"error":"document not found"}'));

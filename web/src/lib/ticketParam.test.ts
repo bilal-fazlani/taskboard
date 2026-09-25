@@ -6,7 +6,6 @@ import {
   ticketRefFor,
   ticketUrl,
   withTicket,
-  withoutTicket,
   type TicketIdentity,
 } from "./ticketParam";
 
@@ -55,23 +54,6 @@ describe("withTicket", () => {
   });
 });
 
-describe("withoutTicket", () => {
-  it("removes only the ticket parameter", () => {
-    const params = withoutTicket(new URLSearchParams("project=ACP&ticket=ACP-25&status=todo&q=url"));
-    expect(params.toString()).toBe("project=ACP&status=todo&q=url");
-  });
-
-  it("leaves params with no ticket alone", () => {
-    const params = withoutTicket(new URLSearchParams("project=ACP&status=todo"));
-    expect(params.toString()).toBe("project=ACP&status=todo");
-  });
-
-  it("does not touch the params it was given", () => {
-    const params = new URLSearchParams("ticket=ACP-25");
-    withoutTicket(params);
-    expect(params.toString()).toBe("ticket=ACP-25");
-  });
-});
 
 describe("findTicket", () => {
   const tickets = [ticket({ id: "a", number: 7 }), ticket({ id: "b", number: 25 })];

@@ -302,6 +302,7 @@ export default function Graph() {
   // The open ticket comes from the URL, so ?ticket=KEY opens it on load.
   const {
     selected: selectedTicket,
+    deleted: ticketDeleted,
     closeRequested,
     open: openSelected,
     switchTo: switchTicket,
@@ -991,6 +992,7 @@ export default function Graph() {
           ticket={selectedTicket}
           projects={projects ?? []}
           ticketUrl={ticketUrl}
+          deleted={ticketDeleted}
           closeRequested={closeRequested}
           onCloseCancelled={cancelClose}
           onDirtyChange={onDirtyChange}

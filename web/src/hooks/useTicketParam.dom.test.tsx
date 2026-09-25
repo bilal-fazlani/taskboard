@@ -224,31 +224,125 @@ describe("useTicketParam under BrowserRouter", () => {
     expect(state.selected).toBeNull();
   });
 
-  it("drops the parameter and closes when the open ticket is deleted", async () => {
+  it("keeps a clean editor open, read-only, when the open ticket is deleted", async () => {
     await mount("/kanban?status=todo");
     await act(async () => state.open(tickets[0]));
     expect(url()).toBe("/kanban?status=todo&ticket=ACP-7");
 
-    // A live refresh brings back every ticket but the open one.
+    // A live refresh brings back every ticket but the open one: the
+    // parameter stays (a reload with it then opens nothing), the editor
+    // stays mounted on the last known copy, and nothing asks.
     await reload([tickets[1]]);
+    expect(url()).toBe("/kanban?status=todo&ticket=ACP-7");
+    expect(state.selected?.id).toBe("01AAA");
+    expect(state.deleted).toBe(true);
+    expect(state.closeRequested).toBe(false);
+
+    // Close is the only way out, and it drops the parameter as usual.
+    await act(async () => {
+      state.close();
+      await settle();
+    });
     expect(url()).toBe("/kanban?status=todo");
     expect(state.selected).toBeNull();
-    expect(state.closeRequested).toBe(false);
+    expect(state.deleted).toBe(false);
   });
 
-  it("drops the parameter of a ticket opened straight from a link", async () => {
+  it("keeps a ticket opened straight from a link, read-only, when it is deleted", async () => {
     await mount("/?project=ACP&ticket=ACP-25");
     expect(state.selected?.id).toBe("01BBB");
     await reload([tickets[0]]);
-    expect(url()).toBe("/?project=ACP");
+    expect(url()).toBe("/?project=ACP&ticket=ACP-25");
+    expect(state.selected?.id).toBe("01BBB");
+    expect(state.deleted).toBe(true);
+  });
+
+  it("keeps the ticket read-only when the last ticket goes", async () => {
+    await mount("/table?ticket=ACP-7");
+    await reload([]);
+    expect(url()).toBe("/table?ticket=ACP-7");
+    expect(state.selected?.id).toBe("01AAA");
+    expect(state.deleted).toBe(true);
+  });
+
+  // Review 1 (major): a deleted ticket's editor previously never closed on
+  // Back, because `gone` kept `held` set and `closeRequested` was never true
+  // for it. Back moving the URL away from a deleted ticket must still close
+  // its read-only editor — without asking, since there is nothing to ask.
+  it("closes a deleted ticket's editor when Back moves the URL away, without asking", async () => {
+    await mount("/kanban?status=todo");
+    await act(async () => state.open(tickets[0]));
+    await reload([tickets[1]]);
+    expect(state.deleted).toBe(true);
+    expect(state.selected?.id).toBe("01AAA");
+
+    await act(async () => {
+      window.history.back();
+      await settle();
+    });
+    expect(url()).toBe("/kanban?status=todo");
+    expect(state.selected).toBeNull();
+    expect(state.deleted).toBe(false);
+    expect(state.closeRequested).toBe(false);
+  });
+
+  it("only closes a deleted ticket's editor on the Back that actually drops its own parameter", async () => {
+    // What a document opened over the ticket, and then closed by its own
+    // Back, looks like from here: another entry pushed on top that still
+    // names this ticket. The first Back should leave the ticket editor
+    // alone; only a further Back that moves off its own parameter closes it.
+    await mount("/kanban");
+    await act(async () => state.open(tickets[0]));
+    await reload([tickets[1]]);
+    expect(state.deleted).toBe(true);
+
+    await act(async () => navigate("/kanban?ticket=ACP-7&doc=Design"));
+    expect(state.selected?.id).toBe("01AAA");
+
+    await act(async () => {
+      window.history.back();
+      await settle();
+    });
+    // Still named by the URL Back landed on: the ticket editor stays.
+    expect(url()).toBe("/kanban?ticket=ACP-7");
+    expect(state.selected?.id).toBe("01AAA");
+    expect(state.deleted).toBe(true);
+
+    await act(async () => {
+      window.history.back();
+      await settle();
+    });
+    // This Back drops the ticket's own parameter: now it closes.
+    expect(url()).toBe("/kanban");
     expect(state.selected).toBeNull();
   });
 
-  it("drops the parameter when the last ticket goes", async () => {
-    await mount("/table?ticket=ACP-7");
-    await reload([]);
-    expect(url()).toBe("/table");
+  // Review 1 (minor): the display key a stale parameter names can be reused
+  // by an unrelated new ticket. A clean, read-only, deleted editor must stay
+  // on the ticket it is actually showing rather than silently switching to
+  // whatever the key now resolves to.
+  it("stays on the deleted ticket, never switching to a new one that reuses its key", async () => {
+    await mount("/kanban?ticket=ACP-7");
+    expect(state.selected?.id).toBe("01AAA");
+
+    await reload([tickets[1]]);
+    expect(state.deleted).toBe(true);
+    expect(state.selected?.id).toBe("01AAA");
+
+    // A new ticket, same project and number, different id: the same display
+    // key (ACP-7) now resolves to it.
+    const reused: TicketIdentity = { id: "01NEW", number: 7, projectPrefix: "ACP" };
+    await reload([tickets[1], reused]);
+    expect(state.selected?.id).toBe("01AAA");
+    expect(state.deleted).toBe(true);
+
+    // Close still works normally afterwards.
+    await act(async () => {
+      state.close();
+      await settle();
+    });
     expect(state.selected).toBeNull();
+    expect(url()).toBe("/kanban");
   });
 
   it("keeps a parameter that never named a loaded ticket", async () => {
@@ -268,47 +362,51 @@ describe("useTicketParam under BrowserRouter", () => {
     expect(state.selected?.id).toBe("01AAA");
   });
 
-  it("holds a dirty editor open and asks, rather than dropping it with the ticket", async () => {
+  it("holds a dirty editor open, read-only, without asking, when its ticket is deleted", async () => {
     await mount("/kanban?ticket=ACP-7");
     await act(async () => state.onDirtyChange(true));
     await reload([tickets[1]]);
 
-    // The parameter is gone, but the editor is still mounted and told to ask.
-    expect(url()).toBe("/kanban");
+    // The parameter stays, the editor stays mounted with the edits, and
+    // nothing asks: a deleted ticket has nothing left to save.
+    expect(url()).toBe("/kanban?ticket=ACP-7");
     expect(state.selected?.id).toBe("01AAA");
-    expect(state.closeRequested).toBe(true);
-
-    // Keeping the edits leaves the editor open with the ticket gone: there is
-    // no parameter worth putting back, so the question is not asked again.
-    await act(async () => state.cancelClose());
-    expect(url()).toBe("/kanban");
+    expect(state.deleted).toBe(true);
     expect(state.closeRequested).toBe(false);
-    expect(state.selected?.id).toBe("01AAA");
+
+    // It stays exactly the same across further refreshes.
     await reload([tickets[1]]);
-    expect(url()).toBe("/kanban");
-    expect(state.closeRequested).toBe(false);
+    expect(url()).toBe("/kanban?ticket=ACP-7");
+    expect(state.deleted).toBe(true);
     expect(state.selected?.id).toBe("01AAA");
 
-    // Letting them go closes it for good.
-    await act(async () => state.close());
+    // Close is the only way out, deleted or not, dirty or not.
+    await act(async () => {
+      state.close();
+      await settle();
+    });
     expect(state.selected).toBeNull();
     expect(url()).toBe("/kanban");
   });
 
-  it("holds the ticket for as long as the editor has unsaved edits", async () => {
-    // What a failed save looks like from here: the editor stayed dirty, so
-    // the ticket it is open on must not be let go, deleted or not.
+  it("keeps holding a deleted ticket even once its edits are no longer reported dirty", async () => {
+    // Unlike a live ticket, a deleted one is never let go just because the
+    // editor stops reporting unsaved edits: read-only lasts until Close.
     await mount("/kanban?ticket=ACP-7");
     await act(async () => state.onDirtyChange(true));
     await reload([tickets[1]]);
     expect(state.selected?.id).toBe("01AAA");
+    expect(state.deleted).toBe(true);
 
-    await act(async () => state.cancelClose());
-    await reload([tickets[1]]);
-    expect(state.selected?.id).toBe("01AAA");
-
-    // Only once the edits are gone does the editor go with them.
     await act(async () => state.onDirtyChange(false));
+    expect(state.selected?.id).toBe("01AAA");
+    expect(state.deleted).toBe(true);
+    expect(url()).toBe("/kanban?ticket=ACP-7");
+
+    await act(async () => {
+      state.close();
+      await settle();
+    });
     expect(state.selected).toBeNull();
   });
 
