@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { Download, Eye, Pencil, Trash2, X } from "lucide-react";
 import Markdown from "react-markdown";
 import { api, type DocumentMeta, type DocumentOwnerRef, type DocumentWithContent } from "../api/client";
@@ -9,14 +9,18 @@ import {
   displayName,
   DOCUMENT_SANDBOX,
   formatSize,
+  imagesOf,
+  isImageFormat,
   isNotFound,
   isTextFormat,
 } from "../lib/documents";
 import { serverMessage } from "../lib/epics";
 import { useEscape } from "../lib/escapeStack";
+import { useImageStepping } from "../hooks/useImageStepping";
 import DeleteDocumentConfirm from "./DeleteDocumentConfirm";
 import DiscardChangesConfirm from "./DiscardChangesConfirm";
 import DocumentRenameField from "./DocumentRenameField";
+import ImageView, { ImageViewerControls, type ImageZoom } from "./ImageViewer";
 
 // The HTML document's frame is in the Tab order, so the keyboard can reach
 // and scroll the page.
@@ -55,6 +59,10 @@ type Saved = { revision: number; content: string };
 // for it: Cancel, Escape, ×, the scrim, or Back (closeRequested, from
 // useDocParam). A document deleted mid-edit stays on screen (deleted, also
 // from useDocParam) and offers to save the text as a new document.
+//
+// An image is shown by the image viewer (ImageViewer): no Edit, Fit and 100%
+// in the header, and ← and → step to the owner's other images through
+// onStep, which puts the next one in place of this one in the URL.
 export default function DocumentModal({
   doc,
   documents,
@@ -70,6 +78,7 @@ export default function DocumentModal({
   onRenamed,
   onDeleted,
   onRecreated,
+  onStep,
 }: {
   doc: DocumentMeta;
   documents: readonly DocumentMeta[];
@@ -90,8 +99,11 @@ export default function DocumentModal({
   onDeleted: () => void;
   /** "Save as a new document" created this copy of a deleted one. */
   onRecreated: (doc: DocumentMeta) => void;
+  /** Show another of the owner's images in place of this one (← and →). */
+  onStep?: (doc: DocumentMeta) => void;
 }) {
   const editable = doc.format === "markdown";
+  const image = isImageFormat(doc.format);
   const [saved, setSaved] = useState<Saved | null>(null);
   const [failed, setFailed] = useState(false);
   const [editing, setEditing] = useState(startEditing && editable);
@@ -117,6 +129,13 @@ export default function DocumentModal({
   const asking = pending !== null || urlAsking;
   const gone = deleted || goneOnSave;
 
+  // The window stays mounted from image to image, so the zoom is kept by
+  // image: each one opens fitted.
+  const images = useMemo(() => imagesOf(documents), [documents]);
+  const [zoomed, setZoomed] = useState<{ id: string; zoom: ImageZoom } | null>(null);
+  const zoom: ImageZoom = zoomed?.id === doc.id ? zoomed.zoom : "fit";
+  useImageStepping(image ? doc : null, images, onStep, renaming || deleting || asking);
+
   // The fetch reads these without re-running on each keystroke.
   const editingRef = useRef(editing);
   const baseRef = useRef(base);
@@ -130,7 +149,8 @@ export default function DocumentModal({
   });
 
   useEffect(() => {
-    // An HTML page is loaded by its frame, straight from the server.
+    // An HTML page is loaded by its frame, and an image by the viewer,
+    // straight from the server.
     if (!editable) return;
     let cancelled = false;
     Promise.resolve()
@@ -294,7 +314,9 @@ export default function DocumentModal({
 
   const writing = editing && base !== null && mode === "write";
   let body: React.ReactNode;
-  if (!editable) {
+  if (image) {
+    body = <ImageView doc={doc} zoom={zoom} />;
+  } else if (!editable) {
     body = (
       <iframe
         // A new revision mounts a new frame rather than changing this one's
@@ -415,9 +437,13 @@ export default function DocumentModal({
             </>
           ) : (
             <>
-              <span className="hidden shrink-0 whitespace-nowrap text-xs text-slate-500 sm:inline">
-                {formatSize(doc.size)} · updated {activityTime(doc.updatedAt)}
-              </span>
+              {image ? (
+                <ImageViewerControls doc={doc} images={images} zoom={zoom} onZoom={(z) => setZoomed({ id: doc.id, zoom: z })} />
+              ) : (
+                <span className="hidden shrink-0 whitespace-nowrap text-xs text-slate-500 sm:inline">
+                  {formatSize(doc.size)} · updated {activityTime(doc.updatedAt)}
+                </span>
+              )}
               {editable && (
                 <button
                   type="button"
@@ -474,12 +500,12 @@ export default function DocumentModal({
 
         <div
           className={`min-h-0 flex-1 ${
-            !editable ? "" : `px-4 py-4 sm:px-8 sm:py-6 ${writing ? "flex flex-col" : "overflow-y-auto"}`
+            image ? "relative" : !editable ? "" : `px-4 py-4 sm:px-8 sm:py-6 ${writing ? "flex flex-col" : "overflow-y-auto"}`
           }`}
         >
           {body}
         </div>
-        {!editable && (
+        {doc.format === "html" && (
           // Tab inside the frame never reaches trapTab (its keys stay in the
           // page), so leaving the page's last control lands here and wraps
           // to the top of the modal.

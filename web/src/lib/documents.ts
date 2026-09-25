@@ -54,6 +54,13 @@ export function imageDimensions(doc: Pick<DocumentMeta, "width" | "height">): st
   return doc.width && doc.height ? `${doc.width}×${doc.height}` : "";
 }
 
+/** "2 of 3 images", or "" when the image is not in the list. */
+export function imagePosition(doc: Pick<DocumentMeta, "id">, images: readonly Pick<DocumentMeta, "id">[]): string {
+  const index = images.findIndex((d) => d.id === doc.id);
+  if (index < 0) return "";
+  return `${index + 1} of ${images.length} ${images.length === 1 ? "image" : "images"}`;
+}
+
 /**
  * The key the document window is mounted under. Every image shares one, so
  * stepping from image to image with ← and → keeps the window (and its focus)
