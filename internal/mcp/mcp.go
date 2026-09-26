@@ -223,7 +223,15 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 		if p == nil && err == nil {
 			return nil, fmt.Errorf("project not found")
 		}
-		return p, err
+		if err != nil {
+			return nil, err
+		}
+		journal, err := s.store.ListJournal(p.ID, "", db.JournalPreviewLimit)
+		if err != nil {
+			return nil, err
+		}
+		p.Journal = &journal
+		return p, nil
 
 	case "create_project":
 		var a struct {
@@ -277,6 +285,20 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 			return nil, err
 		}
 		return map[string]bool{"deleted": true}, s.store.DeleteProject(projectID)
+
+	case "append_project_journal":
+		var a appendJournalArgs
+		if err := decodeArgs(args, &a); err != nil {
+			return nil, err
+		}
+		return s.appendProjectJournal(a)
+
+	case "list_project_journal":
+		var a listJournalArgs
+		if err := decodeArgs(args, &a); err != nil {
+			return nil, err
+		}
+		return s.listProjectJournal(a)
 
 	case "list_tickets":
 		var a listTicketsArgs
@@ -805,7 +827,8 @@ const noteParamDescription = "Why the status is changing, saved with the change 
 // The help for a project's two text fields: the description says what the
 // project is, the agent instructions how to work on it.
 const (
-	projectDescriptionHelp       = "What the project is: its goals, scope and context. Not how to work on it; that goes in agentInstructions."
+	projectDescriptionHelp = "What the project is: its goals, scope and context. Not how to work on it; that goes in agentInstructions. " +
+		"Not running notes or a log of what happened; append those to the project's journal with append_project_journal."
 	projectAgentInstructionsHelp = "Agent instructions: how agents should work on this project's tickets (for example branches, review, " +
 		"verify commands, commit style). get_project returns them; the board never acts on them."
 )
@@ -887,7 +910,8 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 			Name: "get_project",
 			Description: "Get detailed project information by ID, including its full description (list_projects returns only a short preview) " +
 				"and its agentInstructions: how agents should work on the project's tickets. " +
-				"Before working on a project's tickets, read its agent instructions and follow them. The board itself never acts on them.",
+				"Before working on a project's tickets, read its agent instructions and follow them. The board itself never acts on them. " +
+				getProjectJournalHelp,
 			InputSchema: jsonSchema{
 				Type:       "object",
 				Properties: map[string]schemaProp{"id": {Type: "string", Description: "Project ID or prefix (case-insensitive)"}},
@@ -944,6 +968,8 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 				Required:   []string{"id"},
 			},
 		},
+		journalToolDefs[0],
+		journalToolDefs[1],
 		// --- Epics (project-scoped grouping of tickets) ---
 		{
 			Name: "list_epics",

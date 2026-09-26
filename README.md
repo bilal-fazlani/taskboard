@@ -116,6 +116,8 @@ To add to a ticket's description without resending it, `PUT /api/tickets/{id}` t
 
 A ticket's `delivery` says where its work lives and where it landed: `branch`, `worktree`, `prUrl` and `landedCommits`, each commit a `sha` (7 to 64 hex characters, full or short, kept lowercase) with the `repo` it landed in, so one ticket can land in several repos. `PUT /api/tickets/{id}` takes `{"delivery": {...}}` (MCP `update_ticket` takes the same argument, the CLI `ticket update --branch`, `--worktree`, `--pr-url` and `--landed-commit repo@sha`). Only the fields given change: `""` clears a text field, and `landedCommits` replaces the whole list (`[]` clears it). A commit without a repo takes the ticket's repo when it has exactly one. The full ticket carries `delivery` when any field is set; lists leave it out. The web editor shows it, read only, in a Delivery section at the end of the fields column, which is hidden while nothing is set. MCP `find_tickets_by_commit` and the CLI `ticket find-by-commit` find the tickets that landed a commit, by its full or short sha.
 
+Each project has a journal: dated entries, each with its author, that are appended and never edited or deleted (they go only with their project). It is the place for running notes and run reports, which would otherwise grow the description that every read carries. `POST /api/projects/{id}/journal` with `{"author": "...", "text": "..."}` appends one; `author` is free text, the name of whoever writes it. `GET /api/projects/{id}/journal` reads them newest first, one page at a time, as `{entries, total, hasMore, nextBefore}`: `?limit=` sets the page size (1 to 100, default 20) and `?before=` takes the previous page's `nextBefore` to read older entries. `GET /api/projects/{id}` carries the latest five as `journal`, in the same shape. The MCP tools are `append_project_journal` and `list_project_journal` (`get_project` carries the latest five too), and the CLI's are `project journal append` and `project journal list`.
+
 `GET /api/tickets` filters by `projectId`, `status`, `priority`, `repo`, `label` and `epic`, plus `ready=true` (todo tickets whose dependencies are all done) and `excludeLabel` (leave out tickets with that label, e.g. `hold`). Repeat `status` for several, e.g. `?status=todo&status=in_progress`, or comma-separate them in one value, e.g. `?status=todo,in_progress`, the same as the CLI's `--status`. A status outside `todo`, `in_progress`, `agent_review` or `done` is a 400 naming the allowed values. Every filter given must match, so `ready=true` with statuses that leave out `todo` returns nothing. The CLI's `ticket list` and the MCP `list_tickets` tool take the same filters.
 
 ### CLI
@@ -124,6 +126,8 @@ A ticket's `delivery` says where its work lives and where it landed: `branch`, `
 taskboard project create "Auth System" --prefix AUTH --icon "🔐"
 taskboard project create "Billing" --prefix BILL --description "Invoicing and payments." --agent-instructions "Run the tests before landing."
 taskboard project list
+taskboard project journal append BILL "Run finished: 3 tickets landed." --author orchestrator
+taskboard project journal list BILL   # newest first; --limit and --before page through older entries
 
 taskboard ticket create --project <ID> --title "Implement login" --priority high
 taskboard ticket list --project <ID> --status todo
@@ -232,36 +236,38 @@ ticket whose dependencies are unfinished can still be moved to any status.
 The reverse direction is derived, not stored. When `BILL-5` depends on `BILL-2`,
 `BILL-2` lists `BILL-5` under *blocks* automatically, and that list is read-only.
 
-#### Available MCP Tools (20)
+#### Available MCP Tools (23)
 
-| Tool                    | Description                                      |
-| ----------------------- | ------------------------------------------------ |
-| **Projects**            |                                                  |
-| `list_projects`         | List all projects with optional status filter    |
-| `get_project`           | Get project details, with its agent instructions |
-| `create_project`        | Create a new project (use for epics/initiatives) |
-| `update_project`        | Update project properties                        |
-| `delete_project`        | Delete a project and all its tickets             |
-| **Labels**              |                                                  |
-| `list_labels`           | List all labels with ticket counts               |
-| `create_label`          | Create a label with a name and color             |
-| `update_label`          | Rename or recolor a label, by id or exact name   |
-| `delete_label`          | Delete a label and report tickets detached       |
-| **Tickets**             |                                                  |
-| `list_tickets`          | List tickets with filters                        |
-| `get_ticket`            | Get ticket details, subtasks, labels and history |
-| `create_ticket`         | Create a ticket (task) within a project          |
-| `update_ticket`         | Update ticket properties, with an optional note  |
-| `move_ticket`           | Move ticket to a status column, with a note      |
-| `delete_ticket`         | Delete a ticket                                  |
-| `find_tickets_by_commit` | Find the tickets that landed a commit, by sha   |
-| **Board**               |                                                  |
-| `get_board`             | Get full Kanban board grouped by status          |
-| **Subtasks**            |                                                  |
-| `create_subtask`        | Add a subtask to a ticket                        |
-| `batch_create_subtasks` | Add multiple subtasks to a ticket at once        |
-| `toggle_subtask`        | Set subtask completion (or toggle it)            |
-| `delete_subtask`        | Remove a subtask from a ticket                   |
+| Tool                     | Description                                      |
+| ------------------------ | ------------------------------------------------ |
+| **Projects**             |                                                  |
+| `list_projects`          | List all projects with optional status filter    |
+| `get_project`            | Get project details, with its agent instructions |
+| `create_project`         | Create a new project (use for epics/initiatives) |
+| `update_project`         | Update project properties                        |
+| `delete_project`         | Delete a project and all its tickets             |
+| `append_project_journal` | Append a dated entry to a project's journal      |
+| `list_project_journal`   | Read a project's journal, newest first, by page  |
+| **Labels**               |                                                  |
+| `list_labels`            | List all labels with ticket counts               |
+| `create_label`           | Create a label with a name and color             |
+| `update_label`           | Rename or recolor a label, by id or exact name   |
+| `delete_label`           | Delete a label and report tickets detached       |
+| **Tickets**              |                                                  |
+| `list_tickets`           | List tickets with filters                        |
+| `get_ticket`             | Get ticket details, subtasks, labels and history |
+| `create_ticket`          | Create a ticket (task) within a project          |
+| `update_ticket`          | Update ticket properties, with an optional note  |
+| `move_ticket`            | Move ticket to a status column, with a note      |
+| `delete_ticket`          | Delete a ticket                                  |
+| `find_tickets_by_commit` | Find the tickets that landed a commit, by sha    |
+| **Board**                |                                                  |
+| `get_board`              | Get full Kanban board grouped by status          |
+| **Subtasks**             |                                                  |
+| `create_subtask`         | Add a subtask to a ticket                        |
+| `batch_create_subtasks`  | Add multiple subtasks to a ticket at once        |
+| `toggle_subtask`         | Set subtask completion (or toggle it)            |
+| `delete_subtask`         | Remove a subtask from a ticket                   |
 
 #### Status notes
 

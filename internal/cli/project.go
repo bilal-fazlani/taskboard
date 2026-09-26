@@ -95,6 +95,6 @@ func projectCommands() *cobra.Command {
 		},
 	}
 
-	cmd.AddCommand(listCmd, createCmd, deleteCmd)
+	cmd.AddCommand(listCmd, createCmd, deleteCmd, journalCommands())
 	return cmd
 }

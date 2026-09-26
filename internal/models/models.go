@@ -24,6 +24,10 @@ type Project struct {
 	// Every read sets it. It is not part of the project's JSON: the HTTP
 	// project list adds it for each project, and MCP never shows it.
 	HasAgentInstructions bool `json:"-"`
+	// Journal is the newest page of the project's journal. Only a read of
+	// one project through HTTP or MCP sets it; everything else leaves it
+	// nil, and out of the JSON.
+	Journal *JournalPage `json:"journal,omitempty"`
 }
 
 type Ticket struct {

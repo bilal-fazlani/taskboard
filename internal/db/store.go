@@ -39,6 +39,7 @@ func (s *Store) ClearData() error {
 		"ticket_status_changes",
 		"ticket_landed_commits",
 		"ticket_delivery",
+		"project_journal_entries",
 		"ticket_dependencies",
 		"ticket_labels",
 		"subtasks",

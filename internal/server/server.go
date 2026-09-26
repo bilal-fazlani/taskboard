@@ -191,6 +191,8 @@ func (s *Server) setupRoutes(webFS fs.FS) {
 			r.Get("/{id}", s.getProject)
 			r.Put("/{id}", s.updateProject)
 			r.Delete("/{id}", s.deleteProject)
+			r.Get("/{id}/journal", s.listJournal)
+			r.Post("/{id}/journal", s.appendJournalEntry)
 		})
 
 		r.Route("/tickets", func(r chi.Router) {
@@ -392,6 +394,12 @@ func (s *Server) getProject(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "project not found")
 		return
 	}
+	journal, err := s.store.ListJournal(p.ID, "", db.JournalPreviewLimit)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	p.Journal = &journal
 	writeJSON(w, http.StatusOK, p)
 }
 
