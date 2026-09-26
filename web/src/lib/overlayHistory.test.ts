@@ -42,13 +42,24 @@ describe("closedState", () => {
 
 describe("overlay params", () => {
   it("knows which parameters are overlays", () => {
-    expect(hasOverlay(new URLSearchParams("status=todo"))).toBe(false);
-    expect(hasOverlay(new URLSearchParams("ticket=ACP-7"))).toBe(true);
-    expect(hasOverlay(new URLSearchParams("epic=Launch"))).toBe(true);
+    expect(hasOverlay("/table", new URLSearchParams("status=todo"))).toBe(false);
+    expect(hasOverlay("/table", new URLSearchParams("ticket=ACP-7"))).toBe(true);
+    expect(hasOverlay("/epics", new URLSearchParams("epic=Launch"))).toBe(true);
+  });
+
+  it("counts epic as an overlay only in the Epics view, where it is the modal", () => {
+    for (const path of ["/", "/kanban", "/table"]) {
+      expect(hasOverlay(path, new URLSearchParams("epic=Launch"))).toBe(false);
+    }
   });
 
   it("drops every overlay and keeps the rest in order", () => {
-    const next = withoutOverlays(new URLSearchParams("project=ACP&ticket=ACP-7&doc=Plan.md&status=todo"));
+    const next = withoutOverlays("/table", new URLSearchParams("project=ACP&ticket=ACP-7&doc=Plan.md&status=todo"));
     expect(next.toString()).toBe("project=ACP&status=todo");
+  });
+
+  it("keeps a ticket view's epic filter and drops the Epics view's modal", () => {
+    expect(withoutOverlays("/table", new URLSearchParams("epic=M1&ticket=ACP-7")).toString()).toBe("epic=M1");
+    expect(withoutOverlays("/epics", new URLSearchParams("project=ACP&epic=M1&doc=a.md")).toString()).toBe("project=ACP");
   });
 });

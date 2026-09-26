@@ -30,6 +30,7 @@ export function useOverlayHistory(): OverlayHistory {
   const location = useLocation();
   const navigate = useNavigate();
   const depth = overlayState(location.state).depth;
+  const { pathname } = location;
 
   // Set by closeAll when going back lands on an entry that still has an
   // overlay (the editor was opened from a link); cleared once it is stripped.
@@ -38,17 +39,17 @@ export function useOverlayHistory(): OverlayHistory {
     if (!stripRef.current || depth !== 0) return;
     stripRef.current = false;
     const latest = latestSearchParams(params);
-    if (hasOverlay(latest)) {
-      setParams(withoutOverlays(latest), { replace: true, state: latestLocationState(location.state) });
+    if (hasOverlay(pathname, latest)) {
+      setParams(withoutOverlays(pathname, latest), { replace: true, state: latestLocationState(location.state) });
     }
-  }, [location.key, location.state, depth, params, setParams]);
+  }, [location.key, location.state, pathname, depth, params, setParams]);
 
   const push = useCallback(
     (next: URLSearchParams) => {
-      const baseHasOverlay = hasOverlay(latestSearchParams(params));
+      const baseHasOverlay = hasOverlay(pathname, latestSearchParams(params));
       setParams(next, { state: pushState(latestLocationState(location.state), baseHasOverlay) });
     },
-    [params, setParams, location.state],
+    [params, setParams, location.state, pathname],
   );
 
   const replace = useCallback(
@@ -81,12 +82,12 @@ export function useOverlayHistory(): OverlayHistory {
   const closeAll = useCallback(() => {
     const now = overlayState(latestLocationState(location.state));
     if (now.depth === 0) {
-      replace(withoutOverlays(latestSearchParams(params)));
+      replace(withoutOverlays(pathname, latestSearchParams(params)));
       return;
     }
     const closeInPlace = () => {
       stripRef.current = false;
-      setParams(withoutOverlays(latestSearchParams(params)), {
+      setParams(withoutOverlays(pathname, latestSearchParams(params)), {
         replace: true,
         state: closedState(latestLocationState(location.state)),
       });
@@ -100,7 +101,7 @@ export function useOverlayHistory(): OverlayHistory {
     const key = keyBelow(navigation, now.depth);
     if (key === null) closeInPlace();
     else onRefused(navigation.traverseTo(key), closeInPlace);
-  }, [navigate, replace, setParams, params, location.state]);
+  }, [navigate, replace, setParams, params, location.state, pathname]);
 
   return useMemo(() => ({ depth, push, replace, closeOne, closeAll }), [depth, push, replace, closeOne, closeAll]);
 }

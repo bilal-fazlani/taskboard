@@ -1,5 +1,7 @@
 // Overlays are what opens on top of a view and lives in its query string: the
-// ticket editor (`ticket`), a document (`doc`) and the epic modal (`epic`).
+// ticket editor (`ticket`), a document (`doc`) and, in the Epics view, the
+// epic modal (`epic`). In the ticket views `epic` is the epic filter instead,
+// which stays when an overlay closes.
 // Each overlay the user opens is its own browser history entry, so Back and
 // Forward step through them. How many such entries sit on top of the view the
 // overlays opened from is kept in the entry's location state, which the
@@ -13,7 +15,13 @@
 // overlay, which is how an editor opened straight from a link looks. Going
 // back to it lands on that linked overlay, so the caller strips it after.
 
-export const OVERLAY_PARAMS: readonly string[] = ["ticket", "doc", "epic"];
+const OVERLAY_PARAMS: readonly string[] = ["ticket", "doc"];
+const EPICS_OVERLAY_PARAMS: readonly string[] = [...OVERLAY_PARAMS, "epic"];
+
+/** The query parameters that are overlays on the page at `pathname`. */
+export function overlayParams(pathname: string): readonly string[] {
+  return pathname === "/epics" ? EPICS_OVERLAY_PARAMS : OVERLAY_PARAMS;
+}
 
 export interface OverlayState {
   depth: number;
@@ -50,12 +58,12 @@ export function closedState(current: unknown): Record<string, unknown> {
   return rest;
 }
 
-export function hasOverlay(params: URLSearchParams): boolean {
-  return OVERLAY_PARAMS.some((key) => params.has(key));
+export function hasOverlay(pathname: string, params: URLSearchParams): boolean {
+  return overlayParams(pathname).some((key) => params.has(key));
 }
 
-export function withoutOverlays(params: URLSearchParams): URLSearchParams {
+export function withoutOverlays(pathname: string, params: URLSearchParams): URLSearchParams {
   const next = new URLSearchParams(params);
-  for (const key of OVERLAY_PARAMS) next.delete(key);
+  for (const key of overlayParams(pathname)) next.delete(key);
   return next;
 }

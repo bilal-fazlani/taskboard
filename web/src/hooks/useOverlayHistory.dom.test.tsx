@@ -131,6 +131,17 @@ describe("useOverlayHistory under BrowserRouter", () => {
     expect(overlays.depth).toBe(0);
   });
 
+  it("closeAll keeps a ticket view's epic filter, which is not an overlay there", async () => {
+    await mount("/table?project=ACP&epic=M1");
+    await act(async () => overlays.push(params("project=ACP&epic=M1&ticket=ACP-7")));
+    await act(async () => {
+      overlays.closeAll();
+      await settle();
+    });
+    expect(url()).toBe("/table?project=ACP&epic=M1");
+    expect(overlays.depth).toBe(0);
+  });
+
   it("closeAll with nothing pushed strips the overlays in place", async () => {
     await mount("/table?project=ACP&ticket=ACP-7&doc=Plan.md");
     await act(async () => {
