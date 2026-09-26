@@ -110,6 +110,8 @@ A `: keep-alive` comment arrives roughly every 20 seconds while nothing changes,
 
 `GET /api/tickets/{id}/history` returns a ticket's status changes, newest first. Every status change is recorded, whichever surface made it; the first entry, with an empty `fromStatus`, is the ticket's creation. `PUT /api/tickets/{id}` and `POST /api/tickets/{id}/move` take an optional `note`, saved with the change. Tickets carry `reviewRounds`, the number of times they have entered `agent_review`.
 
+`GET /api/tickets` filters by `projectId`, `status`, `priority`, `repo`, `label` and `epic`, plus `ready=true` (todo tickets whose dependencies are all done) and `excludeLabel` (leave out tickets with that label, e.g. `hold`). Repeat `status` for several, e.g. `?status=todo&status=in_progress`. Every filter given must match, so `ready=true` with statuses that leave out `todo` returns nothing. The CLI's `ticket list` and the MCP `list_tickets` tool take the same filters.
+
 ### CLI
 
 ```bash
@@ -136,6 +138,8 @@ taskboard ticket create --project <ID> --title "Implement login" --priority high
 taskboard ticket update <ID> --labels backend,urgent --depends-on AUTH-1
 taskboard ticket update <ID> --repo acme/auth-api,acme/auth-web  # replaces the set
 taskboard ticket list --repo acme/auth-api                       # tickets touching that repo
+taskboard ticket list --project AUTH --status todo,in_progress   # any of several statuses (or repeat --status)
+taskboard ticket list --project AUTH --ready --exclude-label hold # todo tickets whose dependencies are all done, minus held ones
 ```
 
 `ticket get`, `ticket move`, `ticket history`, `ticket delete`, `ticket update`

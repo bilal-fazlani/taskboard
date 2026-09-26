@@ -1815,7 +1815,7 @@ func TestMoveTicketToAgentReview(t *testing.T) {
 		t.Fatalf("stored status = %q, want %q", got.Status, models.StatusAgentReview)
 	}
 
-	listed, err := s.ListTickets(models.TicketFilter{Status: models.StatusAgentReview})
+	listed, err := s.ListTickets(models.TicketFilter{Statuses: []string{models.StatusAgentReview}})
 	if err != nil {
 		t.Fatalf("listing agent_review tickets: %v", err)
 	}

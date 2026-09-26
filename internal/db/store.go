@@ -238,9 +238,22 @@ func (s *Store) ListTickets(filter models.TicketFilter) ([]models.Ticket, error)
 		query += " AND t.project_id = ?"
 		args = append(args, projectID)
 	}
-	if filter.Status != "" {
-		query += " AND t.status = ?"
-		args = append(args, filter.Status)
+	if statuses := nonBlank(filter.Statuses); len(statuses) > 0 {
+		query += " AND t.status IN (" + strings.TrimSuffix(strings.Repeat("?,", len(statuses)), ",") + ")"
+		for _, st := range statuses {
+			args = append(args, st)
+		}
+	}
+	if filter.Ready {
+		// ANDed with Statuses like every other filter: a status list
+		// without todo leaves nothing ready. A dependency on any ticket not
+		// done holds the ticket back, whichever project that ticket is in; a
+		// deleted dependency takes its row with it.
+		query += ` AND t.status = ? AND NOT EXISTS (
+			SELECT 1 FROM ticket_dependencies d
+			JOIN tickets b ON b.id = d.blocked_by_id
+			WHERE d.ticket_id = t.id AND b.status != ?)`
+		args = append(args, models.StatusTodo, models.StatusDone)
 	}
 	if filter.Priority != "" {
 		query += " AND t.priority = ?"
@@ -270,6 +283,20 @@ func (s *Store) ListTickets(filter models.TicketFilter) ([]models.Ticket, error)
 			SELECT 1 FROM ticket_labels tl
 			WHERE tl.ticket_id = t.id AND tl.label_id = ?)`
 		args = append(args, labelID)
+	}
+	if filter.ExcludeLabel != "" {
+		// The same name lookup as Label. A name no label has excludes
+		// nothing, since no ticket can carry it.
+		labelID, err := findLabelIDByName(s.db, filter.ExcludeLabel)
+		if err != nil {
+			return nil, err
+		}
+		if labelID != "" {
+			query += ` AND NOT EXISTS (
+			SELECT 1 FROM ticket_labels tl
+			WHERE tl.ticket_id = t.id AND tl.label_id = ?)`
+			args = append(args, labelID)
+		}
 	}
 	if epic := strings.TrimSpace(filter.Epic); epic != "" {
 		if strings.EqualFold(epic, models.NoEpic) {
@@ -315,6 +342,19 @@ func (s *Store) ListTickets(filter models.TicketFilter) ([]models.Ticket, error)
 	}
 
 	return tickets, nil
+}
+
+// nonBlank returns values trimmed of surrounding whitespace, without the
+// ones left empty, so a stray "" from a query string or flag does not
+// narrow a filter to nothing.
+func nonBlank(values []string) []string {
+	var out []string
+	for _, v := range values {
+		if v = strings.TrimSpace(v); v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 // attachListDetails fills Repos, Labels, Subtasks, DependsOn, ReviewRounds and DocumentCount
@@ -852,7 +892,7 @@ func (s *Store) GetBoard(projectID string) (*models.Board, error) {
 	}
 
 	for i, status := range statuses {
-		filter := models.TicketFilter{Status: status}
+		filter := models.TicketFilter{Statuses: []string{status}}
 		if hasProjectFilter {
 			filter.ProjectID = projectID
 		}

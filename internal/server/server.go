@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"path"
+	"strconv"
 	"strings"
 	"time"
 
@@ -430,14 +431,26 @@ func (s *Server) deleteProject(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// listTickets answers GET /api/tickets. Several statuses are repeated
+// params, the way the web URL filters carry several values
+// (?status=todo&status=in_progress); ready=true keeps the todo tickets whose
+// dependencies are all done; excludeLabel leaves out tickets with that label.
 func (s *Server) listTickets(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	ready, err := parseBoolParam(q.Get("ready"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "ready must be true or false")
+		return
+	}
 	filter := models.TicketFilter{
-		ProjectID: r.URL.Query().Get("projectId"),
-		Status:    r.URL.Query().Get("status"),
-		Priority:  r.URL.Query().Get("priority"),
-		Repo:      r.URL.Query().Get("repo"),
-		Label:     r.URL.Query().Get("label"),
-		Epic:      r.URL.Query().Get("epic"),
+		ProjectID:    q.Get("projectId"),
+		Statuses:     q["status"],
+		Priority:     q.Get("priority"),
+		Repo:         q.Get("repo"),
+		Label:        q.Get("label"),
+		Epic:         q.Get("epic"),
+		Ready:        ready,
+		ExcludeLabel: q.Get("excludeLabel"),
 	}
 	tickets, err := s.store.ListTickets(filter)
 	if err != nil {
@@ -448,6 +461,14 @@ func (s *Server) listTickets(w http.ResponseWriter, r *http.Request) {
 		tickets = []models.Ticket{}
 	}
 	writeJSON(w, http.StatusOK, tickets)
+}
+
+// parseBoolParam reads a boolean query param; missing or empty is false.
+func parseBoolParam(v string) (bool, error) {
+	if strings.TrimSpace(v) == "" {
+		return false, nil
+	}
+	return strconv.ParseBool(strings.TrimSpace(v))
 }
 
 func (s *Server) getTicket(w http.ResponseWriter, r *http.Request) {

@@ -785,7 +785,7 @@ func TestListTicketsFilterByEpic(t *testing.T) {
 	assertTitles(t, "any project + none", ticketTitles(t, s, models.TicketFilter{Epic: "none"}), "bill loose", "search loose")
 
 	// It combines with the other filters.
-	assertTitles(t, "none + done", ticketTitles(t, s, models.TicketFilter{ProjectID: p.ID, Epic: "none", Status: models.StatusDone}))
+	assertTitles(t, "none + done", ticketTitles(t, s, models.TicketFilter{ProjectID: p.ID, Epic: "none", Statuses: []string{models.StatusDone}}))
 
 	// An epic that matches nothing matches no tickets, rather than failing.
 	assertTitles(t, "unknown epic", ticketTitles(t, s, models.TicketFilter{ProjectID: p.ID, Epic: "Nope"}))

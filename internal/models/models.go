@@ -259,16 +259,28 @@ type UpdateLabelRequest struct {
 	Color *string `json:"color,omitempty"`
 }
 
+// TicketFilter narrows ListTickets. Every field that is set must match, so
+// the filters combine as an AND; within Statuses any one value matches.
 type TicketFilter struct {
 	ProjectID string
-	Status    string
-	Priority  string
-	Repo      string
-	Label     string
+	// Statuses keeps tickets in any of these statuses. Empty, or only blank
+	// values, means every status.
+	Statuses []string
+	Priority string
+	Repo     string
+	Label    string
 	// Epic is an epic name (case-insensitive) or id, or models.NoEpic
 	// ("none", any case) for tickets without an epic. Without a ProjectID a
 	// name matches that epic in every project.
 	Epic string
+	// Ready keeps only tickets that can start now: status todo, with every
+	// ticket they depend on done. A todo ticket with no dependencies is
+	// ready. Like every other filter it is ANDed with the rest, so Ready
+	// with Statuses that leave out todo matches nothing.
+	Ready bool
+	// ExcludeLabel drops tickets carrying this label, matched by name
+	// case-insensitively like Label. A name no label has drops nothing.
+	ExcludeLabel string
 }
 
 // SetAgentInstructions sets the project's agent instructions, trimmed of

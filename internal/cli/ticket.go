@@ -16,7 +16,9 @@ func ticketCommands() *cobra.Command {
 		Short: "Manage tickets",
 	}
 
-	var projectID, status, priority, listRepo, listLabel, listEpic string
+	var projectID, priority, listRepo, listLabel, listEpic, listExcludeLabel string
+	var listStatuses []string
+	var listReady bool
 	listCmd := &cobra.Command{
 		Use:   "list",
 		Short: "List tickets",
@@ -26,12 +28,14 @@ func ticketCommands() *cobra.Command {
 				return err
 			}
 			tickets, err := store.ListTickets(models.TicketFilter{
-				ProjectID: projectID,
-				Status:    status,
-				Priority:  priority,
-				Repo:      listRepo,
-				Label:     listLabel,
-				Epic:      listEpic,
+				ProjectID:    projectID,
+				Statuses:     listStatuses,
+				Priority:     priority,
+				Repo:         listRepo,
+				Label:        listLabel,
+				Epic:         listEpic,
+				Ready:        listReady,
+				ExcludeLabel: listExcludeLabel,
 			})
 			if err != nil {
 				return err
@@ -70,11 +74,13 @@ func ticketCommands() *cobra.Command {
 		},
 	}
 	listCmd.Flags().StringVar(&projectID, "project", "", "filter by project ID or prefix (case-insensitive); an unknown one returns no tickets rather than an error")
-	listCmd.Flags().StringVar(&status, "status", "", fmt.Sprintf("filter by status (%s)", strings.Join(models.Statuses, "|")))
+	listCmd.Flags().StringSliceVar(&listStatuses, "status", nil, fmt.Sprintf("filter by status (%s); comma-separated or repeated for any of several", strings.Join(models.Statuses, "|")))
 	listCmd.Flags().StringVar(&priority, "priority", "", "filter by priority (urgent|high|medium|low)")
 	listCmd.Flags().StringVar(&listRepo, "repo", "", "filter by repo")
 	listCmd.Flags().StringVar(&listLabel, "label", "", "filter by label name")
 	listCmd.Flags().StringVar(&listEpic, "epic", "", `filter by epic name (case-insensitive) or id, or "none" for tickets without an epic`)
+	listCmd.Flags().BoolVar(&listReady, "ready", false, "only tickets ready to start: todo, with every ticket they depend on done; combined with --status, a list without todo matches nothing")
+	listCmd.Flags().StringVar(&listExcludeLabel, "exclude-label", "", "leave out tickets with this label name (case-insensitive), e.g. hold")
 
 	var getJSON bool
 	getCmd := &cobra.Command{

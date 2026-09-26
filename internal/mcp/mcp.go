@@ -248,11 +248,11 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 		return map[string]bool{"deleted": true}, s.store.DeleteProject(projectID)
 
 	case "list_tickets":
-		var a models.TicketFilter
+		var a listTicketsArgs
 		if err := decodeArgs(args, &a); err != nil {
 			return nil, err
 		}
-		tickets, err := s.store.ListTickets(a)
+		tickets, err := s.store.ListTickets(a.filter())
 		if err != nil {
 			return nil, err
 		}
@@ -842,17 +842,25 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 		},
 		// --- Tickets (tasks within a project) ---
 		{
-			Name:        "list_tickets",
-			Description: "List tickets with optional filters by project, status, priority, repo, label, and epic",
+			Name: "list_tickets",
+			Description: "List tickets with optional filters by project, status (one or several), priority, repo, label, and epic, " +
+				"plus ready (todo tickets whose dependencies are all done) and excludeLabel (e.g. leave out `hold` tickets). " +
+				"Every filter given must match.",
 			InputSchema: jsonSchema{
 				Type: "object",
 				Properties: map[string]schemaProp{
 					"projectId": {Type: "string", Description: "Filter by project ID or prefix (case-insensitive); an unknown one returns no tickets rather than an error"},
-					"status":    {Type: "string", Description: "Filter by status", Enum: models.Statuses},
-					"priority":  {Type: "string", Description: "Filter by priority", Enum: []string{"urgent", "high", "medium", "low"}},
-					"repo":      {Type: "string", Description: "Filter to tickets attached to this repo, matched exactly"},
-					"label":     {Type: "string", Description: "Filter by label name, case-insensitive"},
-					"epic":      {Type: "string", Description: "Filter by epic name (case-insensitive) or id, or \"none\" for tickets without an epic. Without projectId, a name matches that epic in every project, and \"none\" spans every project's tickets without an epic too — pass projectId to scope the filter to one project."},
+					"status": {
+						Type:        "array",
+						Description: "Filter by status: tickets in any of these (" + strings.Join(models.Statuses, ", ") + "), e.g. [\"todo\", \"in_progress\"]. A single status string is accepted too.",
+						Items:       &jsonSchema{Type: "string"},
+					},
+					"priority":     {Type: "string", Description: "Filter by priority", Enum: []string{"urgent", "high", "medium", "low"}},
+					"repo":         {Type: "string", Description: "Filter to tickets attached to this repo, matched exactly"},
+					"label":        {Type: "string", Description: "Filter by label name, case-insensitive"},
+					"epic":         {Type: "string", Description: "Filter by epic name (case-insensitive) or id, or \"none\" for tickets without an epic. Without projectId, a name matches that epic in every project, and \"none\" spans every project's tickets without an epic too — pass projectId to scope the filter to one project."},
+					"ready":        {Type: "boolean", Description: "Only tickets ready to start: status todo, with every ticket they depend on done (a todo ticket with no dependencies is ready). Combined with status like any filter, so a status list without todo returns nothing."},
+					"excludeLabel": {Type: "string", Description: "Leave out tickets carrying this label name, case-insensitive (e.g. \"hold\")"},
 				},
 			},
 		},
