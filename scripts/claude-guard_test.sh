@@ -64,6 +64,10 @@ expect allow 'curl -s http://localhost:3011/api/projects'
 expect allow 'curl -s -X POST -d "{}" http://localhost:3011/api/projects'
 expect allow 'curl -s http://localhost:3010/api/projects'
 expect allow 'curl -fsS localhost:3010/api/projects | jq .'
+expect allow 'curl -X GET localhost:3010/api/projects'
+expect allow 'curl -sX GET "http://localhost:3010/api/tickets/$(echo 01ABC)"'
+expect allow 'curl --request=GET http://127.0.0.1:3010/api/projects'
+expect allow 'curl -X "$(echo POST)" localhost:3011/api/projects'
 expect allow '~/.local/bin/taskboard --help'
 expect allow '~/.local/bin/taskboard ticket list'
 expect allow "$HOME/.local/bin/taskboard mcp"
@@ -77,6 +81,9 @@ expect allow 'go run ./cmd/taskboard --db $(mktemp -d)/x.db start --port 3011'
 expect allow 'cd /Users/bilal/Projects/taskboard && git status'
 expect allow 'git log --oneline -5'
 expect allow 'lsof -nP -iTCP:3010 -sTCP:LISTEN'
+expect allow 'lsof -ti :3010'
+expect allow 'kill $(lsof -ti tcp:3041)'
+expect allow 'lsof -ti :30100 | xargs kill'
 expect allow 'ps -o pid,command -p 12345'
 expect allow 'grep -rn taskboard internal/cli'
 # Reading about kill in paths that contain "taskboard" is not killing anything.
@@ -95,6 +102,20 @@ expect allow $'git commit -m "$(cat <<\'EOF\'\nfix: guard the live board\n\nDon\
 expect allow $'cat > notes.md <<EOF\n- make install\n- pkill taskboard\n- ./taskboard ticket list\nEOF\nwc -l notes.md'
 expect allow $'git commit -F - <<-\'MSG\'\n\tmake install\n\tMSG\ngit log -1'
 expect allow $'mkdir -p .tmp\ngo run ./cmd/taskboard --db ./.tmp/dev.db project list'
+# A substitution as the command word that names neither make nor taskboard,
+# or runs taskboard with --db.
+expect allow '$(which go) test ./...'
+expect allow '`command -v make` test-install'
+expect allow '$(which taskboard) --db ./.tmp/x.db ticket list'
+expect allow '"$(git rev-parse --show-toplevel)/scripts/claude-guard_test.sh"'
+expect allow '$(git -C /Users/bilal/Projects/taskboard-worktrees/acp-31 rev-parse --show-toplevel)/scripts/claude-guard_test.sh'
+expect allow 'echo "$(which make) install"'
+# Arithmetic, with and without substitutions inside.
+expect allow 'echo $(( (1 + 2) * 3 ))'
+expect allow 'echo $(( $(wc -l < notes.md) + 1 ))'
+expect allow '(( n = $(git rev-list --count HEAD) ))'
+expect allow $'echo $(( 1 << 2 ))\ncat notes.md'
+expect allow 'echo "$(( $(date +%s) - 60 )) make install"'
 
 # make install
 expect deny 'make install'
@@ -112,6 +133,16 @@ expect deny $'(( y <<= 1 ))\nmake install'
 expect deny $'bash <<\'EOF\'\nmake install\nEOF'
 expect deny $'cat > notes.md <<EOF\nmake install\nEOF\nmake install'
 expect deny $'git commit -F - <<\'MSG\'\nnotes\nMSG\nmake install'
+# A substitution inside arithmetic, and $(( that bash reads as $( plus a
+# subshell because it doesn't close with )).
+expect deny 'echo $(( $(make install) ))'
+expect deny 'echo "$(( 1 + $(make install) ))"'
+expect deny 'echo $(( `make install` + 1 ))'
+expect deny '(( n = $(make install) ))'
+expect deny 'echo $(( $(( 2 * $(make install) )) ))'
+expect deny '$((make install) )'
+expect deny 'echo $((make install) )'
+expect deny '((make install) )'
 
 # Selecting processes by the name taskboard.
 expect deny 'pkill taskboard'
@@ -125,6 +156,13 @@ expect deny 'ps aux | grep taskboard | awk "{print \$2}" | xargs kill -9'
 expect deny 'kill $(lsof -t -c taskboard)'
 expect deny 'kill "$(pgrep -f taskboard)"'
 expect deny $'sh -s <<EOF\npkill taskboard\nEOF'
+
+# Selecting processes by the live port.
+expect deny 'lsof -ti :3010 | xargs kill'
+expect deny 'kill $(lsof -ti tcp:3010)'
+expect deny 'kill -9 $(lsof -t -iTCP:3010 -sTCP:LISTEN)'
+expect deny 'lsof -ti:3010 | xargs kill -9'
+expect deny 'kill `lsof -t -i @localhost:3010`'
 
 # The live data directory.
 expect deny 'ls ~/Library/Application\ Support/taskboard'
@@ -146,6 +184,16 @@ expect deny 'curl -s -H "Content-Type: application/json" -d "$(cat t.json)" http
 expect deny 'curl --json "$(jq -n {})" localhost:3010/api/projects'
 expect deny 'curl -d `cat t.json` localhost:3010/api/tickets'
 expect deny 'curl -d $(cat t.json) localhost:3010/api/tickets'
+# A method the guard can't read counts as a write.
+expect deny 'curl localhost:3010/api/x -X "$(echo POST)"'
+expect deny 'curl -X "$METHOD" http://localhost:3010/api/tickets/1'
+expect deny 'curl --request=${m} http://127.0.0.1:3010/api/tickets/1'
+expect deny 'curl --request `echo DELETE` localhost:3010/api/tickets/1'
+expect deny 'curl -X$(echo PUT) localhost:3010/api/tickets/1'
+expect deny 'curl -sX "$(echo POST)" localhost:3010/api/projects'
+expect deny 'curl -sXPOST localhost:3010/api/projects'
+expect deny 'curl -dXYZ localhost:3010/api/projects'
+expect deny 'wget --method="$(echo DELETE)" http://localhost:3010/api/tickets/1'
 
 # Development builds without --db.
 expect deny './taskboard ticket list'
@@ -157,6 +205,15 @@ expect deny 'go run github.com/tcarac/taskboard/cmd/taskboard mcp'
 expect deny 'go build -o taskboard ./cmd/taskboard && ./taskboard clear --force'
 expect deny 'nohup ./taskboard start --foreground > server.log 2>&1 &'
 expect deny 'git commit -m "$(printf %s ok)" && ./taskboard ticket list'
+
+# A substitution as the command word: the guard can't tell what it runs, so
+# it goes by what the substitution names.
+expect deny '$(which taskboard) ticket list'
+expect deny '`command -v make` install'
+expect deny '"$(command -v taskboard)" start --foreground'
+expect deny 'sudo $(which gmake) -C . install'
+expect deny '$(dirname $(which taskboard))/taskboard ticket list'
+expect deny 'echo x | `which make` install'
 
 echo "$cases guard checks, $failures failed (readers: ${parsers[*]})"
 [ "$failures" -eq 0 ]

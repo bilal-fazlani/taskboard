@@ -4,9 +4,12 @@
 #
 #   - make install (replaces the live binary and restarts the live server)
 #   - pkill/killall taskboard, or kill fed by pgrep/pidof/ps/grep/lsof -c taskboard
+#     or by lsof -i :3010
 #   - anything mentioning "Application Support/taskboard" (the live database)
-#   - POST/PUT/PATCH/DELETE to localhost:3010 or 127.0.0.1:3010
-#   - running a taskboard binary other than ~/.local/bin/taskboard without --db
+#   - POST/PUT/PATCH/DELETE to localhost:3010 or 127.0.0.1:3010, or a method
+#     it can't read there (-X "$(...)", -X "$m")
+#   - running a taskboard binary other than ~/.local/bin/taskboard without --db,
+#     including one named by a substitution ($(which taskboard) ticket list)
 #
 # This is string matching on the command line, and it is easy to get around: a
 # script file, eval, variables, aliases, a binary with another name, `go run .`
@@ -82,8 +85,10 @@ deny() {
 # Separators inside quotes stay text. A command substitution, $(...) or
 # backticks, leaves the word __SUBST__ in the command around it, so that
 # command keeps all its words, and its contents follow as separate commands at
-# the end of the same statement. Arithmetic, $((...)) and ((...)), is text. A
-# heredoc body is dropped unless the command it feeds is a shell.
+# the end of the same statement. As the command word it leaves __SUBST__make
+# or __SUBST__taskboard instead when its contents name make or taskboard.
+# Arithmetic, $((...)) and ((...)), is text apart from the substitutions inside
+# it. A heredoc body is dropped unless the command it feeds is a shell.
 read -r -d '' LEXER <<'AWK'
 function out(s) {
   if (lv == 1) printf "%s", s; else buf[lv] = buf[lv] s
@@ -94,18 +99,58 @@ function mark(m) {
   out(m); cur = ""
 }
 function open_sub(kind) {
-  out("__SUBST__")
+  cw = at_command_word()
   saved[lv] = cur; lv++; buf[lv] = ""; pend[lv] = ""; cur = ""; ws = 1
+  cmdword[lv] = cw
   sp++; st[sp] = kind
 }
 function close_sub(   s) {
   while (sp > 1 && st[sp] != "X" && st[sp] != "B") sp--
   s = buf[lv] pend[lv]; lv--; pend[lv] = pend[lv] C s; cur = saved[lv]
+  out(cmdword[lv + 1] ? subst_word(s) : "__SUBST__")
   sp--
+}
+# at_command_word: whether cur holds nothing yet but quotes, assignments,
+# flags and wrappers, so a substitution starting here is the command word.
+function at_command_word(   rest, w) {
+  rest = cur
+  while (match(rest, /[^ \t]+/)) {
+    w = substr(rest, RSTART, RLENGTH); rest = substr(rest, RSTART + RLENGTH)
+    gsub(/["']/, "", w)
+    if (w == "" || w ~ /^[A-Za-z_][A-Za-z0-9_]*=/ || w ~ /^-/ || w ~ /^[0-9]/) continue
+    if (w ~ /^(:|env|exec|nohup|time|sudo|nice|xargs|timeout|caffeinate)$/) continue
+    return 0
+  }
+  return 1
+}
+# subst_word <contents>: the placeholder for a substitution that is the
+# command word, named after what it looks up: __SUBST__make when a word of it
+# is make or gmake, __SUBST__taskboard when one mentions taskboard.
+function subst_word(s,   parts, np, k, w, kind) {
+  kind = ""
+  np = split(s, parts, "[ \t" S C "]+")
+  for (k = 1; k <= np; k++) {
+    w = parts[k]
+    gsub(/["'`\\()]/, "", w)
+    if (tolower(w) ~ /taskboard/) kind = "taskboard"
+    sub(/.*\//, "", w)
+    if (w ~ /^g?make$/) return "__SUBST__make"
+  }
+  return "__SUBST__" kind
 }
 function has_backtick(   k) {
   for (k = sp; k > 1; k--) if (st[k] == "B") return 1
   return 0
+}
+# is_arith <index after (( or $((>: whether the parentheses close with )), as
+# bash requires of arithmetic. $((a) ) is $( with a subshell inside, and
+# ((a) ) two subshells.
+function is_arith(j,   d) {
+  for (d = 0; j <= n; j++) {
+    if (ch[j] == "(") d++
+    else if (ch[j] == ")") { if (d == 0) return ch[j + 1] == ")"; d-- }
+  }
+  return 1
 }
 function feeds_shell(   parts, np, k, w) {
   np = split(cur, parts, /[ \t]+/)
@@ -131,6 +176,8 @@ END {
   while (i <= n) {
     c = ch[i]; top = st[sp]
     if (top == "A") {
+      if (c == "$" && ch[i + 1] == "(" && (ch[i + 2] != "(" || !is_arith(i + 3))) { open_sub("X"); i += 2; continue }
+      if (c == "`") { if (has_backtick()) close_sub(); else open_sub("B"); i++; continue }
       if (c == "(") { ad[sp]++; out(c); i++; continue }
       if (c == ")") {
         if (ad[sp] > 0) { ad[sp]--; out(c); i++; continue }
@@ -139,7 +186,7 @@ END {
       }
       out(c == "\n" ? " " : c); i++; continue
     }
-    if (c == "$" && ch[i + 1] == "(" && ch[i + 2] == "(") { out("$(("); sp++; st[sp] = "A"; ad[sp] = 0; i += 3; continue }
+    if (c == "$" && ch[i + 1] == "(" && ch[i + 2] == "(" && is_arith(i + 3)) { out("$(("); sp++; st[sp] = "A"; ad[sp] = 0; i += 3; continue }
     if (c == "$" && ch[i + 1] == "(") { open_sub("X"); i += 2; continue }
     if (c == "`") { if (has_backtick()) close_sub(); else open_sub("B"); i++; continue }
     if (top == "D") {
@@ -183,7 +230,7 @@ END {
       if (d != "" && !feeds_shell()) { nh++; delim[nh] = d; tabs[nh] = t }
       out(" "); i = j; ws = 1; continue
     }
-    if (c == "(" && ch[i + 1] == "(") { out("(("); sp++; st[sp] = "A"; ad[sp] = 0; i += 2; continue }
+    if (c == "(" && ch[i + 1] == "(" && is_arith(i + 2)) { out("(("); sp++; st[sp] = "A"; ad[sp] = 0; i += 2; continue }
     if (c == "(") { mark(C); sp++; st[sp] = "P"; i++; ws = 1; continue }
     if (c == ")") {
       if (top == "X") { close_sub(); i++; continue }
@@ -272,8 +319,23 @@ has_taskboard_word() {
   return 1
 }
 
+# subst_command_word: without awk, a command word that is a substitution stays
+# as written ($(which or `command), its contents in the words after it. Name it
+# the way the awk lexer would, from all the command's words.
+subst_command_word() {
+  local w kind=
+  for w in "${WORDS[@]}"; do
+    case "$w" in $TB) kind=taskboard ;; esac
+    w=${w#'$('}
+    w=${w#'`'}
+    w=${w%%[\)\`]*}
+    case "${w##*/}" in make | gmake) kind='make'; break ;; esac
+  done
+  WORDS[0]=__SUBST__$kind
+}
+
 check_make_install() {
-  case "${WORDS[0]##*/}" in make | gmake) ;; *) return ;; esac
+  case "${WORDS[0]##*/}" in make | gmake | __SUBST__make) ;; *) return ;; esac
   local w
   for w in "${WORDS[@]:1}"; do
     [ "$w" = install ] && deny "make install replaces the live binary and restarts the live server. It is Bilal's action, never an agent's."
@@ -282,7 +344,9 @@ check_make_install() {
 
 check_dev_binary() {
   local b0=${WORDS[0]##*/} path i start=
-  if [ "$b0" = taskboard ]; then
+  if [ "$b0" = __SUBST__taskboard ]; then
+    start=1
+  elif [ "$b0" = taskboard ]; then
     path=${WORDS[0]}
     if [ "$path" = taskboard ]; then
       path=$(command -v taskboard 2>/dev/null || true)
@@ -311,13 +375,15 @@ check_dev_binary() {
   for ((i = 0; i < ${#RAW[@]}; i++)); do
     [ "${RAW[i]}" = --db ] && [ -n "${RAW[i + 1]:-}" ] && return
   done
+  [ "$b0" = __SUBST__taskboard ] && deny "the command word is a substitution naming taskboard, so this may run a development build without --db. Write the binary's path out (~/.local/bin/taskboard), or pass --db ./.tmp/<name>.db and a port of 3011 or above."
   deny "this runs a development taskboard build without --db. Pass --db ./.tmp/<name>.db and a port of 3011 or above. Only ~/.local/bin/taskboard may run without --db."
 }
 
 # check_kill_by_name: over the simple commands of one statement, in COMMANDS.
-# Only a command whose own name is kill/pkill/killall counts as killing.
+# Only a command whose own name is kill/pkill/killall counts as killing. lsof
+# naming port 3010 (-i :3010, -ti tcp:3010, -iTCP:3010) finds the live server.
 check_kill_by_name() {
-  local line has_kill= looks_up_name= b0 i
+  local line has_kill= looks_up_name= looks_up_port= b0 i
   for line in ${COMMANDS[@]+"${COMMANDS[@]}"}; do
     words_of "$line"
     [ ${#WORDS[@]} -gt 0 ] || continue
@@ -337,35 +403,69 @@ check_kill_by_name() {
           case "${WORDS[i]}" in
             -c) case "${WORDS[i + 1]:-}" in $TB) looks_up_name=1 ;; esac ;;
             -c$TB) looks_up_name=1 ;;
+            *:3010 | *:3010[!0-9]*) looks_up_port=1 ;;
           esac
         done
         ;;
     esac
   done
 
-  if [ -n "$has_kill" ] && [ -n "$looks_up_name" ]; then
+  [ -n "$has_kill" ] || return
+  if [ -n "$looks_up_name" ]; then
     deny "this kills processes found by the name taskboard, which includes the live server. Stop only PIDs you started, or those from lsof -t -- <your own db path>."
+  fi
+  if [ -n "$looks_up_port" ]; then
+    deny "this kills whatever listens on port 3010, which is the live server. Stop only PIDs you started, or those from lsof -t -- <your own db path>."
   fi
 }
 
 HOST_RE='([Ll][Oo][Cc][Aa][Ll][Hh][Oo][Ss][Tt]|127\.0\.0\.1|0\.0\.0\.0|\[::1\]):3010([^0-9]|$)'
 METHOD_RE='^(-X|--request=?|--method=?)?([Pp][Oo][Ss][Tt]|[Pp][Uu][Tt]|[Pp][Aa][Tt][Cc][Hh]|[Dd][Ee][Ll][Ee][Tt][Ee])$'
+# -X, also at the end of a cluster (-sX), and --request/--method, with the
+# method as the next word or joined to the flag.
+METHOD_FLAG_RE='^(-[A-Za-z]*X|--request|--method)$'
+METHOD_JOINED_RE='^(-[A-Za-z]*X|--request=|--method=)(.+)$'
 SHORT_DATA_RE='^-[A-Za-z]*[dFT]'
 LONG_DATA_RE='^--(data|data-[a-z]+|json|form|form-string|upload-file|post-data|post-file)(=|$)'
+
+deny_live_write() {
+  deny "this writes to the live taskboard API on port 3010. Point writes at your own dev server on 3011 or above; GET requests to 3010 are fine."
+}
+
+# check_method <value>: a method written out as a write, or one the guard
+# can't read (a variable or substitution), counts as a write.
+check_method() {
+  [[ $1 =~ ^[A-Za-z]+$ ]] || deny "this sends a request to the live taskboard API on port 3010 with a method the guard can't read, so it counts as a write. Write the method out; GET requests to 3010 are fine."
+  [[ $1 =~ $METHOD_RE ]] && deny_live_write
+}
 
 # check_live_write <simple command>: only the flags of the command that names
 # the 3010 URL count, not those of commands its output is piped into.
 check_live_write() {
-  local command=$1 w
+  local command=$1 w method_next=
   case "$command" in *:3010*) ;; *) return ;; esac
   [[ $command =~ $HOST_RE ]] || return
   words_of "$command"
   for w in ${RAW[@]+"${RAW[@]}"}; do
     unquote_word "$w"
     w=$UNQUOTED
-    if [[ $w =~ $METHOD_RE ]] || [[ $w =~ $SHORT_DATA_RE ]] || [[ $w =~ $LONG_DATA_RE ]]; then
-      deny "this writes to the live taskboard API on port 3010. Point writes at your own dev server on 3011 or above; GET requests to 3010 are fine."
+    if [ -n "$method_next" ]; then
+      method_next=
+      check_method "$w"
+      continue
     fi
+    case "$w" in
+      -*)
+        if [[ $w =~ $METHOD_RE ]] || [[ $w =~ $SHORT_DATA_RE ]] || [[ $w =~ $LONG_DATA_RE ]]; then
+          deny_live_write
+        elif [[ $w =~ $METHOD_FLAG_RE ]]; then
+          method_next=1
+        elif [[ $w =~ $METHOD_JOINED_RE ]]; then
+          check_method "${BASH_REMATCH[2]}"
+        fi
+        ;;
+      *) [[ $w =~ $METHOD_RE ]] && deny_live_write ;;
+    esac
   done
 }
 
@@ -401,6 +501,7 @@ check() {
       check_live_write "$line"
       words_of "$line"
       [ ${#WORDS[@]} -gt 0 ] || continue
+      case "${WORDS[0]}" in '$('* | '`'*) subst_command_word ;; esac
       check_make_install
       check_dev_binary
       case "${WORDS[0]##*/}" in
