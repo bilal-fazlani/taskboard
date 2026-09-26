@@ -110,6 +110,8 @@ A `: keep-alive` comment arrives roughly every 20 seconds while nothing changes,
 
 `GET /api/tickets/{id}/history` returns a ticket's status changes, newest first. Every status change is recorded, whichever surface made it; the first entry, with an empty `fromStatus`, is the ticket's creation. `PUT /api/tickets/{id}` and `POST /api/tickets/{id}/move` take an optional `note`, saved with the change. Tickets carry `reviewRounds`, the number of times they have entered `agent_review`.
 
+To add to a ticket's description without resending it, `PUT /api/tickets/{id}` takes `appendDescription` (MCP `update_ticket` takes the same argument, the CLI `ticket update --append-description`). The existing text is kept byte for byte; on a non-empty description the new text starts a new paragraph, with only the newlines needed for a blank line before it, and on an empty one it becomes the description. The append is read and written in one transaction, so appends at the same moment all land. It cannot be combined with `description`, and text that is empty or only whitespace is refused (a 400 over HTTP).
+
 `GET /api/tickets` filters by `projectId`, `status`, `priority`, `repo`, `label` and `epic`, plus `ready=true` (todo tickets whose dependencies are all done) and `excludeLabel` (leave out tickets with that label, e.g. `hold`). Repeat `status` for several, e.g. `?status=todo&status=in_progress`. Every filter given must match, so `ready=true` with statuses that leave out `todo` returns nothing. The CLI's `ticket list` and the MCP `list_tickets` tool take the same filters.
 
 ### CLI
@@ -137,6 +139,7 @@ taskboard ticket create --project <ID> --title "Implement login" --priority high
   --label backend --repo acme/auth-api --repo acme/auth-web
 taskboard ticket update <ID> --labels backend,urgent --depends-on AUTH-1
 taskboard ticket update <ID> --repo acme/auth-api,acme/auth-web  # replaces the set
+taskboard ticket update AUTH-1 --append-description "Worktree: ~/w/auth-1"  # adds a paragraph
 taskboard ticket list --repo acme/auth-api                       # tickets touching that repo
 taskboard ticket list --project AUTH --status todo,in_progress   # any of several statuses (or repeat --status)
 taskboard ticket list --project AUTH --ready --exclude-label hold # todo tickets whose dependencies are all done, minus held ones

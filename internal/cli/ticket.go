@@ -237,6 +237,7 @@ func ticketCommands() *cobra.Command {
 	var (
 		updTitle, updDescription, updStatus, updPriority, updDue, updEpic, updNote string
 		updRepos, updLabels, updLabelAlias, updDependsOn                           []string
+		updAppendDescription                                                       string
 	)
 	updateCmd := &cobra.Command{
 		Use:   "update [id-or-key]",
@@ -249,7 +250,12 @@ func ticketCommands() *cobra.Command {
 			"same rule: omit it to leave the due date alone, or pass --due=\"\" to clear it. " +
 			"--epic follows the same rule as --due: omit it to leave the epic alone, or " +
 			"pass --epic=\"\" or --epic=none to clear it; anything else names an epic " +
-			"(by name, case-insensitive, or id) in the ticket's own project.",
+			"(by name, case-insensitive, or id) in the ticket's own project.\n\n" +
+			"--append-description adds text to the end of the description instead of " +
+			"replacing it, leaving the existing text untouched: on a non-empty " +
+			"description the text starts a new paragraph (a blank line before it), on " +
+			"an empty one it becomes the description. It cannot be combined with " +
+			"--description and must not be empty.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			store, err := openStore()
@@ -267,6 +273,9 @@ func ticketCommands() *cobra.Command {
 			}
 			if cmd.Flags().Changed("description") {
 				req.Description = &updDescription
+			}
+			if cmd.Flags().Changed("append-description") {
+				req.AppendDescription = &updAppendDescription
 			}
 			if cmd.Flags().Changed("status") {
 				req.Status = &updStatus
@@ -320,6 +329,8 @@ func ticketCommands() *cobra.Command {
 	}
 	updateCmd.Flags().StringVar(&updTitle, "title", "", "new title")
 	updateCmd.Flags().StringVar(&updDescription, "description", "", "new description")
+	updateCmd.Flags().StringVar(&updAppendDescription, "append-description", "", "text to add to the description as a new paragraph")
+	updateCmd.MarkFlagsMutuallyExclusive("description", "append-description")
 	updateCmd.Flags().StringVar(&updStatus, "status", "", fmt.Sprintf("status (%s)", strings.Join(models.Statuses, "|")))
 	updateCmd.Flags().StringVar(&updNote, "note", "", noteFlagUsage)
 	updateCmd.Flags().StringVar(&updPriority, "priority", "", "priority (urgent|high|medium|low)")

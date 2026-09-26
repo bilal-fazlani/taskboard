@@ -210,6 +210,14 @@ type UpdateTicketRequest struct {
 	Status      *string  `json:"status,omitempty"`
 	Priority    *string  `json:"priority,omitempty"`
 	Repos       []string `json:"repos,omitempty"`
+	// AppendDescription adds text to the end of the description instead of
+	// replacing it, joined by AppendToDescription's rule, so a caller adding
+	// a line never resends (or mangles) the rest. The store reads the
+	// description and writes the result inside its write transaction, so two
+	// appends at the same moment both survive. It cannot be combined with
+	// Description, and text that is empty or only whitespace is an
+	// ErrInvalidInput; either way nothing in the request is applied.
+	AppendDescription *string `json:"appendDescription,omitempty"`
 	// DueDate is nil when the caller omitted the field (or sent JSON null),
 	// meaning "leave the due date unchanged" — this is what makes it safe for
 	// a caller to send only the fields it actually edited, rather than the
@@ -291,4 +299,24 @@ func (p *Project) SetAgentInstructions(text string) {
 	text = strings.TrimSpace(text)
 	p.AgentInstructions = &text
 	p.HasAgentInstructions = text != ""
+}
+
+// AppendToDescription is the one joining rule for appending to a ticket's
+// description, the same through MCP, HTTP and the CLI. An empty description
+// becomes text as given. Otherwise text starts a new paragraph: the existing
+// text is kept byte for byte, followed by only the newlines it needs to end
+// in a blank line (two when it ends without one, one when it ends in a
+// single newline, none when it already ends in a blank line), then text.
+// text itself is never changed.
+func AppendToDescription(existing, text string) string {
+	switch {
+	case existing == "":
+		return text
+	case strings.HasSuffix(existing, "\n\n"):
+		return existing + text
+	case strings.HasSuffix(existing, "\n"):
+		return existing + "\n" + text
+	default:
+		return existing + "\n\n" + text
+	}
 }

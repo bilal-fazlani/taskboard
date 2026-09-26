@@ -742,6 +742,12 @@ func (s *MCPServer) resolveEpicRefOrError(ref, projectRef string) (string, error
 	return e.ID, nil
 }
 
+// appendDescriptionHelp documents update_ticket's appendDescription; the
+// rule it states is models.AppendToDescription, shared with HTTP and the CLI.
+const appendDescriptionHelp = "Text to add to the end of the description, leaving the existing text untouched. " +
+	"On a non-empty description it starts a new paragraph (a blank line before it); on an empty one it becomes the description. " +
+	"Two appends at the same moment both land. Cannot be combined with description; must not be empty."
+
 // noteParamDescription documents the note move_ticket and update_ticket take.
 const noteParamDescription = "Why the status is changing, saved with the change in the ticket's status history. " +
 	"Required when moving a ticket out of agent_review: say why it is leaving review, either that it was approved and landed, " +
@@ -1080,14 +1086,15 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 		},
 		{
 			Name: "update_ticket",
-			Description: "Update ticket properties. Changing the status out of agent_review requires a note." +
+			Description: "Update ticket properties. Changing the status out of agent_review requires a note. " +
+				"To add a line or paragraph to the description, pass appendDescription rather than resending the whole description." +
 				shortAnswerHelp(ticketHolds, changedHelp, ticketWhole),
 			InputSchema: jsonSchema{
 				Type: "object",
 				Properties: map[string]schemaProp{
 					"id":          {Type: "string", Description: "Ticket ID or display key (e.g. BILL-2), case-insensitive"},
 					"title":       {Type: "string", Description: "Ticket title"},
-					"description": {Type: "string", Description: "Description"},
+					"description": {Type: "string", Description: "Replaces the whole description. To add to it, use appendDescription instead."},
 					"status":      {Type: "string", Description: "Status", Enum: models.Statuses},
 					"note":        {Type: "string", Description: noteParamDescription},
 					"priority":    {Type: "string", Description: "Priority", Enum: []string{"urgent", "high", "medium", "low"}},
@@ -1107,6 +1114,10 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 						Type:        "array",
 						Description: "Ticket IDs or display keys like BILL-2 that this ticket depends on. Informational only: dependencies never block a status change.",
 						Items:       &jsonSchema{Type: "string"},
+					},
+					"appendDescription": {
+						Type:        "string",
+						Description: appendDescriptionHelp,
 					},
 					"full": fullProp(ticketWhole),
 				},

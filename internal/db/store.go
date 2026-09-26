@@ -697,8 +697,18 @@ func (s *Store) CreateTicket(req models.CreateTicketRequest) (*models.Ticket, er
 // UpdateTicket applies the fields req sets and leaves the rest alone. A change
 // of status writes a row of status history, with req.Note, in the same
 // transaction; opts can add rules for that change (see
-// RequireNoteLeavingReview).
+// RequireNoteLeavingReview). req.AppendDescription is joined onto the
+// description read inside the transaction (see models.AppendToDescription).
 func (s *Store) UpdateTicket(id string, req models.UpdateTicketRequest, opts ...WriteOption) (*models.Ticket, error) {
+	if req.AppendDescription != nil {
+		if req.Description != nil {
+			return nil, invalidInput("pass description or appendDescription, not both")
+		}
+		if strings.TrimSpace(*req.AppendDescription) == "" {
+			return nil, invalidInput("appendDescription is empty: pass the text to add")
+		}
+	}
+
 	t, err := s.GetTicket(id)
 	if err != nil || t == nil {
 		return nil, err
@@ -743,6 +753,16 @@ func (s *Store) UpdateTicket(id string, req models.UpdateTicketRequest, opts ...
 	}
 	if req.Description != nil {
 		t.Description = *req.Description
+	}
+	if req.AppendDescription != nil {
+		// Read inside the transaction, which holds the write lock (BEGIN
+		// IMMEDIATE), so no other write lands between this read and the
+		// UPDATE below, and two appends at once both keep their text.
+		var current string
+		if err := tx.QueryRow("SELECT description FROM tickets WHERE id = ?", id).Scan(&current); err != nil {
+			return nil, fmt.Errorf("reading description: %w", err)
+		}
+		t.Description = models.AppendToDescription(current, *req.AppendDescription)
 	}
 	if req.Status != nil {
 		if !validStatus(*req.Status) {
