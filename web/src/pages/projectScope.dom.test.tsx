@@ -280,6 +280,35 @@ describe.each(views)("%s without a project in its URL", (_name, page, path, empt
   });
 });
 
+// The projects list is loaded once, by FilterPanel, and handed up to the view
+// through onProjects (ACP-70): before that fix, the bar and the view each
+// loaded it separately, and either one failing alone left the other showing
+// something wrong. With one list, a failed load either way looks the same:
+// no project ever gets into the URL, so the view can't tell whether one would
+// have been picked, and — since ACP-72 — a view with no project shows no
+// tickets. It must not pass that off as truly having none (an unexplained
+// empty view) or wait for a pick that will never come (hanging on its loading
+// message); it explains instead, until the next live refresh's retry (not
+// exercised here — the retry is FilterPanel's existing, unchanged
+// useLiveRefresh(loadOptions)) succeeds.
+describe.each(views)("%s when the projects list fails to load", (_name, page, path, emptyText) => {
+  beforeEach(() => {
+    mockApi.projects.list.mockRejectedValue(new Error("offline"));
+  });
+
+  it("does not hang on its loading message", async () => {
+    await mount(page(), path);
+    expect(urlProject()).toBeNull();
+    expect(shows("Loading graph…") || shows("Loading board…") || shows("Loading tickets…")).toBe(false);
+  });
+
+  it("explains rather than showing an unexplained empty view", async () => {
+    await mount(page(), path);
+    expect(shows("Couldn't load the projects")).toBe(true);
+    if (emptyText) expect(shows(emptyText)).toBe(false);
+  });
+});
+
 // Archived projects are never picked and not offered, though a link to one
 // still opens it; the pick goes to the active project whose tickets changed
 // last. OLD is archived and its tickets changed last of all.

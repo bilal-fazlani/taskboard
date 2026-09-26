@@ -77,9 +77,18 @@ export function newTicketDefaults(
  *   selected (see defaultProject.ts): a new ticket belongs in the view's
  *   project, and an archived one takes none;
  * - when no project is active, so there is none to put a ticket in.
+ *
+ * `failed` is whether the projects list has never loaded because its only
+ * attempt so far failed, which changes only the message shown while
+ * `projects` is null: a load still on its way says so, one that failed says
+ * that instead, and the next live refresh retries it on its own.
  */
-export function newTicketBlocked(viewProject: string, projects: readonly PickableProject[] | null): string | null {
-  if (projects === null) return "Loading projects…";
+export function newTicketBlocked(
+  viewProject: string,
+  projects: readonly PickableProject[] | null,
+  failed = false,
+): string | null {
+  if (projects === null) return failed ? "Couldn't load projects. Retrying…" : "Loading projects…";
   const shown = namedProject(
     projects.map((p) => p.prefix),
     viewProject,

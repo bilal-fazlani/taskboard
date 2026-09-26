@@ -133,10 +133,19 @@ export function rememberProject(prefix: string): void {
  * on its way). A view shows its loading state meanwhile rather than every
  * project's tickets. With no active projects nothing will be picked, and the
  * view shows its empty state.
+ *
+ * `failed` is whether the projects list has never loaded because its only
+ * attempt so far failed (passed only together with `projects === null`,
+ * which a load still on its way also leaves true). Waiting stops there too,
+ * rather than forever: the view shows its load-error explanation instead,
+ * and the next live refresh retries the load on its own.
  */
 export function awaitingProject(
   project: string,
   projects: readonly Pick<PickableProject, "status">[] | null,
+  failed = false,
 ): boolean {
-  return project === "" && (projects === null || projects.some((p) => !isArchived(p)));
+  if (project !== "") return false;
+  if (projects !== null) return projects.some((p) => !isArchived(p));
+  return !failed;
 }

@@ -15,6 +15,7 @@ import { api, type Ticket, type Project, type TicketWrite } from "../api/client"
 import TicketEditor from "../components/TicketEditor";
 import CreateTicketModal from "../components/CreateTicketModal";
 import FilterPanel from "../components/FilterPanel";
+import ProjectsLoadError from "../components/ProjectsLoadError";
 import { useDocumentMatches } from "../hooks/useDocumentMatches";
 import { useFilters } from "../hooks/useFilters";
 import { useLiveRefresh } from "../hooks/useLiveRefresh";
@@ -84,7 +85,16 @@ function EpicHeader({ sort, onSort }: { sort: EpicSort; onSort: () => void }) {
 
 export default function Tickets() {
   const [tickets, setTickets] = useState<Ticket[]>([]);
-  const [projects, setProjects] = useState<Project[]>([]);
+  // Null until FilterPanel's own load (below) reports the first one back, and
+  // whether that load has failed, through onProjects — the bar is the only
+  // place that loads the projects list, so the table and the bar never
+  // disagree about it (ACP-70).
+  const [projects, setProjects] = useState<Project[] | null>(null);
+  const [projectsFailed, setProjectsFailed] = useState(false);
+  const onProjects = useCallback((loaded: Project[] | null, failed: boolean) => {
+    setProjects(loaded);
+    setProjectsFailed(failed);
+  }, []);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
   const [epicSort, setEpicSort] = useState<EpicSort>(null);
@@ -107,9 +117,8 @@ export default function Tickets() {
 
   const load = useCallback(async () => {
     try {
-      const [t, p] = await Promise.all([api.tickets.list(), api.projects.list()]);
+      const t = await api.tickets.list();
       setTickets(t || []);
-      setProjects(p || []);
     } catch {
       // A failed refetch keeps what is on screen, so an open editor stays open.
       // The first load has nothing to keep and falls through to the empty state.
@@ -138,14 +147,16 @@ export default function Tickets() {
   const rows = useMemo(() => sortByEpic(filtered, epicSort), [filtered, epicSort]);
   const projectCount = projectTickets.length;
   // The filter bar picks a project for a URL without one; until it has, the
-  // table waits rather than listing every project's tickets. The projects load
-  // with the tickets, so once loading is over they are known (or failed, and
-  // there are none to wait for).
-  const waiting = loading || awaitingProject(filters.project, projects);
+  // table waits rather than listing every project's tickets. A projects load
+  // that has never succeeded stops that wait rather than hanging on it
+  // forever (ACP-70): with no project in the URL either, there is no way to
+  // tell whether one would have been picked, so the table explains rather
+  // than showing what would otherwise look like a project with no tickets.
+  const projectsErrored = filters.project === "" && projects === null && projectsFailed;
+  const waiting = loading || awaitingProject(filters.project, projects, projectsFailed);
   const repos = useMemo(() => repoOptions(projectTickets, filters.repo), [projectTickets, filters.repo]);
   // Why New Ticket can't open the form here, if it can't (see newTicketBlocked).
-  // The projects are unknown until the first load is over.
-  const createBlocked = newTicketBlocked(filters.project, loading ? null : projects);
+  const createBlocked = newTicketBlocked(filters.project, projects, projectsFailed);
 
   const handleCreate = async (data: TicketWrite) => {
     await api.tickets.create(data);
@@ -187,7 +198,8 @@ export default function Tickets() {
         state={filterState}
         tickets={loading ? null : tickets}
         repos={repos}
-        count={waiting ? undefined : { shown: filtered.length, total: projectCount }}
+        count={waiting || projectsErrored ? undefined : { shown: filtered.length, total: projectCount }}
+        onProjects={onProjects}
       />
 
       <div data-testid="table-scroll" className="flex-1 overflow-auto">
@@ -195,6 +207,8 @@ export default function Tickets() {
           <div className="flex items-center justify-center h-64 text-slate-600">
             Loading tickets…
           </div>
+        ) : projectsErrored ? (
+          <ProjectsLoadError />
         ) : filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-64 text-slate-600 space-y-3">
             <TicketIcon className="w-10 h-10 text-slate-700" />
@@ -314,7 +328,7 @@ export default function Tickets() {
 
       {showCreate && (
         <CreateTicketModal
-          projects={projects}
+          projects={projects ?? []}
           filters={filters}
           onClose={() => setShowCreate(false)}
           onCreate={handleCreate}
@@ -325,7 +339,7 @@ export default function Tickets() {
         <TicketEditor
           key={selectedTicket.id}
           ticket={selectedTicket}
-          projects={projects}
+          projects={projects ?? []}
           ticketUrl={ticketUrl}
           deleted={ticketDeleted}
           closeRequested={closeRequested}

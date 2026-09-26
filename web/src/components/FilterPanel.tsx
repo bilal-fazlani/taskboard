@@ -97,6 +97,7 @@ export default function FilterPanel({
   repos,
   count,
   unmatched,
+  onProjects,
 }: {
   state: FilterState;
   /**
@@ -115,6 +116,16 @@ export default function FilterPanel({
    * shows the choice. It is no filter, so Clear filters leaves it alone.
    */
   unmatched?: { mode: UnmatchedMode; onChange: (mode: UnmatchedMode) => void };
+  /**
+   * Called with the projects list, and whether its most recent load failed,
+   * whenever either changes. The bar is the only place that loads the list
+   * (below), so a view that needs it too — for its own project-scoped
+   * features, like disabling "+ New Ticket" — reads it from here rather than
+   * loading it again on its own; that second, independent load was ACP-70's
+   * bug, since either it or this one could fail alone. A view with no such
+   * need leaves this out.
+   */
+  onProjects?: (projects: Project[] | null, failed: boolean) => void;
 }) {
   const { filters, active, latestFilters, setFilter, dropValues, clearFilters } = state;
   // The projects and labels the bar offers, and checks the URL's filters
@@ -123,6 +134,14 @@ export default function FilterPanel({
   // filter naming it, while a list still on its way must leave it alone. Null
   // is "not loaded", which is where a failed load leaves it too.
   const [projects, setProjects] = useState<Project[] | null>(null);
+  // Whether the most recently attempted projects load failed. Only checked
+  // together with projects === null: a failure once a list has already
+  // loaded is silent, as loadOptions's catch below already was — the old list
+  // still works, and the next live refresh tries again. This exists only to
+  // tell that ordinary case from a first load that has failed and will never
+  // load on its own, which onProjects's caller needs to stop waiting and
+  // explain instead, rather than hanging on its loading message forever.
+  const [projectsFailed, setProjectsFailed] = useState(false);
   const [labels, setLabels] = useState<Label[] | null>(null);
   // The epics of the project shown, with the prefix they were loaded for, so
   // a list that belongs to the project just left is never taken for the new
@@ -152,8 +171,11 @@ export default function FilterPanel({
   const loadOptions = useCallback(() => {
     api.projects
       .list()
-      .then((p) => setProjects(p ?? []))
-      .catch(() => {});
+      .then((p) => {
+        setProjects(p ?? []);
+        setProjectsFailed(false);
+      })
+      .catch(() => setProjectsFailed(true));
     api.labels
       .list()
       .then((l) => setLabels(l ?? []))
@@ -161,6 +183,17 @@ export default function FilterPanel({
   }, []);
   useEffect(() => loadOptions(), [loadOptions]);
   useLiveRefresh(loadOptions);
+
+  // Handed up to whoever asked, from a ref so a caller that passes a new
+  // function identity every render (an inline callback) doesn't reopen this
+  // effect on its own — only an actual change to what's being reported does.
+  const onProjectsRef = useRef(onProjects);
+  useEffect(() => {
+    onProjectsRef.current = onProjects;
+  }, [onProjects]);
+  useEffect(() => {
+    onProjectsRef.current?.(projects, projectsFailed);
+  }, [projects, projectsFailed]);
 
   // Filters that no longer name anything are dropped from the URL (below, and
   // the project in ProjectSelect), here rather than in each view, since the

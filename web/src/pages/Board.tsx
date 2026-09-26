@@ -19,6 +19,7 @@ import TicketEditor from "../components/TicketEditor";
 import CreateTicketModal from "../components/CreateTicketModal";
 import TicketCard from "../components/TicketCard";
 import FilterPanel from "../components/FilterPanel";
+import ProjectsLoadError from "../components/ProjectsLoadError";
 import { useDocumentMatches } from "../hooks/useDocumentMatches";
 import { useFilters } from "../hooks/useFilters";
 import { useLiveRefresh } from "../hooks/useLiveRefresh";
@@ -115,8 +116,16 @@ function Column({
 }
 
 export default function Board() {
-  // Null until the first load.
+  // Null until FilterPanel's own load (below) reports the first one back, and
+  // whether that load has failed, through onProjects — the bar is the only
+  // place that loads the projects list, so the board and the bar never
+  // disagree about it (ACP-70).
   const [projects, setProjects] = useState<Project[] | null>(null);
+  const [projectsFailed, setProjectsFailed] = useState(false);
+  const onProjects = useCallback((loaded: Project[] | null, failed: boolean) => {
+    setProjects(loaded);
+    setProjectsFailed(failed);
+  }, []);
   const [columns, setColumns] = useState<BoardColumn[]>([]);
   const [activeTicket, setActiveTicket] = useState<Ticket | null>(null);
   const [createForStatus, setCreateForStatus] = useState<string | null>(null);
@@ -151,24 +160,6 @@ export default function Board() {
     setLoading(false);
   }, []);
 
-  // A failed reload keeps the projects already loaded, and only the newest
-  // reply is taken, the way loadBoard above takes only the newest board.
-  // Only a failed first load settles on none.
-  const projectSeqRef = useRef(0);
-  const loadProjects = useCallback(() => {
-    const seq = ++projectSeqRef.current;
-    api.projects
-      .list()
-      .then((loaded) => {
-        if (seq === projectSeqRef.current) setProjects(loaded ?? []);
-      })
-      .catch(() => {
-        if (seq === projectSeqRef.current) setProjects((prev) => prev ?? []);
-      });
-  }, []);
-
-  useEffect(() => loadProjects(), [loadProjects]);
-
   useEffect(() => {
     setLoading(true);
     loadBoard();
@@ -182,14 +173,14 @@ export default function Board() {
   const draggingRef = useRef(false);
   const missedRefreshRef = useRef(false);
   const liveRefresh = useCallback(() => {
-    // The projects come along, so the editor names a project renamed elsewhere.
-    loadProjects();
+    // The projects come along through FilterPanel's own live refresh (below),
+    // so the editor names a project renamed elsewhere.
     if (draggingRef.current) {
       missedRefreshRef.current = true;
       return;
     }
     loadBoard();
-  }, [loadBoard, loadProjects]);
+  }, [loadBoard]);
   useLiveRefresh(liveRefresh);
 
   // Called when a drag ends, however it ended.
@@ -226,10 +217,15 @@ export default function Board() {
   const shownCount = projectTickets.filter((t) => matchesFilters(t, filters, docMatches)).length;
   const projectCount = projectTickets.length;
   // The filter bar picks a project for a URL without one; until it has, the
-  // board waits rather than showing every project's tickets.
-  const waiting = loading || awaitingProject(filters.project, projects);
+  // board waits rather than showing every project's tickets. A projects load
+  // that has never succeeded stops that wait rather than hanging on it
+  // forever (ACP-70): with no project in the URL either, there is no way to
+  // tell whether one would have been picked, so the board explains rather
+  // than showing what would otherwise look like a project with no tickets.
+  const projectsErrored = filters.project === "" && projects === null && projectsFailed;
+  const waiting = loading || awaitingProject(filters.project, projects, projectsFailed);
   const repos = useMemo(() => repoOptions(projectTickets, filters.repo), [projectTickets, filters.repo]);
-  const addBlocked = newTicketBlocked(filters.project, projects);
+  const addBlocked = newTicketBlocked(filters.project, projects, projectsFailed);
 
   const findTicketById = (id: UniqueIdentifier): Ticket | undefined => {
     for (const col of columns) {
@@ -335,7 +331,8 @@ export default function Board() {
         state={filterState}
         tickets={loading ? null : allTickets}
         repos={repos}
-        count={waiting ? undefined : { shown: shownCount, total: projectCount }}
+        count={waiting || projectsErrored ? undefined : { shown: shownCount, total: projectCount }}
+        onProjects={onProjects}
       />
 
       <div data-testid="board-scroll" className="flex-1 overflow-x-auto p-6">
@@ -343,6 +340,8 @@ export default function Board() {
           <div className="flex items-center justify-center h-full text-slate-600">
             Loading board…
           </div>
+        ) : projectsErrored ? (
+          <ProjectsLoadError />
         ) : (
           <DndContext
             sensors={sensors}

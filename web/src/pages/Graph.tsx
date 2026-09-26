@@ -5,6 +5,7 @@ import { api, type Ticket, type Project, type TicketWrite } from "../api/client"
 import TicketEditor from "../components/TicketEditor";
 import TicketCard from "../components/TicketCard";
 import FilterPanel from "../components/FilterPanel";
+import ProjectsLoadError from "../components/ProjectsLoadError";
 import { useChangeGlow } from "../hooks/useChangeGlow";
 import { useDocumentSearch } from "../hooks/useDocumentMatches";
 import { useDocumentVisible } from "../hooks/useDocumentVisible";
@@ -222,8 +223,16 @@ function Arrowhead({ id, className }: { id: string; className: string }) {
 }
 
 export default function Graph() {
-  // Null until the first load.
+  // Null until FilterPanel's own load (below) reports the first one back, and
+  // whether that load has failed, through onProjects — the bar is the only
+  // place that loads the projects list, so the graph and the bar never
+  // disagree about it (ACP-70).
   const [projects, setProjects] = useState<Project[] | null>(null);
+  const [projectsFailed, setProjectsFailed] = useState(false);
+  const onProjects = useCallback((loaded: Project[] | null, failed: boolean) => {
+    setProjects(loaded);
+    setProjectsFailed(failed);
+  }, []);
   // Every project's tickets, null until the first fetch. The graph is laid
   // out from the selected project's alone; the other filters dim cards, or in
   // hide mode leave them out too.
@@ -259,25 +268,6 @@ export default function Graph() {
   // Hide mode only changes anything while a filter but the project is set.
   const hiding = unmatched === "hide" && filterState.active;
 
-  // Reloaded with the tickets, so the editor names a project that was renamed
-  // elsewhere. A failed reload keeps the projects already loaded, and a reply
-  // to a fetch a newer one has overtaken is dropped rather than put on screen.
-  // Only a failed first load settles on none.
-  useEffect(() => {
-    let cancelled = false;
-    api.projects
-      .list()
-      .then((loaded) => {
-        if (!cancelled) setProjects(loaded ?? []);
-      })
-      .catch(() => {
-        if (!cancelled) setProjects((prev) => prev ?? []);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [version]);
-
   useEffect(() => {
     let cancelled = false;
     api.tickets
@@ -297,8 +287,13 @@ export default function Graph() {
 
   const refresh = useCallback(() => setVersion((v) => v + 1), []);
   // The filter bar picks a project for a URL without one; until it has, the
-  // graph waits rather than laying out every project's tickets.
-  const loading = fetched === null || awaitingProject(filters.project, projects);
+  // graph waits rather than laying out every project's tickets. A projects
+  // load that has never succeeded stops that wait rather than hanging on it
+  // forever (ACP-70): with no project in the URL either, there is no way to
+  // tell whether one would have been picked, so the graph explains rather
+  // than showing what would otherwise look like a project with no tickets.
+  const projectsErrored = filters.project === "" && projects === null && projectsFailed;
+  const loading = fetched === null || awaitingProject(filters.project, projects, projectsFailed);
   // The open ticket comes from the URL, so ?ticket=KEY opens it on load.
   const {
     selected: selectedTicket,
@@ -755,8 +750,9 @@ export default function Graph() {
         state={filterState}
         tickets={fetched}
         repos={repos}
-        count={loading ? undefined : { shown: matching?.size ?? topology.nodes.length, total: projectOpenCount }}
+        count={loading || projectsErrored ? undefined : { shown: matching?.size ?? topology.nodes.length, total: projectOpenCount }}
         unmatched={{ mode: unmatched, onChange: setUnmatched }}
+        onProjects={onProjects}
       />
 
       <div
@@ -777,6 +773,8 @@ export default function Graph() {
           <div className="flex items-center justify-center h-full text-slate-600">
             Loading graph…
           </div>
+        ) : projectsErrored ? (
+          <ProjectsLoadError />
         ) : topology.nodes.length === 0 ? (
           // Hide mode can leave out every open ticket the project has, which
           // is not the same as having none.
