@@ -79,17 +79,31 @@ describe("views navigation", () => {
     expect(activeLink(html)).toBe(name);
   });
 
-  it.each(["/board", "/tickets", "/graph"])("no longer serves %s, not even as a redirect", (path) => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    try {
-      const html = render(path);
-      // The layout route does not match either, so nothing renders at all.
-      expect(html).toBe("");
-      expect(warn).toHaveBeenCalledWith(expect.stringContaining(`No routes matched location "${path}"`));
-    } finally {
-      warn.mockRestore();
-    }
+  it.each([
+    ["/table/", "Table"],
+    ["/kanban/", "Kanban"],
+    ["/projects/", "Projects"],
+    ["/KANBAN", "Kanban"],
+  ])("marks the entry current on %s, as on its own path", (path, name) => {
+    const html = render(path);
+    expect(heading(html)).toBe(name);
+    expect(activeLink(html)).toBe(name);
   });
+
+  it.each(["/board", "/tickets", "/graph", "/no/such/page", "/kanban/extra"])(
+    "serves a not-found page inside the layout for %s, with no redirect",
+    (path) => {
+      const html = render(path);
+      expect(heading(html)).toBe("Page not found");
+      expect(html).toContain(`>${path}</code>`);
+      // The sidebar is there, with no entry marked as the current page.
+      expect(viewsGroupLinks(html)).toEqual(["Dependencies /", "Kanban /kanban", "Table /table"]);
+      expect(html).toMatch(/href="\/projects"/);
+      expect(activeLink(html)).toBeUndefined();
+      // A way back to the default view.
+      expect(html).toMatch(/<a [^>]*href="\/"[^>]*>Go to Dependencies<\/a>/);
+    },
+  );
 });
 
 // The select with the given accessible name, and the value it shows selected.

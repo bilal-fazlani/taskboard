@@ -1,27 +1,26 @@
 import { useEffect } from "react";
-import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { Link, Outlet, useLocation } from "react-router-dom";
 import { Zap } from "lucide-react";
-import { VIEWS_GROUP_LABEL, otherItems, viewItems, type NavItem } from "../lib/navigation";
+import { VIEWS_GROUP_LABEL, isCurrentPath, otherItems, viewItems, type NavItem } from "../lib/navigation";
 import { filterSearch } from "../lib/filters";
 import { rememberView } from "../lib/lastView";
 
 // `search` is the query string the link carries; the views pass on the filters.
 function NavEntry({ item, search = "" }: { item: NavItem; search?: string }) {
+  const current = isCurrentPath(useLocation().pathname, item.to);
   return (
-    <NavLink
+    <Link
       to={{ pathname: item.to, search }}
-      end={item.to === "/"}
-      className={({ isActive }) =>
-        `flex items-center gap-2.5 px-2.5 py-2 rounded-md text-sm transition-colors ${
-          isActive
-            ? "bg-blue-500/15 text-blue-400"
-            : "text-slate-400 hover:text-slate-200 hover:bg-slate-800"
-        }`
-      }
+      aria-current={current ? "page" : undefined}
+      className={`flex items-center gap-2.5 px-2.5 py-2 rounded-md text-sm transition-colors ${
+        current
+          ? "bg-blue-500/15 text-blue-400"
+          : "text-slate-400 hover:text-slate-200 hover:bg-slate-800"
+      }`}
     >
       <item.icon className="w-4 h-4" />
       {item.label}
-    </NavLink>
+    </Link>
   );
 }
 

@@ -33,3 +33,15 @@ export const otherItems: NavItem[] = [
   { to: "/epics", icon: Layers, label: "Epics" },
   { to: "/labels", icon: Tag, label: "Labels" },
 ];
+
+/**
+ * Whether the page at `pathname` is the entry at `to`. No page has sub-pages,
+ * so only the entry's own path counts, with or without one trailing slash,
+ * in any letter case, as the router matches routes: /table/ is Table, while
+ * an unknown path below an entry, such as /kanban/extra, is the not-found
+ * page and no entry is current.
+ */
+export function isCurrentPath(pathname: string, to: string): boolean {
+  const path = pathname.length > 1 && pathname.endsWith("/") ? pathname.slice(0, -1) : pathname;
+  return path.toLowerCase() === to.toLowerCase();
+}
