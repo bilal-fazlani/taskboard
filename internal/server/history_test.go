@@ -167,3 +167,48 @@ func TestHTTPTicketJSONCarriesReviewRounds(t *testing.T) {
 		}
 	}
 }
+
+// The list the Dependencies page fetches carries doneAt on a done ticket, the
+// time of its move to done, and leaves the key out on one that is not done.
+func TestHTTPTicketListCarriesDoneAt(t *testing.T) {
+	base, store := newHistoryServer(t)
+	open := seedReviewTicket(t, store)
+	done, err := store.CreateTicket(models.CreateTicketRequest{ProjectID: open.ProjectID, Title: "Finished"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, body := send(t, http.MethodPost, base+"/api/tickets/"+done.ID+"/move", `{"status":"done"}`)
+	if code != http.StatusOK {
+		t.Fatalf("move to done: %d %s", code, body)
+	}
+	moved := history(t, base, done.ID)[0]
+
+	code, body = send(t, http.MethodGet, base+"/api/tickets", "")
+	if code != http.StatusOK {
+		t.Fatalf("GET /api/tickets: %d %s", code, body)
+	}
+	var raw []map[string]any
+	if err := json.Unmarshal(body, &raw); err != nil {
+		t.Fatal(err)
+	}
+	for _, tk := range raw {
+		at, has := tk["doneAt"]
+		switch tk["id"] {
+		case open.ID:
+			if has {
+				t.Fatalf("an open ticket carries doneAt %v", at)
+			}
+		case done.ID:
+			if !has {
+				t.Fatalf("the done ticket has no doneAt: %v", tk)
+			}
+			var want models.Ticket
+			if err := json.Unmarshal([]byte(`{"doneAt":"`+at.(string)+`"}`), &want); err != nil {
+				t.Fatal(err)
+			}
+			if want.DoneAt == nil || !want.DoneAt.Equal(moved.CreatedAt) {
+				t.Fatalf("doneAt = %v, want the move's %v", at, moved.CreatedAt)
+			}
+		}
+	}
+}

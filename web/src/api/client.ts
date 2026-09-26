@@ -156,6 +156,10 @@ export interface Ticket {
   /** How many times the ticket has entered agent_review. Optional because
    * fixtures and mocks leave it out; a missing value means 0, not unknown. */
   reviewRounds?: number;
+  /** When a done ticket last moved to done, from its status history; left
+   * out when it is not done. One done before the history began carries its
+   * createdAt, earlier than every logged move. Only lists carry it. */
+  doneAt?: string;
   /** How many documents the ticket has. Lists and the full ticket carry it. */
   documentCount?: number;
   /** The documents, without content. Only the full ticket carries it. */

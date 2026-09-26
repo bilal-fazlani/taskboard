@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tcarac/taskboard/internal/models"
 )
@@ -464,6 +465,106 @@ func TestReviewRoundsCountEntriesIntoAgentReview(t *testing.T) {
 		for _, tk := range col.Tickets {
 			if tk.ReviewRounds != want[tk.ID] {
 				t.Fatalf("GetBoard: %s has ReviewRounds %d, want %d", tk.Title, tk.ReviewRounds, want[tk.ID])
+			}
+		}
+	}
+}
+
+// DoneAt is when a done ticket last moved to done, from its history. One done
+// before the history began has no such row and takes its CreatedAt, which is
+// earlier than every logged move. A ticket that is not done has none, even
+// with a move to done in its past.
+func TestListTicketsCarriesDoneAt(t *testing.T) {
+	s := newTestStore(t)
+	p := seedProject(t, s, "Agent Control Plane", "ACP")
+	twice := seedTicket(t, s, p.ID, "Done twice")
+	reopened := seedTicket(t, s, p.ID, "Reopened")
+	open := seedTicket(t, s, p.ID, "Never done")
+	legacy := seedTicket(t, s, p.ID, "Done before the history")
+	born, err := s.CreateTicket(models.CreateTicketRequest{ProjectID: p.ID, Title: "Born done", Status: models.StatusDone})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, to := range []string{"done", "todo", "done"} {
+		if _, err := s.MoveTicket(twice.ID, models.MoveTicketRequest{Status: to}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, to := range []string{"done", "in_progress"} {
+		if _, err := s.MoveTicket(reopened.ID, models.MoveTicketRequest{Status: to}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Pin the moves to known instants: the first move to done, then the
+	// last, both later than any ticket's creation.
+	first := time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC)
+	last := time.Date(2099, 1, 2, 0, 0, 0, 0, time.UTC)
+	if _, err := s.db.Exec(`UPDATE ticket_status_changes SET created_at = ?
+		WHERE ticket_id = ? AND to_status = 'done' AND from_status = 'todo' AND rowid = (
+			SELECT MIN(rowid) FROM ticket_status_changes WHERE ticket_id = ? AND to_status = 'done')`,
+		stamp(first), twice.ID, twice.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`UPDATE ticket_status_changes SET created_at = ?
+		WHERE ticket_id = ? AND to_status = 'done' AND rowid = (
+			SELECT MAX(rowid) FROM ticket_status_changes WHERE ticket_id = ? AND to_status = 'done')`,
+		stamp(last), twice.ID, twice.ID); err != nil {
+		t.Fatal(err)
+	}
+	// A ticket done before the history began: done, with no rows at all.
+	if _, err := s.db.Exec(`UPDATE tickets SET status = 'done' WHERE id = ?`, legacy.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`DELETE FROM ticket_status_changes WHERE ticket_id = ?`, legacy.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	listed, err := s.ListTickets(models.TicketFilter{ProjectID: p.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]models.Ticket{}
+	for _, tk := range listed {
+		got[tk.ID] = tk
+	}
+	if len(got) != 5 {
+		t.Fatalf("listed %d tickets, want 5", len(got))
+	}
+
+	if at := got[twice.ID].DoneAt; at == nil || !at.Equal(last) {
+		t.Fatalf("Done twice: DoneAt = %v, want the last move to done, %v", at, last)
+	}
+	for _, id := range []string{reopened.ID, open.ID} {
+		if at := got[id].DoneAt; at != nil {
+			t.Fatalf("%s is not done but has DoneAt %v", got[id].Title, at)
+		}
+	}
+	bornRows, err := s.ListStatusChanges(born.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if at := got[born.ID].DoneAt; at == nil || !at.Equal(bornRows[0].CreatedAt) {
+		t.Fatalf("Born done: DoneAt = %v, want its birth row's %v", at, bornRows[0].CreatedAt)
+	}
+	fallback := got[legacy.ID].DoneAt
+	if fallback == nil || !fallback.Equal(got[legacy.ID].CreatedAt) {
+		t.Fatalf("Done before the history: DoneAt = %v, want its CreatedAt %v", fallback, got[legacy.ID].CreatedAt)
+	}
+	for _, id := range []string{twice.ID, born.ID} {
+		if !fallback.Before(*got[id].DoneAt) {
+			t.Fatalf("the fallback %v does not sort before %s's logged %v", fallback, got[id].Title, got[id].DoneAt)
+		}
+	}
+
+	board, err := s.GetBoard(p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, col := range board.Columns {
+		for _, tk := range col.Tickets {
+			if (tk.DoneAt == nil) != (got[tk.ID].DoneAt == nil) || (tk.DoneAt != nil && !tk.DoneAt.Equal(*got[tk.ID].DoneAt)) {
+				t.Fatalf("GetBoard: %s has DoneAt %v, want %v", tk.Title, tk.DoneAt, got[tk.ID].DoneAt)
 			}
 		}
 	}

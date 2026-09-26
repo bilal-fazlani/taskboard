@@ -74,6 +74,14 @@ type Ticket struct {
 	// only the rounds since it began.
 	ReviewRounds int `json:"reviewRounds"`
 
+	// DoneAt is when a done ticket last moved to done, from its status
+	// history; it is left out for a ticket that is not done. A done ticket
+	// whose history has no move to done, which only one done before the
+	// history began has, takes its CreatedAt: the earliest it can have been
+	// done, and earlier than every logged move. Lists carry it; the full
+	// ticket leaves it out.
+	DoneAt *time.Time `json:"doneAt,omitempty"`
+
 	// DocumentCount is how many documents the ticket has. Lists and the full
 	// ticket both carry it; the card's paperclip reads it.
 	DocumentCount int `json:"documentCount"`

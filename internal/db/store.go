@@ -436,7 +436,7 @@ func splitStatusFilter(values []string) ([]string, error) {
 	return out, nil
 }
 
-// attachListDetails fills Repos, Labels, Subtasks, DependsOn, SurfacedFrom, ReviewRounds and DocumentCount
+// attachListDetails fills Repos, Labels, Subtasks, DependsOn, SurfacedFrom, ReviewRounds, DoneAt and DocumentCount
 // for a page of tickets using one query per relation rather than one per ticket. Blocks is not filled;
 // no list view renders it.
 func (s *Store) attachListDetails(tickets []models.Ticket) error {
@@ -455,11 +455,15 @@ func (s *Store) attachListDetails(tickets []models.Ticket) error {
 		tickets[i].DependsOn = nil
 		tickets[i].SurfacedFrom = nil
 		tickets[i].ReviewRounds = 0
+		tickets[i].DoneAt = nil
 		tickets[i].DocumentCount = 0
 	}
 	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
 
 	if err := s.attachReviewRounds(tickets, index, placeholders, ids); err != nil {
+		return err
+	}
+	if err := s.attachDoneAt(tickets, index, placeholders, ids); err != nil {
 		return err
 	}
 	if err := s.attachDocumentCounts(tickets, index, placeholders, ids); err != nil {

@@ -142,6 +142,42 @@ func (s *Store) getTicketReviewRounds(ticketID string) (int, error) {
 	return n, err
 }
 
+// attachDoneAt fills DoneAt for the done tickets of a page: when each last
+// moved to done, or its CreatedAt when its history has no such move (it was
+// done before the history began). Arguments as attachReviewRounds.
+func (s *Store) attachDoneAt(tickets []models.Ticket, index map[string]int, placeholders string, ids []any) error {
+	// Oldest first, rowid for changes within the same instant, so the last
+	// row read for a ticket is its latest move to done. created_at is read
+	// as the column itself, not through MAX(), so it scans as a time.
+	rows, err := s.db.Query(`SELECT ticket_id, created_at FROM ticket_status_changes
+		WHERE to_status = '`+models.StatusDone+`' AND ticket_id IN (`+placeholders+`)
+		ORDER BY created_at ASC, rowid ASC`, ids...)
+	if err != nil {
+		return fmt.Errorf("loading done times: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var ticketID string
+		var at time.Time
+		if err := rows.Scan(&ticketID, &at); err != nil {
+			return err
+		}
+		if i, ok := index[ticketID]; ok && tickets[i].Status == models.StatusDone {
+			tickets[i].DoneAt = &at
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for i := range tickets {
+		if tickets[i].Status == models.StatusDone && tickets[i].DoneAt == nil {
+			created := tickets[i].CreatedAt
+			tickets[i].DoneAt = &created
+		}
+	}
+	return nil
+}
+
 // attachReviewRounds fills ReviewRounds for a page of tickets. index maps a
 // ticket id to its place in tickets; placeholders and ids are the IN list
 // attachListDetails already built for the same page.
