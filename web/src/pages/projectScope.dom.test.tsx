@@ -643,8 +643,8 @@ describe("Dependencies dimming or hiding the cards the filters don't match", () 
     expect(dimmed("ACP-1")).toBe(true);
   });
 
-  it("says so when the filters match no open ticket in hide mode", async () => {
-    // Done tickets are never on the graph, so status Done matches none.
+  it("says so when the filters match no ticket in hide mode", async () => {
+    // ACP has no done ticket, so status Done matches none.
     await mount(<Graph />, "/?project=ACP&status=done&unmatched=hide");
     expect(canvas()).toBeNull();
     expect(shows("No open tickets match the filters")).toBe(true);
@@ -657,11 +657,21 @@ describe("Dependencies dimming or hiding the cards the filters don't match", () 
     expect(dimmed("ACP-1")).toBe(true);
   });
 
-  it("still says there are no open tickets when the project has none, in hide mode", async () => {
+  it("still says there are no open tickets when the project has none and no done ticket matches, in hide mode", async () => {
     serves([ticket("ACP", 1, { status: "done" }), LDR1], PROJECTS);
-    await mount(<Graph />, "/?project=ACP&status=done&unmatched=hide");
+    await mount(<Graph />, "/?project=ACP&priority=high&unmatched=hide");
+    expect(canvas()).toBeNull();
     expect(shows("No open tickets")).toBe(true);
     expect(shows("No open tickets match the filters")).toBe(false);
+  });
+
+  it("shows the done block alone when only done tickets match in hide mode", async () => {
+    serves([ticket("ACP", 1, { status: "done" }), LDR1], PROJECTS);
+    await mount(<Graph />, "/?project=ACP&status=done&unmatched=hide");
+    await layout();
+    expect(shows("No open tickets")).toBe(false);
+    expect(card("ACP-1")!.getAttribute("aria-label")).toBe("ACP-1 ACP ticket 1, done");
+    expect(columnCounts()).toEqual(["1"]);
   });
 
   it("fits afresh when the mode changes", async () => {
@@ -892,5 +902,209 @@ describe("Dependencies shelf of unlinked Ready tickets", () => {
     expect(y + k * top).toBeGreaterThanOrEqual(0);
     expect(x + k * (left + MEASURES.offsetWidth)).toBeLessThanOrEqual(MEASURES.clientWidth);
     expect(y + k * (top + MEASURES.offsetHeight)).toBeLessThanOrEqual(MEASURES.clientHeight);
+  });
+});
+
+// The done block: the project's most recently done tickets, newest first, in
+// balanced columns left of Ready under a Done header, with no arrows. ACP-1
+// is held; ACP-2 blocks ACP-3 and waits on done ACP-10; ACP-4 and ACP-5 link
+// nothing. ACP-10 to ACP-12 are done, ACP-12 last, and ACP-11 is high.
+describe("Dependencies done block", () => {
+  const at = (minute: number) => new Date(Date.UTC(2026, 8, 20, 10, minute)).toISOString();
+  const finished = (number: number, overrides: Partial<Ticket> = {}) =>
+    ticket("ACP", number, { status: "done", doneAt: at(number), ...overrides });
+  const D10 = finished(10);
+  const D11 = finished(11, { priority: "high" });
+  const D12 = finished(12);
+  const G1 = ticket("ACP", 1, { status: "in_progress" });
+  const G2 = ticket("ACP", 2, { dependsOn: [ref(D10)] });
+  const G3 = ticket("ACP", 3, { dependsOn: [ref(G2)] });
+  const G4 = ticket("ACP", 4);
+  const G5 = ticket("ACP", 5, { priority: "high" });
+  const OPEN = [G1, G2, G3, G4, G5];
+  const canvas = () => document.querySelector<HTMLElement>("[data-graph-canvas]")!;
+  const card = (key: string) => screen.queryByRole("button", { name: new RegExp(`^${key} `) });
+  const box = (key: string) => ({ left: parseFloat(card(key)!.style.left), top: parseFloat(card(key)!.style.top) });
+  const headers = () => [...canvas().querySelectorAll("h3")].map((h) => h.parentElement!);
+  const headings = () => headers().map((h) => `${h.firstElementChild!.textContent} ${h.lastElementChild!.textContent}`);
+  const doneKeys = () =>
+    [...canvas().querySelectorAll<HTMLElement>("[data-done]")].map((el) => el.getAttribute("aria-label")!.split(" ")[0]);
+  const edges = () => canvas().querySelectorAll(":scope > svg > path");
+  const radio = (name: "Dim" | "Hide") => screen.getByRole("radio", { name }) as HTMLInputElement;
+  // n done tickets from ACP-101, a minute apart, the higher number later;
+  // every other one high.
+  const many = (n: number) =>
+    Array.from({ length: n }, (_, i) => finished(101 + i, { doneAt: at(i), priority: i % 2 === 0 ? "high" : "medium" }));
+
+  beforeEach(() => serves([...OPEN, D10, D11, D12], [project("ACP")]));
+
+  it("lays the done tickets out left of Ready, newest first, under their own header", async () => {
+    await mount(<Graph />, "/?project=ACP");
+    await layout();
+    expect(headings()).toEqual(["Done 3", "Ready 4", "Blocked · 1 step 1"]);
+    expect(doneKeys()).toEqual(["ACP-12", "ACP-11", "ACP-10"]);
+    // One column, from the top of the graph, newest on top.
+    expect(box("ACP-11").left).toBe(box("ACP-12").left);
+    expect(box("ACP-12").top).toBe(box("ACP-1").top);
+    expect(box("ACP-11").top).toBeGreaterThan(box("ACP-12").top);
+    expect(box("ACP-10").top).toBeGreaterThan(box("ACP-11").top);
+    // Then the shelf, then linked Ready.
+    expect(box("ACP-4").left).toBeGreaterThan(box("ACP-12").left + MEASURES.offsetWidth);
+    const [done, ready] = headers();
+    expect(parseFloat(done.style.left)).toBe(box("ACP-12").left);
+    expect(parseFloat(ready.style.left)).toBe(box("ACP-4").left);
+    // Done cards look done: a check for the dot, a quieter title.
+    expect(within(card("ACP-12")!).getByTestId("card-done")).toBeTruthy();
+    expect(within(card("ACP-12")!).getByText("ACP ticket 12").className).toContain("text-slate-400");
+    expect(within(card("ACP-4")!).queryByTestId("card-done")).toBeNull();
+    // The page's count is of open tickets, as before.
+    expect(count()).toBe("5 tickets");
+  });
+
+  it("draws no arrow to or from a done card, and open cards still count their done dependencies", async () => {
+    await mount(<Graph />, "/?project=ACP");
+    await layout();
+    expect(edges()).toHaveLength(1);
+    expect(card("ACP-2")!.textContent).toContain("1 of 1 dependency done");
+    expect(card("ACP-10")!.textContent).not.toContain("dependenc");
+  });
+
+  it("shows the 50 most recently done and counts them all in the header", async () => {
+    serves([...OPEN, ...many(60)], [project("ACP")]);
+    await mount(<Graph />, "/?project=ACP");
+    await layout();
+    expect(headings()[0]).toBe("Done 50 of 60");
+    const keys = doneKeys();
+    expect(keys).toHaveLength(50);
+    expect(keys[0]).toBe("ACP-160");
+    expect(keys[49]).toBe("ACP-111");
+  });
+
+  it("reaches the done block first with Tab, and opens a done card's editor on click", async () => {
+    mockApi.tickets.get.mockResolvedValue(D11);
+    await mount(<Graph />, "/?project=ACP");
+    await layout();
+    const order = [...canvas().querySelectorAll<HTMLElement>("[data-ticket-id]")].map((el) => el.getAttribute("aria-label")!.split(" ")[0]);
+    expect(order.slice(0, 4)).toEqual(["ACP-12", "ACP-11", "ACP-10", "ACP-4"]);
+    expect(card("ACP-11")!.tabIndex).toBe(0);
+    await act(async () => fireEvent.click(within(card("ACP-11")!).getByText("ACP ticket 11")));
+    expect(new URLSearchParams(window.location.search).get("ticket")).toBe("ACP-11");
+    expect((screen.getByRole("dialog").querySelector('[aria-label="Title"]') as HTMLInputElement).value).toBe("ACP ticket 11");
+  });
+
+  it("opens a done card's editor from the keyboard", async () => {
+    mockApi.tickets.get.mockResolvedValue(D12);
+    await mount(<Graph />, "/?project=ACP");
+    await layout();
+    await act(async () => fireEvent.keyDown(card("ACP-12")!, { key: "Enter" }));
+    expect(new URLSearchParams(window.location.search).get("ticket")).toBe("ACP-12");
+  });
+
+  it("never lights a done card as part of a chain, and hovering one lights nothing", async () => {
+    await mount(<Graph />, "/?project=ACP");
+    await layout();
+    // ACP-2 waits on done ACP-10: hovering it lights ACP-3, not ACP-10.
+    await act(async () => fireEvent.pointerMove(card("ACP-2")!));
+    expect(card("ACP-3")!.className).toContain("*:border-blue-400!");
+    expect(card("ACP-10")!.className).toContain("opacity-22");
+    expect(card("ACP-10")!.className).not.toContain("*:border");
+    await act(async () => fireEvent.pointerLeave(card("ACP-2")!));
+    await act(async () => fireEvent.pointerMove(card("ACP-10")!));
+    for (const key of ["ACP-1", "ACP-2", "ACP-3", "ACP-10", "ACP-12"]) {
+      expect(card(key)!.className, key).not.toContain("opacity-22");
+      expect(card(key)!.className, key).not.toContain("*:border");
+    }
+  });
+
+  it("dims the done cards the filters don't match, and counts the matching ones in the header", async () => {
+    await mount(<Graph />, "/?project=ACP&priority=high");
+    await layout();
+    expect(card("ACP-11")!.className).not.toContain("opacity-20");
+    expect(card("ACP-10")!.className).toContain("opacity-20");
+    expect(card("ACP-12")!.className).toContain("opacity-20");
+    // One matching done card shown, of one matching done ticket.
+    expect(headings()[0]).toBe("Done 1");
+    // The page's count is still of open tickets.
+    expect(count()).toBe("1 of 5 tickets");
+  });
+
+  it("in dim mode counts the matching done cards shown of every matching done ticket", async () => {
+    // 60 done, 30 of them high; the 50 newest hold 25 high ones.
+    serves([...OPEN, ...many(60)], [project("ACP")]);
+    await mount(<Graph />, "/?project=ACP&priority=high");
+    await layout();
+    expect(doneKeys()).toHaveLength(50);
+    expect(headings()[0]).toBe("Done 25 of 30");
+  });
+
+  it("in hide mode lays out only the matching done tickets, capping them after filtering", async () => {
+    // 120 done, 60 of them high: the 50 newest high ones, of 60.
+    serves([...OPEN, ...many(120)], [project("ACP")]);
+    await mount(<Graph />, "/?project=ACP&priority=high&unmatched=hide");
+    await layout();
+    const keys = doneKeys();
+    expect(keys).toHaveLength(50);
+    expect(keys[0]).toBe("ACP-219");
+    for (const key of keys) expect(card(key)!.className).not.toContain("opacity-20");
+    expect(headings()[0]).toBe("Done 50 of 60");
+  });
+
+  it("drops the block in hide mode when the status filter leaves done out, and Ready moves to the left edge", async () => {
+    serves(OPEN, [project("ACP")]);
+    await mount(<Graph />, "/?project=ACP&status=todo&status=in_progress&unmatched=hide");
+    await layout();
+    const alone = parseFloat(headers()[0].style.left);
+    cleanup();
+    FakeResizeObserver.instances = [];
+    serves([...OPEN, D10, D11, D12], [project("ACP")]);
+    await mount(<Graph />, "/?project=ACP&status=todo&status=in_progress&unmatched=hide");
+    await layout();
+    expect(doneKeys()).toEqual([]);
+    expect(headings()[0]).toBe("Ready 4");
+    expect(parseFloat(headers()[0].style.left)).toBe(alone);
+    // Adding done to the filter brings the block back, left of Ready.
+    await toggleFilter("Status", "Done");
+    await layout();
+    expect(doneKeys()).toEqual(["ACP-12", "ACP-11", "ACP-10"]);
+    expect(headings()[0]).toBe("Done 3");
+    expect(parseFloat(headers()[1].style.left)).toBeGreaterThan(alone);
+  });
+
+  it("fits the done block into the first view, and frames a matching done card on Fit", async () => {
+    const onScreen = (key: string) => {
+      const [, x, y, k] = /translate\(([-\d.]+)px, ([-\d.]+)px\) scale\(([\d.]+)\)/.exec(canvas().style.transform)!.map(Number);
+      const { left, top } = box(key);
+      return (
+        x + k * left >= 0 &&
+        y + k * top >= 0 &&
+        x + k * (left + MEASURES.offsetWidth) <= MEASURES.clientWidth &&
+        y + k * (top + MEASURES.offsetHeight) <= MEASURES.clientHeight
+      );
+    };
+    await mount(<Graph />, "/?project=ACP&priority=high");
+    await layout();
+    for (const key of ["ACP-10", "ACP-11", "ACP-12", "ACP-1", "ACP-3", "ACP-4"]) expect(onScreen(key), key).toBe(true);
+    const whole = canvas().style.transform;
+    await act(async () => screen.getByLabelText("Fit to screen").click());
+    // ACP-11 and ACP-5 match: the fit frames them, closer in than the whole.
+    const scale = (t: string) => Number(/scale\(([^)]+)\)/.exec(t)![1]);
+    expect(scale(canvas().style.transform)).toBeGreaterThan(scale(whole));
+    expect(onScreen("ACP-11")).toBe(true);
+    expect(onScreen("ACP-5")).toBe(true);
+    // Hiding re-lays the graph out and fits it again, the block included.
+    await act(async () => radio("Hide").click());
+    await layout();
+    expect(doneKeys()).toEqual(["ACP-11"]);
+    expect(onScreen("ACP-11")).toBe(true);
+    expect(onScreen("ACP-5")).toBe(true);
+  });
+
+  it("shows the done block alone for a project whose tickets are all done", async () => {
+    serves([D10, D11, D12], [project("ACP")]);
+    await mount(<Graph />, "/?project=ACP");
+    await layout();
+    expect(shows("No open tickets")).toBe(false);
+    expect(headings()).toEqual(["Done 3"]);
+    expect(canvas().className).not.toContain("invisible");
   });
 });

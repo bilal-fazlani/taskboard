@@ -158,7 +158,16 @@ function referenceModel(input: GraphTicket[]) {
 
 describe("computeGraphTopology", () => {
   it("returns an empty graph for no tickets", () => {
-    expect(computeGraphTopology([])).toEqual({ nodes: [], edges: [], columns: [], layers: [], shelf: [], columnCounts: [] });
+    expect(computeGraphTopology([])).toEqual({
+      nodes: [],
+      edges: [],
+      columns: [],
+      layers: [],
+      shelf: [],
+      columnCounts: [],
+      done: [],
+      doneTotal: 0,
+    });
   });
 
   it("puts each step of a linear chain in its own column", () => {
@@ -1448,7 +1457,7 @@ describe("positionGraph", () => {
   });
 
   it("returns an empty layout for no tickets", () => {
-    expect(layoutGraph([], { origin: { x: 4, y: 8 } })).toEqual({ nodes: [], edges: [], columns: [], shelf: null, width: 4, height: 8 });
+    expect(layoutGraph([], { origin: { x: 4, y: 8 } })).toEqual({ nodes: [], edges: [], columns: [], shelf: null, done: null, width: 4, height: 8 });
   });
 });
 

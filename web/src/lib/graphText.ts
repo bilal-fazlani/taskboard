@@ -9,6 +9,14 @@ export function columnHeading(index: number): string {
 }
 
 /**
+ * The done block's count beside its "Done" header: "50 of 96" while it shows
+ * fewer than there are, and just the total, "42", once it shows them all.
+ */
+export function doneCountText(shown: number, total: number): string {
+  return shown < total ? `${shown} of ${total}` : `${total}`;
+}
+
+/**
  * "1 of 2 dependencies done", "3 of 3 dependencies done", "1 of 1 dependency
  * done", or null when none are done. The noun agrees with the total, not the
  * done count, since it always names every dependency, not just the done ones.

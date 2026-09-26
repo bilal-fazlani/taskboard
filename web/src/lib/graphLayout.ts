@@ -17,6 +17,9 @@
 //
 // - Every ticket whose status is not done is a node. Ticket ids are assumed
 //   to be unique.
+// - Done tickets are not nodes and have no edges. The most recently done of
+//   them, DONE_BLOCK_LIMIT at most, newest first (graphDone.ts), make up the
+//   done block (topology.done), left of everything else.
 // - A dependency on another node is an edge from the dependency (the blocker)
 //   to the dependent. A dependency on a done ticket is not an edge; it counts
 //   towards the node's satisfiedDependencyCount.
@@ -87,11 +90,15 @@
 // them, those components can't be stacked apart and share one band. A card
 // with no edge in a later column sits below the last band, bandGap under it.
 //
-// The shelf starts at the origin, and every column, the linked Ready column
-// first, starts right of it, shelfGap after it. Its columns balance against
-// the linked graph's height, the bottom of the last band (graphShelf.ts has
-// the rule); with no band that height is 0, which leaves the shelf square.
-// Each shelf column stacks its own cards from the origin down, rowGap apart.
+// The done block starts at the origin, and the shelf starts right of it,
+// doneGap after it; without a done block the shelf starts at the origin.
+// Every column, the linked Ready column first, starts right of the shelf,
+// shelfGap after it, or doneGap after the done block when there is no shelf.
+// The done block and the shelf balance their columns against the same
+// height, the linked graph's, the bottom of the last band (graphShelf.ts has
+// the rule); with no band that height is 0, which leaves them square. Each
+// of their columns stacks its own cards from the top of the graph down,
+// rowGap apart, the done block's newest first.
 // When every Ready ticket is on the shelf, the linked Ready column is empty
 // and takes no room: it sits at the shelf's right edge with no width, so the
 // next column starts one gap after the shelf.
@@ -104,6 +111,7 @@
 // the input array or of any dependsOn list.
 
 import type { Ticket, TicketRef } from "../api/client";
+import { DONE_BLOCK_LIMIT, recentDone, type DoneTicket } from "./graphDone";
 import { balanceShelf, placeShelf } from "./graphShelf";
 import { isActive, isDone } from "./status";
 
@@ -115,9 +123,10 @@ export type { ChainRole, EdgeChainRole, GraphChains } from "./graphChains";
 export type GraphTicketRef = Pick<TicketRef, "id" | "status">;
 
 /** The part of a Ticket the layout reads. A full Ticket satisfies it. */
-export type GraphTicket = Pick<Ticket, "id" | "projectPrefix" | "number" | "status"> & {
-  dependsOn?: readonly GraphTicketRef[];
-};
+export type GraphTicket = Pick<Ticket, "id" | "projectPrefix" | "number" | "status"> &
+  Pick<DoneTicket, "doneAt" | "createdAt"> & {
+    dependsOn?: readonly GraphTicketRef[];
+  };
 
 export interface GraphNode<T extends GraphTicket = GraphTicket> {
   id: string;
@@ -186,6 +195,13 @@ export interface GraphTopology<T extends GraphTicket = GraphTicket> {
   shelf: string[];
   /** Node count per column. Ready's includes the shelf, since those tickets are ready too. */
   columnCounts: number[];
+  /**
+   * The done block: the most recently done tickets, newest first, at most
+   * DONE_BLOCK_LIMIT. They are not nodes, and no edge touches them.
+   */
+  done: T[];
+  /** How many tickets in the input are done, the block's and the rest. */
+  doneTotal: number;
 }
 
 export interface Size {
@@ -225,6 +241,13 @@ export interface PositionOptions {
    * it. A gap it has no value for is columnGap.
    */
   shelfGap?: number;
+  /**
+   * Horizontal space between the done block and what is right of it: the
+   * shelf, or the linked Ready column when there is no shelf. A gap it has no
+   * value for is columnGap. The done block's own columns are shelfColumnGap
+   * apart.
+   */
+  doneGap?: number;
 }
 
 export const DEFAULT_NODE_SIZE: Size = { width: 280, height: 96 };
@@ -282,15 +305,35 @@ export interface PositionedShelf {
   count: number;
 }
 
+/** A done ticket's card in the done block. */
+export interface PositionedDoneCard<T extends GraphTicket = GraphTicket> {
+  id: string;
+  ticket: T;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** Where the done block sits, left of everything else, and its cards. */
+export interface PositionedDone<T extends GraphTicket = GraphTicket> extends PositionedShelf {
+  /** Its cards, newest first: down each column, then the next column. */
+  cards: PositionedDoneCard<T>[];
+  /** topology.doneTotal: done tickets in all, the block's and the rest. */
+  total: number;
+}
+
 export interface GraphLayout<T extends GraphTicket = GraphTicket> {
   nodes: PositionedNode<T>[];
   edges: PositionedEdge[];
   columns: PositionedColumn[];
   /** Null when no ticket is on the shelf. */
   shelf: PositionedShelf | null;
-  /** Extent from (0, 0), origin included, to the right edge of the last column, or of the shelf. */
+  /** Null when the done block is empty. */
+  done: PositionedDone<T> | null;
+  /** Extent from (0, 0), origin included, to the right edge of the last column, the shelf or the done block. */
   width: number;
-  /** Extent from (0, 0), origin included, to the lowest card, the shelf's included. */
+  /** Extent from (0, 0), origin included, to the lowest card, the shelf's and done block's included. */
   height: number;
 }
 
@@ -495,7 +538,17 @@ export function computeGraphTopology<T extends GraphTicket>(tickets: readonly T[
   );
   const columnCounts = columns.map((ids) => ids.length);
   if (columnTotal > 0) columnCounts[0] += shelf.length;
-  return { nodes, edges, columns, layers, shelf: shelf.map((v) => open[v].id), columnCounts };
+  const done = recentDone([...byId.values()], DONE_BLOCK_LIMIT);
+  return {
+    nodes,
+    edges,
+    columns,
+    layers,
+    shelf: shelf.map((v) => open[v].id),
+    columnCounts,
+    done: done.tickets,
+    doneTotal: done.total,
+  };
 }
 
 // Orders one component's layers (its columns, left to right, each seeded in
@@ -756,6 +809,7 @@ export function positionGraph<T extends GraphTicket>(
   const bandGap = options.bandGap ?? DEFAULT_BAND_GAP;
   const shelfColumnGap = options.shelfColumnGap ?? DEFAULT_SHELF_COLUMN_GAP;
   const shelfGap = options.shelfGap ?? columnGap;
+  const doneGap = options.doneGap ?? columnGap;
   const sizeOf = (id: string) => options.sizes?.get(id) ?? defaultSize;
   const gapAfter = (column: number) => options.columnGaps?.[column] ?? columnGap;
 
@@ -834,19 +888,29 @@ export function positionGraph<T extends GraphTicket>(
     }),
   );
 
-  // The shelf at the origin, in balanced columns, and the columns right of it.
+  // The done block at the origin and the shelf right of it, each in
+  // balanced columns, and the columns right of them.
   const byId = new Map(topology.nodes.map((n) => [n.id, n]));
   const placed = new Map<string, PositionedNode<T>>();
-  let shelf: PositionedShelf | null = null;
+  const shelfGaps = { columnGap: shelfColumnGap, rowGap };
   let x = origin.x;
+  let done: PositionedDone<T> | null = null;
+  if (topology.done.length > 0) {
+    const sizes = topology.done.map((t) => sizeOf(t.id));
+    const at = placeShelf(sizes, balanceShelf(sizes, graphHeight, shelfGaps), origin, shelfGaps);
+    const cards = topology.done.map((ticket, i) => ({ id: ticket.id, ticket, ...at.cards[i], ...sizes[i] }));
+    done = { x, y: origin.y, width: at.width, height: at.height, columns: at.columns, count: sizes.length, cards, total: topology.doneTotal };
+    bottom = Math.max(bottom, origin.y + at.height);
+    x += at.width + doneGap;
+  }
+  let shelf: PositionedShelf | null = null;
   if (topology.shelf.length > 0) {
     const sizes = topology.shelf.map(sizeOf);
-    const gaps = { columnGap: shelfColumnGap, rowGap };
-    const at = placeShelf(sizes, balanceShelf(sizes, graphHeight, gaps), origin, gaps);
+    const at = placeShelf(sizes, balanceShelf(sizes, graphHeight, shelfGaps), { x, y: origin.y }, shelfGaps);
     topology.shelf.forEach((id, i) => {
       placed.set(id, { ...byId.get(id)!, ...at.cards[i], ...sizes[i] });
     });
-    shelf = { x: origin.x, y: origin.y, width: at.width, height: at.height, columns: at.columns, count: sizes.length };
+    shelf = { x, y: origin.y, width: at.width, height: at.height, columns: at.columns, count: sizes.length };
     bottom = Math.max(bottom, origin.y + at.height);
     x += at.width;
   }
@@ -880,7 +944,8 @@ export function positionGraph<T extends GraphTicket>(
     edges,
     columns,
     shelf,
-    width: Math.max(columnsRight, shelf ? shelf.x + shelf.width : origin.x),
+    done,
+    width: Math.max(columnsRight, shelf ? shelf.x + shelf.width : origin.x, done ? done.x + done.width : origin.x),
     height: Math.max(origin.y, bottom),
   };
 }

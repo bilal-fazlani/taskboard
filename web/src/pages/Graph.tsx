@@ -3,7 +3,7 @@ import { flushSync } from "react-dom";
 import { Maximize, RefreshCw, ZoomIn, ZoomOut } from "lucide-react";
 import { api, type Ticket, type Project, type TicketWrite } from "../api/client";
 import TicketEditor from "../components/TicketEditor";
-import TicketCard from "../components/TicketCard";
+import TicketCard, { type GraphCardInfo } from "../components/TicketCard";
 import FilterPanel from "../components/FilterPanel";
 import ProjectsLoadError from "../components/ProjectsLoadError";
 import { useChangeGlow } from "../hooks/useChangeGlow";
@@ -48,7 +48,7 @@ import {
   routeEdges,
 } from "../lib/graphEdges";
 import { entrySize, mergeSizes, pruneSizes } from "../lib/graphSizes";
-import { columnHeading } from "../lib/graphText";
+import { columnHeading, doneCountText } from "../lib/graphText";
 import { CONFLICT_ONLY_DASH, conflictOnlyEdges, edgeKey } from "../lib/graphEdgeKinds";
 import { isDone } from "../lib/status";
 import {
@@ -91,6 +91,9 @@ const SHELF_COLUMN_GAP = 24;
 // Where the separator between the shelf and the linked Ready column starts:
 // below Ready's header, which spans both.
 const SHELF_SEPARATOR_TOP = 24;
+// A done card has no arrows and no dependency line: done tickets aren't on
+// the graph, so the counts a graph card shows don't apply.
+const DONE_CARD: GraphCardInfo = { satisfiedDependencyCount: 0, externalBlockerCount: 0, dependencyTotal: 0 };
 
 const ARROW = "graph-arrow";
 const BACK_ARROW = "graph-arrow-back";
@@ -192,18 +195,21 @@ const TOOL_BUTTON =
 
 // A column's header; Ready's spans the shelf too. With filters set in dim
 // mode, the count is the matching cards out of all of them. In hide mode
-// every card shown matches, so it's a plain count.
+// every card shown matches, so it's a plain count. The done block's header
+// passes its own text.
 function Heading({
   title,
   count,
   matching,
+  text,
   left,
   top,
   width,
 }: {
   title: string;
-  count: number;
+  count?: number;
   matching?: number;
+  text?: string;
   left: number;
   top: number;
   width: number;
@@ -211,7 +217,7 @@ function Heading({
   return (
     <div className="absolute flex items-baseline gap-2" style={{ left, top, width }}>
       <h3 className="text-xs font-medium text-slate-400">{title}</h3>
-      <span className="text-[11px] text-slate-600">{matching === undefined ? count : `${matching} of ${count}`}</span>
+      <span className="text-[11px] text-slate-600">{text ?? (matching === undefined ? count : `${matching} of ${count}`)}</span>
     </div>
   );
 }
@@ -327,8 +333,11 @@ export default function Graph() {
     [hiding, projectTickets, filters, docMatches],
   );
   // The project's open tickets, which the count is out of in either mode.
+  // It counts open tickets only: the done block has its own count.
   const projectOpenCount = useMemo(() => projectTickets.filter((t) => !isDone(t.status)).length, [projectTickets]);
-  // Once per fetched ticket set or project; measuring only repositions.
+  // Once per fetched ticket set or project; measuring only repositions. It
+  // picks the done block from the done tickets laid out: in hide mode only
+  // the matching ones, so a status filter without done leaves it empty.
   const topology = useMemo(() => computeGraphTopology(shownTickets), [shownTickets]);
   // Back edges' vertical runs need room in the gaps and beside the outer
   // columns, which depends only on the topology. Each gap gets the width its
@@ -339,6 +348,7 @@ export default function Graph() {
     return {
       columnGaps: plan.gaps,
       shelfGap: plan.shelf,
+      doneGap: plan.done,
       right: plan.right,
       origin: { x: plan.left, y: CARDS_TOP + lanesHeight(laneCount(topology)) },
     };
@@ -355,6 +365,7 @@ export default function Graph() {
         bandGap: BAND_GAP,
         shelfColumnGap: SHELF_COLUMN_GAP,
         shelfGap: gutters.shelfGap,
+        doneGap: gutters.doneGap,
         origin: gutters.origin,
       }),
     [topology, sizes, gutters],
@@ -368,8 +379,8 @@ export default function Graph() {
     [edges, conflictOnly],
   );
   // Cards a live refresh just changed or brought in glow for two seconds.
-  // Only open tickets are watched, so a ticket that left for done is simply
-  // gone from the next fetch and never flashes on its way out. Every
+  // Only open tickets are watched, so a ticket that left for done never
+  // flashes on its way out, nor as it joins the top of the done block. Every
   // project's are watched, not only the cards on the graph, so switching
   // project brings no card in and nothing flashes.
   const openTickets = useMemo(() => fetched?.filter((t) => !isDone(t.status)) ?? null, [fetched]);
@@ -384,6 +395,23 @@ export default function Graph() {
     [filterState.active, hiding, topology, filters, docMatches],
   );
   const dimmed = (id: string) => matching !== null && !matching.has(id);
+  // The same for the done block: the ids of the project's done tickets the
+  // filters match, those beyond the block included, or null when every one
+  // does. Kept apart from `matching`, which the page's open-ticket count reads.
+  const doneMatching = useMemo(
+    () =>
+      filterState.active && !hiding
+        ? new Set(projectTickets.filter((t) => isDone(t.status) && matchesFilters(t, filters, docMatches)).map((t) => t.id))
+        : null,
+    [filterState.active, hiding, projectTickets, filters, docMatches],
+  );
+  const doneDimmed = (id: string) => doneMatching !== null && !doneMatching.has(id);
+  // The done block's header: shown of the project's done tickets the filters
+  // let through, or just their number when it shows them all. In dim mode
+  // with filters, shown counts only the matching cards among those drawn.
+  const doneCount = doneMatching
+    ? doneCountText(topology.done.filter((t) => doneMatching.has(t.id)).length, doneMatching.size)
+    : doneCountText(topology.done.length, topology.doneTotal);
   // Matching cards per column, for the column headers. The shelf's cards are
   // in Ready, so Ready's count includes them.
   const matchingCounts = useMemo(() => {
@@ -465,7 +493,10 @@ export default function Graph() {
   // is a new element, which the observer measures afresh before it's painted.
   // State adjusted while rendering, like the fit below; pruneSizes hands back
   // the same map while nothing has left, so this settles at once.
-  const nodeIds = useMemo(() => new Set(topology.nodes.map((node) => node.id)), [topology]);
+  const nodeIds = useMemo(
+    () => new Set([...topology.nodes.map((node) => node.id), ...topology.done.map((t) => t.id)]),
+    [topology],
+  );
   const keptSizes = pruneSizes(sizes, nodeIds);
   if (keptSizes !== sizes) setSizes(keptSizes);
 
@@ -480,6 +511,9 @@ export default function Graph() {
   };
 
   const ready = layout.columns[0];
+  const done = layout.done;
+  // The left edge of what follows the done block: the shelf, or Ready.
+  const afterDone = layout.shelf?.x ?? ready?.x;
   // Room right of the last column for back edges' vertical runs and
   // self-loops. An empty Ready column still shows its placeholder, which may
   // be taller than every stacked column.
@@ -514,8 +548,11 @@ export default function Graph() {
     setLaidOut(graphKey);
     setFitPending(stepFit(fitPending, { type: "requested" }).pending);
   }
-  const measured = useMemo(() => topology.nodes.every((node) => sizes.has(node.id)), [topology, sizes]);
-  const hasGraph = !loading && topology.nodes.length > 0;
+  const measured = useMemo(() => [...nodeIds].every((id) => sizes.has(id)), [nodeIds, sizes]);
+  // The done block alone is a graph too: a project with only done tickets,
+  // or hide mode with a done status filter.
+  const hasCards = topology.nodes.length > 0 || topology.done.length > 0;
+  const hasGraph = !loading && hasCards;
   const fitStep = stepFit(fitPending, {
     type: "rendered",
     moment: { visible, hasGraph, measured, hasViewport: viewportSize !== null },
@@ -744,7 +781,9 @@ export default function Graph() {
   // answers null and Fit frames the whole canvas, as first load always does.
   const fit = () => {
     if (!viewportSize) return;
-    const box = matchingBounds(layout.nodes, matching) ?? { width: canvasWidth, height: canvasHeight };
+    const cards = done ? [...done.cards, ...layout.nodes] : layout.nodes;
+    const ids = matching && doneMatching ? new Set([...doneMatching, ...matching]) : null;
+    const box = matchingBounds(cards, ids) ?? { width: canvasWidth, height: canvasHeight };
     moveView(() => fitTransform(box, viewportSize, FIT_INSETS));
   };
 
@@ -783,7 +822,7 @@ export default function Graph() {
           </div>
         ) : projectsErrored ? (
           <ProjectsLoadError />
-        ) : topology.nodes.length === 0 ? (
+        ) : !hasCards ? (
           // Hide mode can leave out every open ticket the project has, which
           // is not the same as having none.
           <div className="flex flex-col items-center justify-center gap-1 h-full text-center">
@@ -820,6 +859,16 @@ export default function Graph() {
               if (!e.currentTarget.contains(e.relatedTarget)) onHighlight({ type: "focusLeftGraph" });
             }}
           >
+            {done && (
+              <Heading title="Done" text={doneCount} left={done.x} top={0} width={done.width} />
+            )}
+            {/* Between the done block and Ready, as between two columns. */}
+            {done && afterDone !== undefined && (
+              <div
+                className="absolute top-0 border-l border-dashed border-slate-800"
+                style={{ left: (done.x + done.width + afterDone) / 2, height: canvasHeight }}
+              />
+            )}
             {/* Ready's header spans the shelf and the linked Ready column. */}
             {layout.columns.map((column) => {
               const left = column.index === 0 && layout.shelf ? layout.shelf.x : column.x;
@@ -898,6 +947,31 @@ export default function Graph() {
               })}
             </svg>
 
+            {/* Done cards come first, so Tab reaches them first, left to
+                right. They have no arrows and are on no chain: they report
+                no highlight, dim while a chain is lit, and never glow. */}
+            {done?.cards.map((card) => (
+              <div
+                key={card.id}
+                ref={observeCard}
+                data-ticket-id={card.id}
+                data-done=""
+                role="button"
+                tabIndex={0}
+                aria-label={`${card.ticket.projectPrefix}-${card.ticket.number} ${card.ticket.title}, done`}
+                onKeyDown={(e) => {
+                  if (e.target !== e.currentTarget || (e.key !== "Enter" && e.key !== " ")) return;
+                  e.preventDefault();
+                  openTicket(card.ticket);
+                }}
+                className={`absolute w-64 rounded-lg transition-opacity duration-150 ${
+                  chains ? CARD_CHAIN_CLASSES.none : doneDimmed(card.id) ? FILTERED_OUT : ""
+                }`}
+                style={{ left: card.x, top: card.y }}
+              >
+                <TicketCard ticket={card.ticket} graph={DONE_CARD} onClick={() => openTicket(card.ticket)} />
+              </div>
+            ))}
             {layout.nodes.map((node) => (
               <div
                 key={node.id}

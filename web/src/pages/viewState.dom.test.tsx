@@ -330,7 +330,8 @@ describe("Dependencies in hide mode across a refetch", () => {
 
   it.each([
     ["a matching ticket is added", "/?project=ACP&priority=high&unmatched=hide", [...start, high(4)], "ACP-4", true],
-    ["a matching ticket is finished", "/?project=ACP&priority=high&unmatched=hide", [high(1, { status: "done" }), start[1], start[2]], "ACP-1", false],
+    // It leaves the graph for the top of the done block.
+    ["a matching ticket is finished", "/?project=ACP&priority=high&unmatched=hide", [high(1, { status: "done" }), start[1], start[2]], "ACP-1", true],
     ["a ticket moves into the filter", "/?project=ACP&priority=high&unmatched=hide", [start[0], start[1], high(3)], "ACP-3", true],
     ["a ticket is added with no filter set", "/?project=ACP&unmatched=hide", [...start, makeTicket(4)], "ACP-4", true],
   ] as const)("keeps the pan and never hides the graph when %s", async (_what, path, next, key, shown) => {
@@ -548,5 +549,47 @@ describe("the selected view across a refetch", () => {
     expect(screen.getByRole("heading", { name: heading })).toBeTruthy();
     expect(screen.getByRole("group", { name: "Status" }).querySelector("button")!.textContent).toBe("Todo");
     expect((screen.getByLabelText("Search") as HTMLInputElement).value).toBe("ticket");
+  });
+});
+
+// A ticket that moves to done in a live refresh leaves the graph for the top
+// of the done block, and the 51st done ticket drops off its end; the view
+// stays where the user put it.
+describe("Dependencies done block across a refetch", () => {
+  const canvas = () => document.querySelector<HTMLElement>("[data-graph-canvas]")!;
+  const doneKeys = () =>
+    [...canvas().querySelectorAll<HTMLElement>("[data-done]")].map((el) => el.getAttribute("aria-label")!.split(" ")[0]);
+  const card = (key: string) => screen.queryByRole("button", { name: new RegExp(`^${key} `) });
+  const heading = () => canvas().querySelector("h3")!.parentElement!.textContent;
+  const at = (minute: number) => new Date(Date.UTC(2026, 8, 20, 10, minute)).toISOString();
+  const done = Array.from({ length: 50 }, (_, i) => makeTicket(101 + i, { status: "done", doneAt: at(i) }));
+  const open = [makeTicket(1), makeTicket(2)];
+
+  it("puts a newly done ticket at the top and drops the 51st, without moving the view", async () => {
+    serves([...open, ...done]);
+    await mount(<Graph />, "/?project=ACP");
+    await layout();
+    expect(heading()).toBe("Done50");
+    expect(doneKeys()[0]).toBe("ACP-150");
+    expect(doneKeys()[49]).toBe("ACP-101");
+    await act(async () => {
+      canvas().parentElement!.dispatchEvent(new WheelEvent("wheel", { deltaX: 30, deltaY: 200, bubbles: true }));
+    });
+    const moved = canvas().style.transform;
+    const top = card("ACP-150")!.style.top;
+    const left = card("ACP-150")!.style.left;
+
+    await liveChange([makeTicket(1, { status: "done", doneAt: at(90) }), open[1], ...done]);
+    expect(doneKeys()).toHaveLength(50);
+    expect(doneKeys()[0]).toBe("ACP-1");
+    expect(doneKeys()).not.toContain("ACP-101");
+    expect(heading()).toBe("Done50 of 51");
+    // ACP-1 takes the top of the block's first column.
+    expect(card("ACP-1")!.style.top).toBe(top);
+    expect(card("ACP-1")!.style.left).toBe(left);
+    expect(canvas().style.transform).toBe(moved);
+    await layout();
+    expect(canvas().className).not.toContain("invisible");
+    expect(canvas().style.transform).toBe(moved);
   });
 });

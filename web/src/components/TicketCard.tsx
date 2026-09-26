@@ -4,7 +4,7 @@ import { attentionClasses } from "../lib/attention";
 import { formatDueDate } from "../lib/dueDate";
 import type { GraphNode } from "../lib/graphLayout";
 import { hiddenBlockersText, satisfiedDependenciesText } from "../lib/graphText";
-import { AGENT_REVIEW_STATUS, STATUS_COLORS, STATUS_LABELS, STATUS_STYLES, isStatus } from "../lib/status";
+import { AGENT_REVIEW_STATUS, STATUS_COLORS, STATUS_LABELS, STATUS_STYLES, isDone, isStatus } from "../lib/status";
 import DependencyBand from "./DependencyBand";
 import PriorityBadge from "./PriorityBadge";
 
@@ -56,7 +56,17 @@ function CardFooter({ ticket }: { ticket: Ticket }) {
   );
 }
 
+// The graph's status mark before the key: a dot in the status colour, or for
+// a done ticket, which only the graph's done block shows, a check in the
+// green done has on Kanban and the Table.
 function StatusDot({ status, attention }: { status: string; attention: string }) {
+  if (isDone(status)) {
+    return (
+      <span data-testid="card-done" title={STATUS_LABELS.done} className="inline-flex shrink-0">
+        <Check aria-label={STATUS_LABELS.done} className="h-3 w-3 text-green-500" strokeWidth={3} />
+      </span>
+    );
+  }
   const known = isStatus(status);
   return (
     <span
@@ -131,7 +141,8 @@ function ReviewRounds({ rounds }: { rounds: number }) {
  * counts, and adds a "review ×N" pill under the title once the ticket has
  * been to agent review. Without it the card renders exactly as the board
  * always has. A ticket in an epic shows the epic before its key, after the
- * graph's dot.
+ * graph's dot. A done ticket on the graph, in its done block, has a check
+ * for its dot and a quieter title.
  */
 export default function TicketCard({
   ticket,
@@ -178,7 +189,9 @@ export default function TicketCard({
         )}
         <PriorityBadge priority={ticket.priority} />
       </div>
-      <p className="text-sm text-slate-200 leading-snug">{ticket.title}</p>
+      <p className={`text-sm leading-snug ${graph && isDone(ticket.status) ? "text-slate-400" : "text-slate-200"}`}>
+        {ticket.title}
+      </p>
       {graph && reviewRounds > 0 && <ReviewRounds rounds={reviewRounds} />}
       {graph ? <GraphDependencies graph={graph} /> : <DependencyBand dependsOn={ticket.dependsOn} />}
       {ticket.labels && ticket.labels.length > 0 && (

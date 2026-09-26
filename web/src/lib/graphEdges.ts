@@ -202,10 +202,12 @@ export interface Routable {
   columns: readonly unknown[];
 }
 
-/** What gutter planning reads: a topology fits, shelf and all. */
+/** What gutter planning reads: a topology fits, shelf, done block and all. */
 export interface GutterPlannable extends Routable {
   /** The Ready tickets on the shelf left of the linked Ready column; none if left out. */
   shelf?: readonly unknown[];
+  /** The done block's tickets, left of everything else; none if left out. */
+  done?: readonly unknown[];
 }
 
 interface LanePlan {
@@ -266,7 +268,7 @@ export interface GutterPlan {
   gaps: number[];
   /**
    * Room needed left of everything, at least BACK_EDGE_GUTTER: left of Ready,
-   * or of the shelf when there is one.
+   * or of the shelf or the done block when there is one.
    */
   left: number;
   /**
@@ -275,6 +277,13 @@ export interface GutterPlan {
    * the room they would need left of Ready without a shelf.
    */
   shelf: number;
+  /**
+   * Width the gap right of the done block needs, at least MIN_COLUMN_GAP.
+   * With no shelf the runs into Ready come down in it, so it takes the room
+   * they would need left of Ready without a done block; with a shelf they
+   * come down after the shelf, and no edge touches the done block.
+   */
+  done: number;
   /** Room needed right of the last column, at least BACK_EDGE_GUTTER. */
   right: number;
 }
@@ -285,7 +294,8 @@ export interface GutterPlan {
  * outgoing runs and its right column's incoming ones with at least
  * CURVE_ROOM between the two groups, past CURVE_CLEARANCE on either side, for
  * the forward edges' curves. With a shelf, the runs into Ready come down
- * between the shelf and Ready rather than left of everything.
+ * between the shelf and Ready rather than left of everything; with a done
+ * block and no shelf, between the done block and Ready.
  */
 export function planGutters(topology: GutterPlannable): GutterPlan {
   const { outCount, inCount } = planLanes(topology);
@@ -297,10 +307,12 @@ export function planGutters(topology: GutterPlannable): GutterPlan {
   const edgeRoom = (slots: number) => Math.max(BACK_EDGE_GUTTER, sideRoom(slots) + GUTTER_OFFSET / 2);
   const intoReady = last >= 0 ? inCount[0] : 0;
   const shelved = (topology.shelf?.length ?? 0) > 0;
+  const hasDone = (topology.done?.length ?? 0) > 0;
   return {
     gaps,
-    left: edgeRoom(shelved ? 0 : intoReady),
+    left: edgeRoom(shelved || hasDone ? 0 : intoReady),
     shelf: Math.max(MIN_COLUMN_GAP, edgeRoom(intoReady)),
+    done: Math.max(MIN_COLUMN_GAP, edgeRoom(shelved ? 0 : intoReady)),
     right: edgeRoom(last >= 0 ? outCount[last] : 0),
   };
 }

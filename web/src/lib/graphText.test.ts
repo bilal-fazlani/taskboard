@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { columnHeading, hiddenBlockersText, satisfiedDependenciesText } from "./graphText";
+import { columnHeading, doneCountText, hiddenBlockersText, satisfiedDependenciesText } from "./graphText";
 
 describe("columnHeading", () => {
   it("calls column 0 Ready and counts steps after it", () => {
@@ -7,6 +7,19 @@ describe("columnHeading", () => {
     expect(columnHeading(1)).toBe("Blocked · 1 step");
     expect(columnHeading(2)).toBe("Blocked · 2 steps");
     expect(columnHeading(12)).toBe("Blocked · 12 steps");
+  });
+});
+
+describe("doneCountText", () => {
+  it("shows shown of total while the block holds fewer than there are", () => {
+    expect(doneCountText(50, 96)).toBe("50 of 96");
+    expect(doneCountText(7, 20)).toBe("7 of 20");
+  });
+
+  it("shows just the total once the block holds them all", () => {
+    expect(doneCountText(50, 50)).toBe("50");
+    expect(doneCountText(42, 42)).toBe("42");
+    expect(doneCountText(0, 0)).toBe("0");
   });
 });
 

@@ -332,6 +332,7 @@ describe("routeEdges", () => {
       gaps: [MIN_COLUMN_GAP, MIN_COLUMN_GAP, MIN_COLUMN_GAP],
       left: BACK_EDGE_GUTTER,
       shelf: MIN_COLUMN_GAP,
+      done: MIN_COLUMN_GAP,
       right: BACK_EDGE_GUTTER,
     });
   });
@@ -654,6 +655,65 @@ describe("routeEdges beside the shelf", () => {
     for (const e of back) {
       for (const node of layout.nodes) {
         expect(pathHitsRect(e.d, node), `${e.from}->${e.to} crosses ${node.id}`).toBe(false);
+      }
+    }
+  });
+});
+
+// The page with a done block and no shelf: the 16 back edges into Ready come
+// down between the done block and Ready, and none touches a done card. With a
+// shelf as well, they come down after the shelf and the done block's gap is
+// the narrowest.
+describe("routeEdges beside the done block", () => {
+  const tickets: GraphTicket[] = [];
+  for (let i = 1; i <= 16; i++) tickets.push(ticket(`W-${2 * i - 1}`, [`W-${2 * i}`]), ticket(`W-${2 * i}`, [`W-${2 * i - 1}`]));
+  for (let i = 1; i <= 20; i++) tickets.push({ ...ticket(`D-${i}`), status: "done", doneAt: `2026-09-${String(i).padStart(2, "0")}T00:00:00Z` });
+  const topology = computeGraphTopology(tickets);
+  const gutters = planGutters(topology);
+  const layout = positionGraph(topology, {
+    columnGap: MIN_COLUMN_GAP,
+    columnGaps: gutters.gaps,
+    shelfGap: gutters.shelf,
+    doneGap: gutters.done,
+    origin: { x: gutters.left, y: 40 + LANE_CLEARANCE + lanesHeight(laneCount(topology)) },
+  });
+  const routed = routeEdges(layout);
+  const back = routed.filter((e) => e.lane !== null);
+  const done = layout.done!;
+  const ready = layout.columns[0];
+
+  it("builds the graph the test is about", () => {
+    expect(topology.shelf).toEqual([]);
+    expect(topology.done).toHaveLength(20);
+    expect(back).toHaveLength(16);
+    expect(done.columns.length).toBeGreaterThan(1);
+  });
+
+  it("widens the gap after the done block for the runs into Ready, and keeps the left edge narrow", () => {
+    expect(gutters.done).toBe(sideRoom(16) + GUTTER_OFFSET / 2);
+    expect(gutters.left).toBe(BACK_EDGE_GUTTER);
+    expect(done.x).toBe(BACK_EDGE_GUTTER);
+    expect(ready.x - (done.x + done.width)).toBe(gutters.done);
+    // With a shelf too, the runs come down after the shelf instead.
+    const shelved = planGutters({ ...topology, shelf: ["Z-1"] });
+    expect(shelved.done).toBe(MIN_COLUMN_GAP);
+    expect(shelved.shelf).toBe(gutters.done);
+  });
+
+  it("runs every back edge into Ready down the gap between the done block and Ready", () => {
+    for (const e of back) {
+      const x = verticalRuns(e.d)[1].x;
+      expect(x).toBeGreaterThan(done.x + done.width);
+      expect(x).toBeLessThan(ready.x);
+    }
+  });
+
+  it("never draws an edge to, from or through a done card", () => {
+    const doneIds = new Set(done.cards.map((c) => c.id));
+    for (const e of routed) {
+      expect(doneIds.has(e.from) || doneIds.has(e.to)).toBe(false);
+      for (const card of done.cards) {
+        expect(pathHitsRect(e.d, card), `${e.from}->${e.to} crosses ${card.id}`).toBe(false);
       }
     }
   });
