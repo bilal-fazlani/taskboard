@@ -354,7 +354,11 @@ export default function Projects() {
                   style={{ backgroundColor: project.color }}
                 />
                 <div className="flex items-start justify-between">
-                  <span className="text-2xl">{project.icon}</span>
+                  {project.icon && (
+                    <span data-testid="project-icon" className="text-2xl">
+                      {project.icon}
+                    </span>
+                  )}
                   <button
                     onClick={(e) => {
                       e.stopPropagation();

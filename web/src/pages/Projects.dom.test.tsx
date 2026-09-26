@@ -14,18 +14,20 @@ vi.mock("../hooks/useLiveRefresh", () => ({ useLiveRefresh: () => {} }));
 
 import Projects from "./Projects";
 
-const project = (prefix: string, extra: Partial<Project> = {}): Project => ({
-  id: `p-${prefix}`,
-  name: `${prefix} project`,
-  prefix,
-  description: `What ${prefix} is.`,
-  icon: "",
-  color: "#3b82f6",
-  status: "active",
-  createdAt: "",
-  updatedAt: "",
-  ...extra,
-});
+// No icon by default: the API leaves an empty one out of the JSON
+// altogether, so a fixture for the ordinary case omits it too.
+const project = (prefix: string, extra: Partial<Project> = {}): Project =>
+  ({
+    id: `p-${prefix}`,
+    name: `${prefix} project`,
+    prefix,
+    description: `What ${prefix} is.`,
+    color: "#3b82f6",
+    status: "active",
+    createdAt: "",
+    updatedAt: "",
+    ...extra,
+  }) as Project;
 
 const WITH = project("ACP", { hasAgentInstructions: true });
 const WITHOUT = project("HOME", { hasAgentInstructions: false });
@@ -170,6 +172,19 @@ describe("project cards", () => {
     expect(row.className).toContain("flex-wrap");
     const dot = row.querySelector("span.rounded-full")!;
     expect(dot.className).toContain("shrink-0");
+  });
+
+  it("shows a project's icon before its name", async () => {
+    mockApi.projects.list.mockResolvedValue([project("ICON", { name: "Iconic", icon: "🧭" })]);
+    render(<Projects />);
+    await screen.findByText("Iconic");
+    expect(screen.getByTestId("project-icon").textContent).toBe("🧭");
+  });
+
+  it("shows only the name, with no icon element, for a project without an icon", async () => {
+    await renderPage();
+    // Neither fixture in this file's default project() sets an icon.
+    expect(screen.queryByTestId("project-icon")).toBeNull();
   });
 });
 

@@ -43,13 +43,24 @@ export function isArchived(project: Pick<PickableProject, "status">): boolean {
 }
 
 /**
- * A project's option label: its icon and name, space-separated (the API
- * leaves out an empty icon, so it can be missing as well as blank, and the
- * label has no leading space when there is none), with " (archived)"
- * appended for an archived project.
+ * A project's icon and name, space-separated: the API leaves out an empty
+ * icon, so it can be missing as well as blank, and the join has no leading
+ * space when there is none. Every place that prints a project's icon next to
+ * its name builds on this, so a project without one never shows a gap or an
+ * "undefined".
  */
-export function projectLabel(project: Pick<PickableProject, "name" | "status"> & { icon: string }): string {
-  const base = [project.icon, project.name].filter(Boolean).join(" ");
+export function projectIconAndName(project: { name: string; icon?: string }): string {
+  return [project.icon, project.name].filter(Boolean).join(" ");
+}
+
+/**
+ * A project's option label: its icon and name (see projectIconAndName), with
+ * " (archived)" appended for an archived project. For a place that already
+ * shows archived status some other way (a status badge, say), use
+ * projectIconAndName instead so it doesn't get the suffix twice.
+ */
+export function projectLabel(project: Pick<PickableProject, "name" | "status"> & { icon?: string }): string {
+  const base = projectIconAndName(project);
   return isArchived(project) ? `${base} (archived)` : base;
 }
 

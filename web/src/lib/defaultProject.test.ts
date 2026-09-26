@@ -7,6 +7,7 @@ import {
   isArchived,
   latestActivity,
   namedProject,
+  projectIconAndName,
   projectLabel,
   readLastProject,
   rememberProject,
@@ -221,17 +222,27 @@ describe("awaitingProject", () => {
   });
 });
 
+describe("projectIconAndName", () => {
+  it("joins icon and name with a space", () => {
+    expect(projectIconAndName({ icon: "🧭", name: "Taskboard" })).toBe("🧭 Taskboard");
+  });
+
+  it("has no leading space when there is no icon", () => {
+    expect(projectIconAndName({ name: "Taskboard" })).toBe("Taskboard");
+  });
+});
+
 describe("projectLabel", () => {
   it("joins icon and name with a space", () => {
     expect(projectLabel({ icon: "🧭", name: "Taskboard", status: "active" })).toBe("🧭 Taskboard");
   });
 
   it("has no leading space when there is no icon", () => {
-    expect(projectLabel({ icon: "", name: "Taskboard", status: "active" })).toBe("Taskboard");
+    expect(projectLabel({ name: "Taskboard", status: "active" })).toBe("Taskboard");
   });
 
   it("appends (archived) for an archived project, after the icon and name", () => {
     expect(projectLabel({ icon: "🧭", name: "Taskboard", status: "archived" })).toBe("🧭 Taskboard (archived)");
-    expect(projectLabel({ icon: "", name: "Taskboard", status: "archived" })).toBe("Taskboard (archived)");
+    expect(projectLabel({ name: "Taskboard", status: "archived" })).toBe("Taskboard (archived)");
   });
 });
