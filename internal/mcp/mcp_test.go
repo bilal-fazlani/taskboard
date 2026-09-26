@@ -448,6 +448,21 @@ func TestToggleSubtaskToolWithCompletedReportsUnknownID(t *testing.T) {
 	}
 }
 
+// delete_subtask on an unknown id must report a clear "subtask not found"
+// error, matching the wording of the other delete tools since ACP-63,
+// instead of reporting deleted: true for a subtask that was never there
+// (ACP-121).
+func TestDeleteSubtaskToolReportsUnknownID(t *testing.T) {
+	s := newTestServer(t)
+	_, err := s.callTool("delete_subtask", mustJSON(t, map[string]any{"id": "nope"}))
+	if err == nil {
+		t.Fatal("expected an error for a subtask that does not exist")
+	}
+	if !strings.Contains(err.Error(), `subtask not found: "nope"`) {
+		t.Fatalf("error = %q, want it to say the subtask was not found", err.Error())
+	}
+}
+
 // A `completed` that is not a JSON boolean (e.g. the string "true") must be
 // rejected as a tool error, not silently ignored: decoding it into *bool
 // fails, and a dropped decode error would leave Completed nil, which falls

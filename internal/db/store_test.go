@@ -1601,6 +1601,14 @@ func TestDeleteProjectUnknownIDIsInvalidInput(t *testing.T) {
 	assertInvalidInput(t, err, `project not found: "01ARZ3NDEKTSV4RRFFQ69G5FAV"`)
 }
 
+// DeleteSubtask of an unknown id reports ErrInvalidInput rather than
+// silently succeeding, the gap ACP-63 left open for this ticket (ACP-121).
+func TestDeleteSubtaskUnknownIDIsInvalidInput(t *testing.T) {
+	s := newTestStore(t)
+	err := s.DeleteSubtask("01ARZ3NDEKTSV4RRFFQ69G5FAV")
+	assertInvalidInput(t, err, `subtask not found: "01ARZ3NDEKTSV4RRFFQ69G5FAV"`)
+}
+
 func TestResolveLabelRefByIDOrExactName(t *testing.T) {
 	s := newTestStore(t)
 	bug, err := s.CreateLabel(models.CreateLabelRequest{Name: "bug", Color: "#FF0000"})

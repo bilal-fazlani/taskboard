@@ -348,9 +348,11 @@ func TestTicketSubtaskToggleAndDelete(t *testing.T) {
 
 // ticket subtask toggle and delete must both fail clearly, with a non-zero
 // exit, on an id that matches no subtask, rather than silently succeeding.
-// store.DeleteSubtask never reports whether it matched a row, so this is
-// what regressed to a false "Subtask deleted." before the CLI checked
-// existence itself first.
+// ToggleSubtask already reported this itself; delete used to rely on the CLI
+// checking existence first (store.DeleteSubtask never reported whether it
+// matched a row), so a false "Subtask deleted." was still possible through
+// MCP and HTTP. store.DeleteSubtask now reports the same not-found error
+// directly (ACP-121), and the CLI relies on that instead of its own check.
 func TestTicketSubtaskToggleAndDeleteRejectUnknownID(t *testing.T) {
 	setLiveBuild(t, false)
 	sandboxHome(t)

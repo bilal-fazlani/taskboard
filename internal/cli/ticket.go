@@ -401,17 +401,10 @@ func subtaskCommands() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			// store.DeleteSubtask never reports whether it matched a row, so
-			// an unknown id would otherwise print success and exit 0. Check
-			// existence first and fail clearly instead; the same gap through
-			// MCP and HTTP is ACP-121.
-			st, err := store.GetSubtask(args[0])
-			if err != nil {
-				return err
-			}
-			if st == nil {
-				return fmt.Errorf("subtask not found: %q", args[0])
-			}
+			// store.DeleteSubtask now reports a clear "subtask not found"
+			// error itself for an unknown id (ACP-121), the same not-found
+			// check every other Delete* store method got in ACP-63, so this
+			// no longer needs its own existence check first.
 			if err := store.DeleteSubtask(args[0]); err != nil {
 				return err
 			}

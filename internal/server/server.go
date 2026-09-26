@@ -580,7 +580,7 @@ func (s *Server) toggleSubtask(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) deleteSubtask(w http.ResponseWriter, r *http.Request) {
 	if err := s.store.DeleteSubtask(chi.URLParam(r, "id")); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeLookupError(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

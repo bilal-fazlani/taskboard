@@ -987,12 +987,11 @@ func invalidInput(format string, a ...any) error {
 // deleteRowOrNotFound runs "DELETE FROM <table> WHERE id = ?" and reports an
 // ErrInvalidInput, naming noun and id, when it matched no row, instead of
 // letting a delete of an unknown id silently succeed. It is shared by every
-// Delete* store method that deletes a single row by id (DeleteSubtask is the
-// one exception, left for ACP-121). q may be *sql.DB or a transaction, so
-// callers that need the delete inside a larger transaction (DeleteLabel,
-// DeleteEpic) can still get the same not-found check. The HTTP layer
-// recognizes ErrInvalidInput here as a 404, via writeLookupError, the same
-// mapping already used for an unresolvable reference.
+// Delete* store method that deletes a single row by id. q may be *sql.DB or a
+// transaction, so callers that need the delete inside a larger transaction
+// (DeleteLabel, DeleteEpic) can still get the same not-found check. The HTTP
+// layer recognizes ErrInvalidInput here as a 404, via writeLookupError, the
+// same mapping already used for an unresolvable reference.
 func deleteRowOrNotFound(q dbtx, table, noun, id string) error {
 	res, err := q.Exec("DELETE FROM "+table+" WHERE id = ?", id)
 	if err != nil {
@@ -1488,27 +1487,10 @@ func (s *Store) SetSubtaskState(id string, completed bool) (*models.Subtask, err
 	return &st, err
 }
 
+// DeleteSubtask removes a subtask. It reports ErrInvalidInput for an unknown
+// id rather than silently succeeding.
 func (s *Store) DeleteSubtask(id string) error {
-	_, err := s.db.Exec("DELETE FROM subtasks WHERE id = ?", id)
-	return err
-}
-
-// GetSubtask returns a subtask by id, or nil if none matches. It is a
-// read-only lookup, unlike ToggleSubtask and SetSubtaskState which also
-// write; the CLI uses it to give delete a clear "not found" error on an
-// unknown id, since DeleteSubtask itself never reports whether it matched a
-// row.
-func (s *Store) GetSubtask(id string) (*models.Subtask, error) {
-	var st models.Subtask
-	err := s.db.QueryRow("SELECT id, ticket_id, title, completed, position FROM subtasks WHERE id = ?", id).
-		Scan(&st.ID, &st.TicketID, &st.Title, &st.Completed, &st.Position)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	return &st, nil
+	return deleteRowOrNotFound(s.db, "subtasks", "subtask", id)
 }
 
 // normalizeRepos trims each entry and drops blanks, so a stray "  " never
