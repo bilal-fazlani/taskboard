@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Plus, Trash2, X, FolderKanban, ChevronDown, ChevronUp, Bot } from "lucide-react";
 import Markdown from "react-markdown";
 import { api, type Project } from "../api/client";
@@ -208,6 +208,64 @@ function ProjectModal({
   );
 }
 
+// A project card's description, clamped to four lines. "Show more" appears
+// only when the clamp cuts something off, measured again whenever the text's
+// box changes size (the card narrowing or widening, an image loading) or the
+// text changes. Once expanded nothing is clamped, so "Show less" stays until
+// it is pressed and the collapsed description is measured afresh.
+function ProjectDescription({
+  text,
+  expanded,
+  onToggle,
+}: {
+  text: string;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [cutOff, setCutOff] = useState(false);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || expanded) return;
+    // The observer reports the box as soon as it starts watching, then on
+    // every resize. A hidden line is a whole line high, so a pixel of slack
+    // absorbs rounding without missing one.
+    const observer = new ResizeObserver(() => {
+      setCutOff(el.scrollHeight - el.clientHeight > 1);
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [expanded, text]);
+
+  return (
+    <div className="mt-1">
+      <div ref={ref} className={`prose-card overflow-hidden ${expanded ? "" : "line-clamp-4"}`}>
+        <Markdown>{text}</Markdown>
+      </div>
+      {(expanded || cutOff) && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggle();
+          }}
+          className="mt-1 inline-flex items-center gap-0.5 text-xs text-slate-500 hover:text-slate-300 transition-colors"
+        >
+          {expanded ? (
+            <>
+              Show less <ChevronUp className="w-3 h-3" />
+            </>
+          ) : (
+            <>
+              Show more <ChevronDown className="w-3 h-3" />
+            </>
+          )}
+        </button>
+      )}
+    </div>
+  );
+}
+
 export default function Projects() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [showCreate, setShowCreate] = useState(false);
@@ -311,32 +369,11 @@ export default function Projects() {
                   {project.name}
                 </h3>
                 {project.description && (
-                  <div className="mt-1">
-                     <div
-                      className={`prose-card overflow-hidden ${
-                        expandedDescs.has(project.id) ? "" : "line-clamp-4"
-                      }`}
-                    >
-                      <Markdown>{project.description}</Markdown>
-                    </div>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        toggleDesc(project.id);
-                      }}
-                      className="mt-1 inline-flex items-center gap-0.5 text-xs text-slate-500 hover:text-slate-300 transition-colors"
-                    >
-                      {expandedDescs.has(project.id) ? (
-                        <>
-                          Show less <ChevronUp className="w-3 h-3" />
-                        </>
-                      ) : (
-                        <>
-                          Show more <ChevronDown className="w-3 h-3" />
-                        </>
-                      )}
-                    </button>
-                  </div>
+                  <ProjectDescription
+                    text={project.description}
+                    expanded={expandedDescs.has(project.id)}
+                    onToggle={() => toggleDesc(project.id)}
+                  />
                 )}
                 {/* On a narrow card the row wraps and the marker takes its own line. */}
                 <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">

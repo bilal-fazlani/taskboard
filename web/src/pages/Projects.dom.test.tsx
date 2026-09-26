@@ -30,6 +30,78 @@ const project = (prefix: string, extra: Partial<Project> = {}): Project => ({
 const WITH = project("ACP", { hasAgentInstructions: true });
 const WITHOUT = project("HOME", { hasAgentInstructions: false });
 
+// jsdom has no ResizeObserver; this one reports every observed element when
+// a test says the browser has laid the page out.
+class FakeResizeObserver {
+  static instances: FakeResizeObserver[] = [];
+  private readonly targets = new Set<Element>();
+  private readonly callback: ResizeObserverCallback;
+
+  constructor(callback: ResizeObserverCallback) {
+    this.callback = callback;
+    FakeResizeObserver.instances.push(this);
+  }
+
+  observe(target: Element) {
+    this.targets.add(target);
+  }
+
+  unobserve(target: Element) {
+    this.targets.delete(target);
+  }
+
+  disconnect() {
+    this.targets.clear();
+  }
+
+  report() {
+    const entries = [...this.targets].map((target) => ({ target }) as ResizeObserverEntry);
+    if (entries.length > 0) this.callback(entries, this as unknown as ResizeObserver);
+  }
+}
+
+// jsdom lays nothing out, so a card description measures as if its text ran
+// in lines of `textWidth` pixels, 7px a character and 23px a line. Clamped
+// (line-clamp-4) it shows at most four lines; its scroll height is always
+// every line.
+const CHAR = 7;
+const LINE = 23;
+let textWidth = 280;
+
+function descriptionLines(el: HTMLElement) {
+  return Math.max(1, Math.ceil(((el.textContent ?? "").length * CHAR) / textWidth));
+}
+
+const layout = {
+  clientHeight(this: HTMLElement) {
+    if (!this.classList.contains("prose-card")) return 0;
+    const lines = descriptionLines(this);
+    return (this.classList.contains("line-clamp-4") ? Math.min(lines, 4) : lines) * LINE;
+  },
+  scrollHeight(this: HTMLElement) {
+    return this.classList.contains("prose-card") ? descriptionLines(this) * LINE : 0;
+  },
+};
+
+// Says the browser has laid the page out, at the current textWidth.
+function relayout() {
+  act(() => {
+    for (const observer of FakeResizeObserver.instances) observer.report();
+  });
+}
+
+function cardOf(name: string) {
+  return screen.getByText(name).parentElement!;
+}
+
+function showMore(card: HTMLElement) {
+  return within(card).queryByRole("button", { name: /Show more/ });
+}
+
+function showLess(card: HTMLElement) {
+  return within(card).queryByRole("button", { name: /Show less/ });
+}
+
 async function renderPage() {
   render(<Projects />);
   await screen.findByText("ACP project");
@@ -52,6 +124,12 @@ function textarea(form: HTMLElement) {
 }
 
 beforeEach(() => {
+  FakeResizeObserver.instances = [];
+  (globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver = FakeResizeObserver;
+  textWidth = 280;
+  for (const [name, get] of Object.entries(layout)) {
+    Object.defineProperty(HTMLElement.prototype, name, { configurable: true, get });
+  }
   mockApi.projects.list.mockResolvedValue([WITH, WITHOUT]);
   mockApi.projects.get.mockImplementation(async (id: string) =>
     id === WITH.id
@@ -65,6 +143,11 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  delete (globalThis as unknown as { ResizeObserver?: unknown }).ResizeObserver;
+  // Uncovers jsdom's own getters on Element.prototype again.
+  for (const name of Object.keys(layout)) {
+    delete (HTMLElement.prototype as unknown as Record<string, unknown>)[name];
+  }
 });
 
 describe("project cards", () => {
@@ -87,6 +170,69 @@ describe("project cards", () => {
     expect(row.className).toContain("flex-wrap");
     const dot = row.querySelector("span.rounded-full")!;
     expect(dot.className).toContain("shrink-0");
+  });
+});
+
+describe("a project card's Show more", () => {
+  // At the starting 280px, 40 characters a line: SHORT takes one line, FITS
+  // exactly the four the clamp shows, LONG ten.
+  const SHORT = project("SHRT", { description: "Tracks the household chores." });
+  const FITS = project("FITS", { description: "x".repeat(160) });
+  const LONG = project("LONG", { description: "y".repeat(400) });
+
+  async function renderCards() {
+    mockApi.projects.list.mockResolvedValue([SHORT, FITS, LONG]);
+    render(<Projects />);
+    await screen.findByText("LONG project");
+    relayout();
+  }
+
+  it("shows only on a description the clamp cuts off", async () => {
+    await renderCards();
+    expect(showMore(cardOf("SHRT project"))).toBeNull();
+    expect(showMore(cardOf("FITS project"))).toBeNull();
+    expect(showMore(cardOf("LONG project"))).not.toBeNull();
+    // Nor is a Show less offered where nothing was shown more.
+    expect(showLess(cardOf("SHRT project"))).toBeNull();
+  });
+
+  it("keeps Show less once expanded, though nothing is clamped then", async () => {
+    await renderCards();
+    const card = cardOf("LONG project");
+    fireEvent.click(showMore(card)!);
+    expect(card.querySelector(".prose-card")!.classList.contains("line-clamp-4")).toBe(false);
+    relayout();
+    expect(showLess(card)).not.toBeNull();
+    expect(showMore(card)).toBeNull();
+
+    // Even when the card widens until the whole description would fit.
+    textWidth = 4000;
+    relayout();
+    expect(showLess(card)).not.toBeNull();
+
+    // Collapsing measures again: at that width nothing is cut off.
+    fireEvent.click(showLess(card)!);
+    relayout();
+    expect(showMore(card)).toBeNull();
+    expect(showLess(card)).toBeNull();
+  });
+
+  it("follows the card's width", async () => {
+    await renderCards();
+    const fits = cardOf("FITS project");
+    expect(showMore(fits)).toBeNull();
+
+    // Narrower, FITS runs to eight lines and the clamp cuts it off.
+    textWidth = 140;
+    relayout();
+    expect(showMore(fits)).not.toBeNull();
+    expect(showMore(cardOf("SHRT project"))).toBeNull();
+
+    // Wider again, it fits and Show more goes.
+    textWidth = 280;
+    relayout();
+    expect(showMore(fits)).toBeNull();
+    expect(showMore(cardOf("LONG project"))).not.toBeNull();
   });
 });
 
