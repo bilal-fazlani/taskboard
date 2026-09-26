@@ -7,6 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/tcarac/taskboard/internal/models"
+	"github.com/tcarac/taskboard/internal/ticketlist"
 	"github.com/tcarac/taskboard/internal/weburl"
 )
 
@@ -18,16 +19,19 @@ func ticketCommands() *cobra.Command {
 
 	var projectID, priority, listRepo, listLabel, listEpic, listExcludeLabel string
 	var listStatuses []string
-	var listReady bool
+	var listReady, listSummary bool
+	var listLimit, listOffset int
 	listCmd := &cobra.Command{
 		Use:   "list",
 		Short: "List tickets",
+		Long: "List tickets, every match in full. To pick tickets, --summary prints one short line per ticket instead. " +
+			"With --summary, --limit or --offset the list comes a page at a time, and ends by saying where the next page starts.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			store, err := openStore()
 			if err != nil {
 				return err
 			}
-			tickets, err := store.ListTickets(models.TicketFilter{
+			filter := models.TicketFilter{
 				ProjectID:    projectID,
 				Statuses:     listStatuses,
 				Priority:     priority,
@@ -36,7 +40,18 @@ func ticketCommands() *cobra.Command {
 				Epic:         listEpic,
 				Ready:        listReady,
 				ExcludeLabel: listExcludeLabel,
-			})
+			}
+			req := ticketlist.Request{Summary: listSummary}
+			if cmd.Flags().Changed("limit") {
+				req.Limit = &listLimit
+			}
+			if cmd.Flags().Changed("offset") {
+				req.Offset = &listOffset
+			}
+			if req.Paged() {
+				return printTicketPage(cmd.OutOrStdout(), store, filter, req)
+			}
+			tickets, err := store.ListTickets(filter)
 			if err != nil {
 				return err
 			}
@@ -44,32 +59,7 @@ func ticketCommands() *cobra.Command {
 				fmt.Fprintln(cmd.OutOrStdout(), "No tickets found.")
 				return nil
 			}
-			base := weburl.Base()
-			for _, t := range tickets {
-				line := fmt.Sprintf("[%s] %s - %s (%s", t.DisplayKey(), t.Title, t.Status, t.Priority)
-				if len(t.Repos) > 0 {
-					line += ", " + strings.Join(t.Repos, " ")
-				}
-				line += ")"
-				if len(t.Labels) > 0 {
-					names := make([]string, len(t.Labels))
-					for i, l := range t.Labels {
-						names[i] = l.Name
-					}
-					line += " [" + strings.Join(names, ", ") + "]"
-				}
-				if t.Epic != nil {
-					line += " epic:" + t.Epic.Name
-				}
-				if len(t.DependsOn) > 0 {
-					keys := make([]string, len(t.DependsOn))
-					for i, d := range t.DependsOn {
-						keys[i] = d.Key
-					}
-					line += " depends on " + strings.Join(keys, ", ")
-				}
-				fmt.Fprintf(cmd.OutOrStdout(), "%s  (%s)  %s\n", line, t.ID, weburl.Ticket(base, weburl.Ref(t)))
-			}
+			printTicketLines(cmd.OutOrStdout(), tickets)
 			return nil
 		},
 	}
@@ -81,6 +71,9 @@ func ticketCommands() *cobra.Command {
 	listCmd.Flags().StringVar(&listEpic, "epic", "", `filter by epic name (case-insensitive) or id, or "none" for tickets without an epic`)
 	listCmd.Flags().BoolVar(&listReady, "ready", false, "only tickets ready to start: todo, with every ticket they depend on done; combined with --status, a list without todo matches nothing")
 	listCmd.Flags().StringVar(&listExcludeLabel, "exclude-label", "", "leave out tickets with this label name (case-insensitive), e.g. hold")
+	listCmd.Flags().BoolVar(&listSummary, "summary", false, "one short line per ticket (key, title, status, priority, epic, labels, dependencies with their status, subtask progress, url), a page at a time; use it to pick tickets")
+	listCmd.Flags().IntVar(&listLimit, "limit", ticketlist.DefaultLimit, fmt.Sprintf("page size, 1 to %d; turns on paging", ticketlist.MaxLimit))
+	listCmd.Flags().IntVar(&listOffset, "offset", 0, "how many matching tickets to skip before the page starts; turns on paging")
 
 	var getJSON bool
 	getCmd := &cobra.Command{

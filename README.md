@@ -140,7 +140,16 @@ taskboard ticket update <ID> --repo acme/auth-api,acme/auth-web  # replaces the 
 taskboard ticket list --repo acme/auth-api                       # tickets touching that repo
 taskboard ticket list --project AUTH --status todo,in_progress   # any of several statuses (or repeat --status)
 taskboard ticket list --project AUTH --ready --exclude-label hold # todo tickets whose dependencies are all done, minus held ones
+taskboard ticket list --project AUTH --summary                    # one short line per ticket, 50 to a page
+taskboard ticket list --project AUTH --summary --offset 50        # the next page
 ```
+
+`ticket list --summary` prints one short line per ticket, for picking
+tickets: key, title, status, priority, epic, labels, the tickets it depends
+on with their status, subtask progress and link. With `--summary`, `--limit`
+(1 to 200, default 50) or `--offset` the list comes a page at a time and ends
+with a line such as `Showing 1-50 of 120 tickets. Next page: --offset 50`.
+Without them it prints every match in full, as before.
 
 `ticket get`, `ticket move`, `ticket history`, `ticket delete`, `ticket update`
 and `ticket subtask add` all accept either a ticket's ID or its display key
@@ -250,6 +259,17 @@ in the ticket's history, which `get_ticket` returns. Over MCP a note is
 required when a ticket leaves `agent_review`: say why, either that it was
 approved and landed, or the findings it was sent back for. The web UI, HTTP
 API and CLI accept a note but never require one.
+
+#### Ticket summaries and paging
+
+`list_tickets` takes `summary: true` to return each ticket as its `key`,
+`title`, `status`, `priority`, `epic`, `labels`, `dependsOn` (each with its
+`key` and `status`), `subtasks` progress (`"2/5"`) and `url`: enough to pick
+tickets, a small fraction of the full form. `limit` (1 to 200, default 50) and
+`offset` page through long lists. With `summary`, `limit` or `offset` the
+answer is one page, `{tickets, total, offset, limit, hasMore, nextOffset}`;
+call again with `offset` set to `nextOffset` for the next. Without them it is
+the array of every match in full, as before. `GET /api/tickets` does not page.
 
 `list_tickets`, `get_ticket`, `create_ticket` and `update_ticket` add a `url`
 field to each ticket — the link that opens it in the web UI — so an assistant

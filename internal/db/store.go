@@ -219,6 +219,32 @@ func nextTicketNumber(q dbtx, projectID string) (int, error) {
 }
 
 func (s *Store) ListTickets(filter models.TicketFilter) ([]models.Ticket, error) {
+	return s.listTickets(filter, nil)
+}
+
+// ListTicketsPage returns one page of the tickets ListTickets would return
+// for filter: up to limit of them (limit must be positive), after skipping
+// offset, plus how many tickets match in all. A page past the end is empty.
+// Only the page's tickets get their labels, subtasks and dependencies
+// loaded, still with one query per relation.
+func (s *Store) ListTicketsPage(filter models.TicketFilter, limit, offset int) ([]models.Ticket, int, error) {
+	page := &ticketPage{limit: limit, offset: offset}
+	tickets, err := s.listTickets(filter, page)
+	if err != nil {
+		return nil, 0, err
+	}
+	return tickets, page.total, nil
+}
+
+// ticketPage asks listTickets for one page of its list, and carries back
+// the number of tickets that match in all.
+type ticketPage struct {
+	limit, offset int
+	total         int
+}
+
+// listTickets is ListTickets, cut down to one page when page is not nil.
+func (s *Store) listTickets(filter models.TicketFilter, page *ticketPage) ([]models.Ticket, error) {
 	query := ticketSelect + ` WHERE 1=1`
 	args := []any{}
 
@@ -317,7 +343,18 @@ func (s *Store) ListTickets(filter models.TicketFilter) ([]models.Ticket, error)
 			}
 		}
 	}
-	query += " ORDER BY t.position ASC, t.created_at DESC"
+	if page != nil {
+		if err := s.db.QueryRow("SELECT COUNT(*) FROM ("+query+")", args...).Scan(&page.total); err != nil {
+			return nil, fmt.Errorf("counting tickets: %w", err)
+		}
+		// The same order as the whole list, with the id to break a tie the
+		// list's order leaves open, so every ticket lands on exactly one
+		// page.
+		query += " ORDER BY t.position ASC, t.created_at DESC, t.id ASC LIMIT ? OFFSET ?"
+		args = append(args, page.limit, page.offset)
+	} else {
+		query += " ORDER BY t.position ASC, t.created_at DESC"
+	}
 
 	rows, err := s.db.Query(query, args...)
 	if err != nil {
