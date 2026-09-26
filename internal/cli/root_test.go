@@ -595,6 +595,61 @@ func TestIsTaskboardBinaryAcceptsOwnExecutableName(t *testing.T) {
 	}
 }
 
+// TestClearConfirmation covers clear's confirmation prompt without --force,
+// which must read the answer through cmd.InOrStdin() (ACP-118) rather than
+// the real process stdin, so it can be driven by an input buffer in tests.
+func TestClearConfirmation(t *testing.T) {
+	setLiveBuild(t, false)
+	sandboxHome(t)
+	t.Cleanup(func() { dbPath = "" })
+
+	t.Run("confirming clears", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "dev.db")
+		if _, err := runCLI(t, "--db", path, "project", "create", "Clear Me", "--prefix", "CLR"); err != nil {
+			t.Fatalf("project create: %v", err)
+		}
+
+		out, err := runCLIWithInput(t, "y\n", "--db", path, "clear")
+		if err != nil {
+			t.Fatalf("clear: %v", err)
+		}
+		if !strings.Contains(out, "All data cleared.") {
+			t.Fatalf("clear printed %q, want confirmation of a clear", out)
+		}
+
+		listed, err := runCLI(t, "--db", path, "project", "list")
+		if err != nil {
+			t.Fatalf("project list: %v", err)
+		}
+		if strings.Contains(listed, "Clear Me") {
+			t.Fatalf("project list still shows the project after clear: %q", listed)
+		}
+	})
+
+	t.Run("declining keeps the data", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "dev.db")
+		if _, err := runCLI(t, "--db", path, "project", "create", "Keep Me", "--prefix", "KEP"); err != nil {
+			t.Fatalf("project create: %v", err)
+		}
+
+		out, err := runCLIWithInput(t, "n\n", "--db", path, "clear")
+		if err != nil {
+			t.Fatalf("clear: %v", err)
+		}
+		if !strings.Contains(out, "Aborted.") {
+			t.Fatalf("clear printed %q, want it to abort", out)
+		}
+
+		listed, err := runCLI(t, "--db", path, "project", "list")
+		if err != nil {
+			t.Fatalf("project list: %v", err)
+		}
+		if !strings.Contains(listed, "Keep Me") {
+			t.Fatalf("project list = %q, want the project still there after declining", listed)
+		}
+	})
+}
+
 // TestStopCLI covers the stop command's wiring end to end: a stale pid file
 // and a successful stop, both through NewRootCmd rather than stopDaemon
 // directly.

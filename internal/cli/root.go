@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bufio"
 	"context"
 	"database/sql"
 	"fmt"
@@ -95,8 +96,8 @@ func NewRootCmd(webFS fs.FS) *cobra.Command {
 			force, _ := cmd.Flags().GetBool("force")
 			if !force {
 				fmt.Fprint(cmd.OutOrStdout(), "This will delete all projects, tickets, and labels. Continue? [y/N] ")
-				var answer string
-				fmt.Scanln(&answer)
+				answer, _ := bufio.NewReader(cmd.InOrStdin()).ReadString('\n')
+				answer = strings.TrimSpace(answer)
 				if answer != "y" && answer != "Y" {
 					fmt.Fprintln(cmd.OutOrStdout(), "Aborted.")
 					return nil
