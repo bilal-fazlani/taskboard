@@ -23,7 +23,7 @@ import { useEscape } from "../lib/escapeStack";
 import { useDocParam } from "../hooks/useDocParam";
 import { useOwnerDocuments } from "../hooks/useOwnerDocuments";
 import { usePasteImages } from "../hooks/usePasteImages";
-import { saveErrorMessage } from "../lib/saveError";
+import { actionErrorMessage, deleteErrorMessage, saveErrorMessage } from "../lib/saveError";
 import { STATUSES, STATUS_LABELS, STATUS_STYLES, isStatus } from "../lib/status";
 import {
   changedFields,
@@ -83,7 +83,10 @@ export default function TicketEditor({
   // Answering with a promise lets the editor wait for the save and keep the
   // edits when it fails; every page does, since each one refetches after it.
   onUpdate: (id: string, data: TicketWrite) => void | Promise<void>;
-  onDelete: (id: string) => void;
+  // Answering with a promise lets the editor wait for the delete: it only
+  // closes once the delete has gone through, and stays open on the fields it
+  // had, showing why, when it hasn't.
+  onDelete: (id: string) => void | Promise<void>;
   // Opens another ticket, by id, in this editor's place: what the Depends on
   // and Blocks rows do when clicked. Without it they are plain text.
   onOpenTicket?: (id: string) => void;
@@ -124,6 +127,16 @@ export default function TicketEditor({
   // edits and all, with a line saying why.
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  // Whether `saveError` is currently a failed Save's message: the edits it
+  // left dirty are still exactly what Save would resend, so it stays on
+  // screen until Save (or Delete) is tried again — a subtask action
+  // succeeding or failing beside it must not quietly wipe it. An action's own
+  // error carries no such claim on the strip.
+  const [saveErrorUnresolved, setSaveErrorUnresolved] = useState(false);
+  // A delete in flight. Unlike a save there is nothing to keep dirty: a
+  // failed delete just leaves the ticket as it was, with the same error strip
+  // saying why, rather than closing the editor.
+  const [deleting, setDeleting] = useState(false);
   const noteChanged = (latest: Ticket | null) => {
     changedRef.current = latest;
     setChanged(latest);
@@ -471,11 +484,13 @@ export default function TicketEditor({
     const write = editedWrite(baseRef.current, current);
     if (write.status !== undefined && note.trim()) write.note = note.trim();
     setSaveError(null);
+    setSaveErrorUnresolved(false);
     setSaving(true);
     try {
       await onUpdate(ticket.id, write);
     } catch (error) {
       setSaveError(saveErrorMessage(error));
+      setSaveErrorUnresolved(true);
       return;
     } finally {
       setSaving(false);
@@ -490,22 +505,71 @@ export default function TicketEditor({
     setDirty(false);
   };
 
+  // Delete asks nothing (there is no confirm for it) and closes the editor
+  // once the ticket is actually gone. A failed delete — the ticket already
+  // gone, the server refusing it, the network down — leaves the editor open
+  // on the fields it had, with the same error strip a failed save uses.
+  const handleDelete = async () => {
+    if (deleted || deleting) return;
+    setSaveError(null);
+    setSaveErrorUnresolved(false);
+    setDeleting(true);
+    try {
+      await onDelete(ticket.id);
+    } catch (error) {
+      setSaveError(deleteErrorMessage(error));
+      return;
+    } finally {
+      setDeleting(false);
+    }
+    onClose();
+  };
+
+  // These three take effect the moment they're clicked, with no Save of their
+  // own to fail instead: a rejected call is reported right here, on the same
+  // error strip a failed save or delete uses, rather than left to become an
+  // unhandled rejection. Each clears a stale error of its own kind before it
+  // starts, so it never lingers past a later action that succeeded — but
+  // never an unresolved Save failure: those edits are still sitting there
+  // unsent, and a subtask succeeding or failing beside them says nothing
+  // about whether they went through.
+  const clearActionError = () => {
+    if (!saveErrorUnresolved) setSaveError(null);
+  };
+  const reportActionError = (error: unknown) => {
+    if (!saveErrorUnresolved) setSaveError(actionErrorMessage(error));
+  };
   const handleAddSubtask = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newSubtask.trim()) return;
-    const sub = await api.tickets.addSubtask(ticket.id, newSubtask);
-    setSubtasks((prev) => [...prev, sub]);
-    setNewSubtask("");
+    clearActionError();
+    try {
+      const sub = await api.tickets.addSubtask(ticket.id, newSubtask);
+      setSubtasks((prev) => [...prev, sub]);
+      setNewSubtask("");
+    } catch (error) {
+      reportActionError(error);
+    }
   };
 
   const handleToggleSubtask = async (id: string) => {
-    const updated = await api.subtasks.toggle(id);
-    setSubtasks((prev) => prev.map((s) => (s.id === id ? updated : s)));
+    clearActionError();
+    try {
+      const updated = await api.subtasks.toggle(id);
+      setSubtasks((prev) => prev.map((s) => (s.id === id ? updated : s)));
+    } catch (error) {
+      reportActionError(error);
+    }
   };
 
   const handleDeleteSubtask = async (id: string) => {
-    await api.subtasks.delete(id);
-    setSubtasks((prev) => prev.filter((s) => s.id !== id));
+    clearActionError();
+    try {
+      await api.subtasks.delete(id);
+      setSubtasks((prev) => prev.filter((s) => s.id !== id));
+    } catch (error) {
+      reportActionError(error);
+    }
   };
 
   const ticketKey = `${ticket.projectPrefix}-${ticket.number}`;
@@ -568,11 +632,9 @@ export default function TicketEditor({
               type="button"
               aria-label="Delete ticket"
               title="Delete ticket"
-              onClick={() => {
-                onDelete(ticket.id);
-                onClose();
-              }}
-              className="shrink-0 text-slate-500 transition-colors hover:text-red-400"
+              onClick={handleDelete}
+              disabled={deleting}
+              className="shrink-0 text-slate-500 transition-colors hover:text-red-400 disabled:opacity-60"
             >
               <Trash2 className="h-4 w-4" />
             </button>

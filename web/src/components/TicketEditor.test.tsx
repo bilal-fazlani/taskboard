@@ -463,10 +463,10 @@ describe("closing with unsaved edits", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it("still deletes without asking", () => {
+  it("still deletes without asking", async () => {
     const { onClose, onDelete } = renderEditor();
     editTitle();
-    fireEvent.click(screen.getByRole("button", { name: "Delete ticket" }));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Delete ticket" })));
     expect(confirmDialog()).toBeNull();
     expect(onDelete).toHaveBeenCalledWith("t1");
     expect(onClose).toHaveBeenCalledTimes(1);
@@ -1186,11 +1186,122 @@ describe("fields", () => {
 });
 
 describe("deleting", () => {
-  it("deletes the ticket and closes", () => {
+  it("deletes the ticket and closes", async () => {
     const { onDelete, onClose } = renderEditor();
-    fireEvent.click(screen.getByRole("button", { name: "Delete ticket" }));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Delete ticket" })));
     expect(onDelete).toHaveBeenCalledWith("t1");
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows an error and stays open, rather than closing, when the delete fails", async () => {
+    const { onDelete, onClose } = renderEditor();
+    onDelete.mockRejectedValue(new Error("API error 500: {}"));
+
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Delete ticket" })));
+
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog")).toBeTruthy();
+    const error = screen.getByTestId("ticket-save-error");
+    expect(error.getAttribute("role")).toBe("alert");
+    expect(error.textContent).toContain("did not go through");
+    // Not the save's wording: a delete leaves nothing "unsaved" to reassure
+    // the user about.
+    expect(error.textContent).not.toContain("edits");
+  });
+
+  it("reads sensibly when the ticket was already deleted elsewhere (a 404, per ACP-63)", async () => {
+    const { onDelete, onClose } = renderEditor();
+    onDelete.mockRejectedValue(new Error('API error 404: {"error":"ticket not found"}'));
+
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Delete ticket" })));
+
+    expect(onClose).not.toHaveBeenCalled();
+    const error = screen.getByTestId("ticket-save-error");
+    expect(error.textContent).toContain("already deleted elsewhere");
+  });
+
+  it("clears a previous delete error and can succeed on retry", async () => {
+    const { onDelete, onClose } = renderEditor();
+    onDelete.mockRejectedValueOnce(new Error("API error 500: {}"));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Delete ticket" })));
+    expect(screen.getByTestId("ticket-save-error")).toBeTruthy();
+
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Delete ticket" })));
+    expect(onDelete).toHaveBeenCalledTimes(2);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ACP-65: subtask actions take effect immediately, with no Save of their own,
+// so a rejected call is reported right where it happened instead of becoming
+// a silent, unhandled promise rejection.
+describe("subtask actions that fail", () => {
+  it("reports a failed toggle and keeps the subtask as it was", async () => {
+    mockApi.subtasks.toggle.mockRejectedValue(new Error('API error 400: {"error":"subtask not found"}'));
+    renderEditor();
+    await act(async () =>
+      fireEvent.click(screen.getByRole("button", { name: "Mark done: Write tests" })),
+    );
+    const error = screen.getByTestId("ticket-save-error");
+    expect(error.textContent).toContain("subtask not found");
+    expect(screen.getByRole("button", { name: "Mark done: Write tests" })).toBeTruthy();
+  });
+
+  it("reports a failed add", async () => {
+    mockApi.tickets.addSubtask.mockRejectedValue(new Error("API error 500: {}"));
+    renderEditor();
+    fireEvent.change(screen.getByLabelText("New subtask"), { target: { value: "Ship it" } });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Add" })));
+    expect(screen.getByTestId("ticket-save-error")).toBeTruthy();
+    expect((screen.getByLabelText("New subtask") as HTMLInputElement).value).toBe("Ship it");
+  });
+
+  it("reports a failed subtask delete and keeps the subtask", async () => {
+    mockApi.subtasks.delete.mockRejectedValue(new Error("API error 500: {}"));
+    renderEditor();
+    await act(async () =>
+      fireEvent.click(screen.getByRole("button", { name: "Delete subtask: Write tests" })),
+    );
+    expect(screen.getByTestId("ticket-save-error")).toBeTruthy();
+    expect(screen.getByText("Write tests")).toBeTruthy();
+  });
+
+  it("clears a stale action error once a later action succeeds", async () => {
+    mockApi.subtasks.toggle.mockRejectedValueOnce(new Error("API error 500: {}"));
+    renderEditor();
+    const toggle = () => screen.getByRole("button", { name: "Mark done: Write tests" });
+    await act(async () => fireEvent.click(toggle()));
+    expect(screen.getByTestId("ticket-save-error")).toBeTruthy();
+
+    mockApi.subtasks.toggle.mockResolvedValue(sub("s1", "Write tests", true));
+    await act(async () => fireEvent.click(toggle()));
+    expect(screen.queryByTestId("ticket-save-error")).toBeNull();
+  });
+
+  // Review 1: a subtask action must never quietly clear an unresolved Save
+  // failure — the edits it is complaining about are still sitting there.
+  it("does not clear or overwrite an unresolved Save failure", async () => {
+    const { onUpdate } = renderEditor();
+    await waitFor(() => expect(mockApi.tickets.get).toHaveBeenCalled());
+    await act(async () => {});
+    editTitle("Mine");
+    onUpdate.mockRejectedValue(new Error('API error 404: {"error":"ticket not found"}'));
+    await act(async () => fireEvent.click(saveButton()!));
+    const error = screen.getByTestId("ticket-save-error");
+    expect(error.textContent).toContain("no longer exists");
+
+    mockApi.subtasks.toggle.mockResolvedValue(sub("s1", "Write tests", true));
+    await act(async () =>
+      fireEvent.click(screen.getByRole("button", { name: "Mark done: Write tests" })),
+    );
+    // The subtask itself still updates; only the strip is left alone.
+    expect(screen.getByTestId("ticket-save-error").textContent).toContain("no longer exists");
+
+    mockApi.subtasks.toggle.mockRejectedValueOnce(new Error('API error 400: {"error":"subtask not found"}'));
+    await act(async () =>
+      fireEvent.click(screen.getByRole("button", { name: "Mark not done: Write tests" })),
+    );
+    expect(screen.getByTestId("ticket-save-error").textContent).toContain("no longer exists");
   });
 });
 

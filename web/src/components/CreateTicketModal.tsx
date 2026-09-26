@@ -1,10 +1,11 @@
 import { useEffect, useId, useRef, useState } from "react";
-import { X } from "lucide-react";
+import { AlertTriangle, X } from "lucide-react";
 import { api, type TicketWrite, type Project } from "../api/client";
 import ImageUploadStatus from "./ImageUploadStatus";
 import LabelPicker from "./LabelPicker";
 import { usePasteImages } from "../hooks/usePasteImages";
 import { activeProjects, projectLabel } from "../lib/defaultProject";
+import { actionErrorMessage } from "../lib/saveError";
 import { DEFAULT_STATUS } from "../lib/status";
 import type { Filters } from "../lib/filters";
 import { newTicketDefaults, type ProjectEpics } from "../lib/newTicketDefaults";
@@ -22,7 +23,10 @@ export default function CreateTicketModal({
   filters: Filters;
   defaultStatus?: string;
   onClose: () => void;
-  onCreate: (data: TicketWrite) => void;
+  // Answering with a promise lets the form wait for the create and keep what
+  // was typed, showing why, when it fails; both pages that render this modal
+  // do, since each one closes it and refetches only once the create lands.
+  onCreate: (data: TicketWrite) => void | Promise<void>;
 }) {
   // The project the form is on: null until the projects are known, then the
   // one it starts on (the view's, see newTicketDefaults), and whichever the
@@ -94,20 +98,38 @@ export default function CreateTicketModal({
   const [priority, setPriority] = useState("medium");
   const [dueDate, setDueDate] = useState("");
   const [labels, setLabels] = useState<string[]>([]);
+  // A create in flight, and what the last one failed with. A failed create
+  // leaves the form as it was, with every field the user entered, rather than
+  // losing them to a silently rejected promise.
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim() || !projectId) return;
-    onCreate({
-      projectId,
-      title,
-      description,
-      priority,
-      status: defaultStatus || DEFAULT_STATUS,
-      dueDate: dueDate || undefined,
-      labels,
-      epic: epicId || undefined,
-    });
+    // Belt and braces beside `disabled={creating}` on the submit button: a
+    // second Enter or click that lands before the disabled attribute has
+    // painted must not fire a second create.
+    if (creating) return;
+    setCreateError(null);
+    setCreating(true);
+    try {
+      await onCreate({
+        projectId,
+        title,
+        description,
+        priority,
+        status: defaultStatus || DEFAULT_STATUS,
+        dueDate: dueDate || undefined,
+        labels,
+        epic: epicId || undefined,
+      });
+    } catch (error) {
+      setCreateError(actionErrorMessage(error));
+      return;
+    } finally {
+      setCreating(false);
+    }
     setLabels([]);
   };
 
@@ -255,6 +277,17 @@ export default function CreateTicketModal({
             </div>
           </div>
 
+          {createError && (
+            <div
+              role="alert"
+              data-testid="create-ticket-error"
+              className="flex items-center gap-2 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-200"
+            >
+              <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+              <span>{createError}</span>
+            </div>
+          )}
+
           <div className="flex justify-end gap-3 pt-2">
             <button
               type="button"
@@ -265,7 +298,8 @@ export default function CreateTicketModal({
             </button>
             <button
               type="submit"
-              className="px-4 py-2 text-sm font-medium bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors"
+              disabled={creating}
+              className="px-4 py-2 text-sm font-medium bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors disabled:opacity-60"
             >
               Create Ticket
             </button>

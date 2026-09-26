@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, createEvent, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, createEvent, fireEvent, render, screen } from "@testing-library/react";
 import type { Project } from "../api/client";
 
 const mockApi = vi.hoisted(() => ({
@@ -177,5 +177,75 @@ describe("CreateTicketModal: images before the ticket exists", () => {
     fireEvent(description(), pasted);
     expect(pasted.defaultPrevented).toBe(false);
     expect(screen.queryByRole("alert")).toBeNull();
+  });
+});
+
+// ACP-65: onCreate was fired and forgotten, so a rejected create (validation,
+// server down) left the form silently stuck with no way to tell the person
+// why nothing happened.
+describe("CreateTicketModal: a failed create", () => {
+  it("shows an error and keeps the form filled in, rather than losing it", async () => {
+    const onCreate = vi.fn().mockRejectedValue(new Error('API error 400: {"error":"title is required"}'));
+    render(
+      <CreateTicketModal
+        projects={[project]}
+        filters={{ ...EMPTY_FILTERS, project: "p1" }}
+        onClose={vi.fn()}
+        onCreate={onCreate}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Ship it" } });
+
+    await act(async () => fireEvent.click(screen.getByText("Create Ticket")));
+
+    const error = screen.getByTestId("create-ticket-error");
+    expect(error.getAttribute("role")).toBe("alert");
+    expect(error.textContent).toContain("title is required");
+    expect((screen.getByLabelText("Title") as HTMLInputElement).value).toBe("Ship it");
+  });
+
+  it("clears the error and can succeed on retry", async () => {
+    const onCreate = vi.fn().mockRejectedValueOnce(new Error("API error 500: {}"));
+    render(
+      <CreateTicketModal
+        projects={[project]}
+        filters={{ ...EMPTY_FILTERS, project: "p1" }}
+        onClose={vi.fn()}
+        onCreate={onCreate}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Ship it" } });
+    await act(async () => fireEvent.click(screen.getByText("Create Ticket")));
+    expect(screen.getByTestId("create-ticket-error")).toBeTruthy();
+
+    await act(async () => fireEvent.click(screen.getByText("Create Ticket")));
+    expect(onCreate).toHaveBeenCalledTimes(2);
+    expect(screen.queryByTestId("create-ticket-error")).toBeNull();
+  });
+
+  // Review 1: the submit button disabling itself is not enough on its own — a
+  // submit dispatched straight at the form, as a fast Enter can, bypasses a
+  // disabled button entirely. handleSubmit needs its own guard.
+  it("ignores a second submit while the first create is still in flight", async () => {
+    let resolve!: () => void;
+    const onCreate = vi.fn().mockReturnValue(new Promise<void>((r) => (resolve = r)));
+    const { container } = render(
+      <CreateTicketModal
+        projects={[project]}
+        filters={{ ...EMPTY_FILTERS, project: "p1" }}
+        onClose={vi.fn()}
+        onCreate={onCreate}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Ship it" } });
+    const form = container.querySelector("form")!;
+
+    await act(async () => fireEvent.submit(form));
+    // Targets the form directly, not the (now disabled) button, so this only
+    // passes if handleSubmit itself turns the second submit away.
+    await act(async () => fireEvent.submit(form));
+    expect(onCreate).toHaveBeenCalledTimes(1);
+
+    await act(async () => resolve());
   });
 });
