@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_BAND_GAP,
   DEFAULT_COLUMN_GAP,
-  DEFAULT_GRID_GAP,
   DEFAULT_NODE_SIZE,
   DEFAULT_ROW_GAP,
+  DEFAULT_SHELF_COLUMN_GAP,
   computeGraphTopology,
   layoutGraph,
   matchingBounds,
@@ -158,7 +158,7 @@ function referenceModel(input: GraphTicket[]) {
 
 describe("computeGraphTopology", () => {
   it("returns an empty graph for no tickets", () => {
-    expect(computeGraphTopology([])).toEqual({ nodes: [], edges: [], columns: [], layers: [], grid: [], columnCounts: [] });
+    expect(computeGraphTopology([])).toEqual({ nodes: [], edges: [], columns: [], layers: [], shelf: [], columnCounts: [] });
   });
 
   it("puts each step of a linear chain in its own column", () => {
@@ -191,7 +191,7 @@ describe("computeGraphTopology", () => {
     expect(topology.edges.every((e) => !e.back)).toBe(true);
   });
 
-  it("puts unconnected Ready tickets in the grid, in ticket order", () => {
+  it("puts unconnected Ready tickets on the shelf, in ticket order", () => {
     const topology = computeGraphTopology(
       tickets([
         ["B-2", "todo"],
@@ -200,12 +200,12 @@ describe("computeGraphTopology", () => {
       ]),
     );
     // Number, not string, order within a prefix.
-    expect(topology.grid).toEqual(["A-9", "A-10", "B-2"]);
+    expect(topology.shelf).toEqual(["A-9", "A-10", "B-2"]);
     expect(topology.columns).toEqual([[]]);
     // Ready still counts them.
     expect(topology.columnCounts).toEqual([3]);
     expect(topology.edges).toEqual([]);
-    expect(topology.nodes.map((n) => [n.id, n.column, n.row, n.inGrid])).toEqual([
+    expect(topology.nodes.map((n) => [n.id, n.column, n.row, n.inShelf])).toEqual([
       ["A-9", 0, 0, true],
       ["A-10", 0, 1, true],
       ["B-2", 0, 2, true],
@@ -242,8 +242,8 @@ describe("computeGraphTopology", () => {
     ]);
     const stale = { ...dependent, dependsOn: [{ id: "A-1", status: "todo" }] };
     const topology = computeGraphTopology([done, stale]);
-    // No edge, so A-2 is in the grid rather than the column.
-    expect(topology.grid).toEqual(["A-2"]);
+    // No edge, so A-2 is on the shelf rather than in the column.
+    expect(topology.shelf).toEqual(["A-2"]);
     expect(topology.nodes[0].satisfiedDependencyCount).toBe(1);
     expect(topology.nodes[0].externalBlockerCount).toBe(0);
     expect(topology.nodes[0].dependencyTotal).toBe(1);
@@ -479,9 +479,9 @@ describe("computeGraphTopology", () => {
       ]),
     );
     // Held tickets stay in the column though nothing links them; the rest
-    // go to the grid.
+    // go to the shelf.
     expect(topology.columns).toEqual([["A-2", "A-4"]]);
-    expect(topology.grid).toEqual(["A-1", "A-3"]);
+    expect(topology.shelf).toEqual(["A-1", "A-3"]);
     expect(topology.nodes.filter((n) => n.active).map((n) => n.id)).toEqual(["A-2", "A-4"]);
   });
 
@@ -499,7 +499,7 @@ describe("computeGraphTopology", () => {
       ]),
     );
     expect(topology.columns).toEqual([["A-2", "A-3", "A-5"]]);
-    expect(topology.grid).toEqual(["A-1", "A-4"]);
+    expect(topology.shelf).toEqual(["A-1", "A-4"]);
     expect(topology.nodes.filter((n) => n.active).map((n) => n.id)).toEqual(["A-2", "A-3", "A-5"]);
   });
 
@@ -557,7 +557,7 @@ describe("computeGraphTopology", () => {
       ["A-2", "A-3", "A-1"],
       ["A-5", "A-4"],
     ]);
-    expect(topology.grid).toEqual(["A-6"]);
+    expect(topology.shelf).toEqual(["A-6"]);
     expect(topology.columnCounts).toEqual([4, 2]);
     expect(crossingsOf(topology)).toBe(0);
   });
@@ -575,10 +575,10 @@ describe("computeGraphTopology", () => {
       ),
     );
     expect(topology.columns).toEqual([["A-1"], ["A-2", "A-4", "A-3"]]);
-    expect(topology.grid).toEqual([]);
+    expect(topology.shelf).toEqual([]);
   });
 
-  it("moves a ticket from the grid into the graph when it gains a link, and back when it loses it", () => {
+  it("moves a ticket from the shelf into the graph when it gains a link, and back when it loses it", () => {
     const loose = tickets([
       ["A-1", "todo"],
       ["A-2", "todo"],
@@ -587,11 +587,11 @@ describe("computeGraphTopology", () => {
       ["A-1", "todo"],
       ["A-2", "todo", ["A-1"]],
     ]);
-    expect(computeGraphTopology(loose).grid).toEqual(["A-1", "A-2"]);
-    expect(computeGraphTopology(linked).grid).toEqual([]);
+    expect(computeGraphTopology(loose).shelf).toEqual(["A-1", "A-2"]);
+    expect(computeGraphTopology(linked).shelf).toEqual([]);
     expect(computeGraphTopology(linked).columns).toEqual([["A-1"], ["A-2"]]);
     // Only an edge links: a done blocker is not one.
-    expect(computeGraphTopology(tickets([["A-1", "todo", ["A-9"]]], { "A-9": "done" })).grid).toEqual(["A-1"]);
+    expect(computeGraphTopology(tickets([["A-1", "todo", ["A-9"]]], { "A-9": "done" })).shelf).toEqual(["A-1"]);
     // A self-dependency is an edge, drawn as a loop on the card, so it stays.
     expect(computeGraphTopology(tickets([["A-1", "todo", ["A-1"]]])).columns).toEqual([["A-1"]]);
   });
@@ -829,7 +829,7 @@ describe("computeGraphTopology", () => {
     for (const node of layout.nodes) {
       expect(Number.isFinite(node.x) && Number.isFinite(node.y)).toBe(true);
     }
-    const ready = layout.nodes.filter((n) => n.column === 0 && !n.inGrid).sort((a, b) => a.row - b.row);
+    const ready = layout.nodes.filter((n) => n.column === 0 && !n.inShelf).sort((a, b) => a.row - b.row);
     expect(ready.some((n) => n.active)).toBe(true);
     // No active ticket sits below one that isn't.
     expect(ready.every((n, i) => i === 0 || !n.active || ready[i - 1].active)).toBe(true);
@@ -944,14 +944,14 @@ describe("positionGraph", () => {
     ]);
     expect(layout.width).toBe(745);
     expect(layout.height).toBe(150);
-    expect(layout.grid).toBeNull();
+    expect(layout.shelf).toBeNull();
     // A single edge end leaves or enters the middle of the side.
     expect(layout.edges).toEqual([
       { from: "A-1", to: "A-2", back: false, start: { x: 205, y: 90 }, end: { x: 265, y: 90 }, via: [] },
       { from: "A-2", to: "A-3", back: false, start: { x: 505, y: 90 }, end: { x: 565, y: 90 }, via: [] },
     ]);
     // Topology fields ride along on each positioned node.
-    expect(layout.nodes[0]).toMatchObject({ id: "A-1", column: 0, row: 0, inGrid: false });
+    expect(layout.nodes[0]).toMatchObject({ id: "A-1", column: 0, row: 0, inShelf: false });
   });
 
   it("gives each gap its own width when columnGaps says so, and columnGap to the rest", () => {
@@ -976,9 +976,8 @@ describe("positionGraph", () => {
     expect([edge.start.x, edge.end.x]).toEqual([265, 415]);
   });
 
-  it("slots the grid under the columns a per-gap layout would have, where there are none", () => {
-    // One linked pair makes two columns; the grid's third slot is where a
-    // third column would start, past the second gap's own width.
+  it("puts the shelf at the origin and moves every column right of it, a shelf gap after it", () => {
+    // A-1 blocks A-2; A-3, A-4 and A-5 link nothing and go on the shelf.
     const topology = computeGraphTopology(
       tickets([
         ["A-1", "todo"],
@@ -992,9 +991,37 @@ describe("positionGraph", () => {
       defaultSize: { width: 100, height: 40 },
       columnGap: 60,
       columnGaps: [70, 90],
+      shelfColumnGap: 10,
+      shelfGap: 50,
+      origin: { x: 5, y: 30 },
     });
-    const xs = layout.nodes.filter((n) => n.inGrid).map((n) => n.x);
-    expect(xs).toEqual([0, 170, 360]);
+    // The graph is one card tall, so the square rule decides: ceil(sqrt(3 ×
+    // 110 / 56)) = 3 rows, one column.
+    expect(layout.shelf).toEqual({ x: 5, y: 30, width: 100, height: 3 * 40 + 2 * DEFAULT_ROW_GAP, columns: [{ x: 5, width: 100, count: 3 }], count: 3 });
+    expect(layout.nodes.filter((n) => n.inShelf).map((n) => [n.id, n.x, n.y])).toEqual([
+      ["A-3", 5, 30],
+      ["A-4", 5, 30 + 40 + DEFAULT_ROW_GAP],
+      ["A-5", 5, 30 + 2 * (40 + DEFAULT_ROW_GAP)],
+    ]);
+    // Linked Ready starts a shelf gap after the shelf; the rest keep their gaps.
+    expect(layout.columns.map((c) => c.x)).toEqual([155, 325]);
+    const edge = layout.edges[0];
+    expect([edge.start.x, edge.end.x]).toEqual([255, 325]);
+    expect(layout.width).toBe(425);
+    // Ready counts the shelf.
+    expect(layout.columns.map((c) => c.count)).toEqual([4, 1]);
+  });
+
+  it("takes columnGap between the shelf and linked Ready when no shelf gap is given", () => {
+    const layout = layoutGraph(
+      tickets([
+        ["A-1", "todo"],
+        ["A-2", "todo", ["A-1"]],
+        ["A-3", "todo"],
+      ]),
+      { columnGap: 60 },
+    );
+    expect(layout.columns[0].x).toBe(DEFAULT_NODE_SIZE.width + 60);
   });
 
   it("puts a card at the median of the cards linked to it, and packs those around it", () => {
@@ -1049,7 +1076,7 @@ describe("positionGraph", () => {
     );
     const n = byId(layout);
     const [a1, a2, a3, a4, a5] = ["A-1", "A-2", "A-3", "A-4", "A-5"].map((id) => n.get(id)!);
-    expect(layout.grid).toBeNull();
+    expect(layout.shelf).toBeNull();
     // A-1 is linked to nothing and still tops Ready, right above A-2.
     expect(a1.y).toBe(0);
     expect(a2.y).toBe(bottom(a1) + DEFAULT_ROW_GAP);
@@ -1189,59 +1216,133 @@ describe("positionGraph", () => {
     expect(extent(layout, ["A-7", "A-8"]).top - shared.bottom).toBe(DEFAULT_BAND_GAP);
   });
 
-  it("lays unlinked Ready tickets out three across below the graph, under the first columns", () => {
+  it("fills the shelf's balanced columns top to bottom, then left to right, as tall as the linked graph", () => {
+    // A-1 holds Ready's top; A-2 → A-3 → A-4 → A-5 is a chain, the graph two
+    // cards tall. A-6 to A-15 link nothing: 10 cards.
     const layout = layoutGraph(
       tickets([
         ["A-1", "in_progress"],
         ["A-2", "todo"],
         ["A-3", "todo", ["A-2"]],
-        ["A-4", "todo"],
-        ["A-5", "todo"],
-        ["A-6", "todo"],
-        ["A-7", "todo"],
-        ["A-8", "todo"],
+        ["A-4", "todo", ["A-3"]],
+        ["A-5", "todo", ["A-4"]],
+        ...Array.from({ length: 10 }, (_, i): Spec => [`A-${i + 6}`, "todo"]),
       ]),
     );
     const { width, height } = DEFAULT_NODE_SIZE;
+    const pitch = height + DEFAULT_ROW_GAP;
     const n = byId(layout);
-    const lowest = Math.max(bottom(n.get("A-2")!), bottom(n.get("A-3")!));
-    const top = lowest + DEFAULT_GRID_GAP;
-    const column1 = width + DEFAULT_COLUMN_GAP;
-    // There is no third column, so its slot is where one would be.
-    const slots = [0, column1, 2 * column1];
-    const rows = [top, top + height + DEFAULT_ROW_GAP];
-    expect(["A-4", "A-5", "A-6", "A-7", "A-8"].map((id) => [n.get(id)!.x, n.get(id)!.y])).toEqual([
-      [slots[0], rows[0]],
-      [slots[1], rows[0]],
-      [slots[2], rows[0]],
-      [slots[0], rows[1]],
-      [slots[1], rows[1]],
-    ]);
-    expect(layout.grid).toEqual({ x: 0, y: top, width: 2 * column1 + width, height: 2 * height + DEFAULT_ROW_GAP, count: 5 });
-    // Ready counts the grid too; the grid's cards come last, so Tab reaches
-    // them after the graph.
-    expect(layout.columns.map((c) => c.count)).toEqual([7, 1]);
-    expect(layout.nodes.map((node) => node.id)).toEqual(["A-1", "A-2", "A-3", "A-4", "A-5", "A-6", "A-7", "A-8"]);
-    expect(layout.nodes.filter((node) => node.inGrid).map((node) => node.row)).toEqual([0, 1, 2, 3, 4]);
-    // The canvas reaches the grid's right and bottom edges.
-    expect(layout.width).toBe(2 * column1 + width);
-    expect(layout.height).toBe(rows[1] + height);
+    // The linked graph: A-1 above A-2 in Ready, 2 cards tall, so 2 rows fit;
+    // a square needs ceil(sqrt(10 × 304 / 112)) = 6 rows, so 2 columns of 5.
+    expect(layout.shelf!.columns.map((c) => c.count)).toEqual([5, 5]);
+    const second = width + DEFAULT_SHELF_COLUMN_GAP;
+    expect(Array.from({ length: 10 }, (_, i) => [n.get(`A-${i + 6}`)!.x, n.get(`A-${i + 6}`)!.y])).toEqual(
+      Array.from({ length: 10 }, (_, i) => [i < 5 ? 0 : second, (i % 5) * pitch]),
+    );
+    expect(layout.shelf).toMatchObject({ x: 0, y: 0, width: second + width, height: 5 * height + 4 * DEFAULT_ROW_GAP, count: 10 });
+    // The held ticket still tops the linked Ready column, right of the shelf.
+    const readyX = second + width + DEFAULT_COLUMN_GAP;
+    expect(layout.columns[0]).toEqual({ index: 0, x: readyX, width, count: 12 });
+    expect([n.get("A-1")!.x, n.get("A-1")!.y]).toEqual([readyX, 0]);
+    expect(n.get("A-2")!.y).toBe(pitch);
+    // The shelf's cards come first, so Tab reaches them before the graph,
+    // left to right.
+    expect(layout.nodes.map((node) => node.id).slice(0, 10)).toEqual(Array.from({ length: 10 }, (_, i) => `A-${i + 6}`));
+    expect(layout.nodes.filter((node) => node.inShelf).map((node) => node.row)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    // The canvas reaches the shelf's bottom, below the graph's.
+    expect(layout.height).toBe(5 * height + 4 * DEFAULT_ROW_GAP);
   });
 
-  it("starts the grid below the origin when nothing is linked, and takes the gap it is given", () => {
+  it("balances the shelf against the linked graph's height after its groups are stacked", () => {
+    // Two groups, each 3 cards tall in Ready, stacked a band gap apart: 6 ×
+    // 96 + 4 × 16 + 32 = 672 tall, which 6 rows of cards fit.
+    const chain = (prefix: string): Spec[] => [
+      [`${prefix}-1`, "todo"],
+      [`${prefix}-2`, "todo"],
+      [`${prefix}-3`, "todo"],
+      [`${prefix}-4`, "todo", [`${prefix}-1`, `${prefix}-2`, `${prefix}-3`]],
+    ];
+    const loose = (n: number): Spec[] => Array.from({ length: n }, (_, i): Spec => [`Z-${i + 1}`, "todo"]);
+    const shelfOf = (n: number) => layoutGraph(tickets([...chain("A"), ...chain("B"), ...loose(n)])).shelf!.columns.map((c) => c.count);
+    // 5 cards: 6 rows fit, one column.
+    expect(shelfOf(5)).toEqual([5]);
+    // 13 cards: 6 rows fit, and the square's ceil(sqrt(13 × 304 / 112)) is 6
+    // too; 3 columns, split 5, 4, 4.
+    expect(shelfOf(13)).toEqual([5, 4, 4]);
+    // 40 cards: the square's ceil(sqrt(40 × 304 / 112)) = 11 rows beat the 6
+    // that fit; 4 columns of 10.
+    expect(shelfOf(40)).toEqual([10, 10, 10, 10]);
+  });
+
+  it("puts every Ready ticket on the shelf when nothing is linked, square, and gives the empty linked column no room", () => {
+    const layout = layoutGraph(
+      Array.from({ length: 4 }, (_, i) => tickets([[`A-${i + 1}`, "todo"]])[0]),
+      { origin: { x: 12, y: 40 } },
+    );
+    // No graph: one row fits, and the square rule gives ceil(sqrt(4 × 304 /
+    // 112)) = 4 rows, one column.
+    expect(layout.shelf).toMatchObject({ x: 12, y: 40, count: 4 });
+    expect(layout.shelf!.columns.map((c) => c.count)).toEqual([4]);
+    expect(layout.nodes.map((n) => [n.x, n.y])).toEqual(
+      [0, 1, 2, 3].map((i) => [12, 40 + i * (DEFAULT_NODE_SIZE.height + DEFAULT_ROW_GAP)]),
+    );
+    // The empty linked Ready column sits at the shelf's right edge, no width.
+    expect(layout.columns).toEqual([{ index: 0, x: 12 + DEFAULT_NODE_SIZE.width, width: 0, count: 4 }]);
+    expect(layout.width).toBe(12 + DEFAULT_NODE_SIZE.width);
+  });
+
+  it("starts Blocked one gap after the shelf when every Ready ticket is on it", () => {
+    // A-3 waits on a hidden blocker, so it is one step on with no edge; A-1
+    // and A-2 are Ready and link nothing.
+    const layout = layoutGraph(
+      tickets(
+        [
+          ["A-1", "todo"],
+          ["A-2", "todo"],
+          ["A-3", "todo", ["X-1"]],
+        ],
+        { "X-1": "todo" },
+      ),
+      { columnGap: 60 },
+    );
+    const { width } = DEFAULT_NODE_SIZE;
+    expect(layout.columns).toEqual([
+      { index: 0, x: width, width: 0, count: 2 },
+      { index: 1, x: width + 60, width, count: 1 },
+    ]);
+  });
+
+  it("leaves Ready one column, as without a shelf, when every Ready ticket is linked or held", () => {
     const layout = layoutGraph(
       tickets([
-        ["A-1", "todo"],
+        ["A-1", "in_progress"],
         ["A-2", "todo"],
+        ["A-3", "todo", ["A-2"]],
       ]),
-      { origin: { x: 12, y: 40 }, gridGap: 30 },
     );
-    expect(layout.grid).toMatchObject({ x: 12, y: 70, count: 2 });
-    expect(layout.nodes.map((n) => [n.x, n.y])).toEqual([
-      [12, 70],
-      [12 + DEFAULT_NODE_SIZE.width + DEFAULT_COLUMN_GAP, 70],
+    expect(layout.shelf).toBeNull();
+    expect(layout.columns.map((c) => c.x)).toEqual([0, DEFAULT_NODE_SIZE.width + DEFAULT_COLUMN_GAP]);
+  });
+
+  it("stacks each shelf column's measured cards rowGap apart", () => {
+    const sizes = new Map([
+      ["A-1", { width: 256, height: 150 }],
+      ["A-2", { width: 256, height: 60 }],
+      ["A-3", { width: 256, height: 90 }],
+      ["A-4", { width: 200, height: 70 }],
     ]);
-    expect(layout.columns).toEqual([{ index: 0, x: 12, width: DEFAULT_NODE_SIZE.width, count: 2 }]);
+    // Mean height 92.5: ceil(sqrt(4 × 280 / 108.5)) = 4 rows, one column.
+    const layout = layoutGraph(
+      ["A-1", "A-2", "A-3", "A-4"].map((key) => tickets([[key, "todo"]])[0]),
+      { sizes },
+    );
+    expect(layout.nodes.map((n) => [n.id, n.y, n.height])).toEqual([
+      ["A-1", 0, 150],
+      ["A-2", 166, 60],
+      ["A-3", 242, 90],
+      ["A-4", 348, 70],
+    ]);
+    expect(layout.shelf).toMatchObject({ width: 256, height: 418 });
   });
 
   it("spreads edge ends down a card's side by the other end's height, back edges at the top", () => {
@@ -1347,7 +1448,7 @@ describe("positionGraph", () => {
   });
 
   it("returns an empty layout for no tickets", () => {
-    expect(layoutGraph([], { origin: { x: 4, y: 8 } })).toEqual({ nodes: [], edges: [], columns: [], grid: null, width: 4, height: 8 });
+    expect(layoutGraph([], { origin: { x: 4, y: 8 } })).toEqual({ nodes: [], edges: [], columns: [], shelf: null, width: 4, height: 8 });
   });
 });
 
@@ -1421,7 +1522,7 @@ describe("layout stability", () => {
     };
     for (const id of parent.keys()) grow(find(id), node.get(id)!.y, node.get(id)!.y + node.get(id)!.height).ids.push(id);
     for (const edge of layout.edges) for (const point of edge.via) grow(find(edge.from), point.y, point.y);
-    const loose = layout.nodes.filter((n) => !n.inGrid && !parent.has(n.id));
+    const loose = layout.nodes.filter((n) => !n.inShelf && !parent.has(n.id));
     return { groups: [...groups.values()].sort((a, b) => a.top - b.top), loose };
   }
 
@@ -1459,27 +1560,38 @@ describe("layout stability", () => {
       const highest = new Map<number, number>();
       for (const card of loose) highest.set(card.column, Math.min(highest.get(card.column) ?? Infinity, card.y));
       for (const y of highest.values()) expect(y).toBe(last + DEFAULT_BAND_GAP);
-      // The grid starts gridGap below the lowest card, or long edge's run.
-      const lowest = Math.max(
-        ...layout.nodes.filter((n) => !n.inGrid).map((n) => n.y + n.height),
-        ...layout.edges.flatMap((e) => e.via.map((point) => point.y)),
-      );
-      if (layout.grid) expect(layout.grid.y).toBe(lowest + DEFAULT_GRID_GAP);
+      // The shelf starts at the origin, balanced against the stacked groups.
+      if (layout.shelf) {
+        expect(layout.shelf.y).toBe(20);
+        const shelved = layout.nodes.filter((n) => n.inShelf);
+        expect(Math.min(...shelved.map((n) => n.y))).toBe(20);
+        const rows = layout.shelf.columns[0].count;
+        const pitch = DEFAULT_NODE_SIZE.height + DEFAULT_ROW_GAP;
+        const fit = Math.max(1, Math.floor((last - 20 + DEFAULT_ROW_GAP) / pitch));
+        const square = Math.ceil(Math.sqrt((shelved.length * (DEFAULT_NODE_SIZE.width + DEFAULT_SHELF_COLUMN_GAP)) / pitch));
+        expect(layout.shelf.columns).toHaveLength(Math.ceil(shelved.length / Math.max(fit, square)));
+        expect(rows).toBeLessThanOrEqual(Math.max(fit, square));
+      }
     }
     expect(stacked).toBeGreaterThan(100);
   });
 
-  it("moves no card of the graph when an unlinked ticket arrives, which goes to the grid", () => {
+  it("moves no card of the graph but sideways when an unlinked ticket arrives, which goes on the shelf", () => {
     const random = mulberry32(12);
     for (let graph = 0; graph < 20; graph++) {
       const specs = board(random, 30);
       const before = layoutGraph(tickets(specs, outside));
       const after = layoutGraph(tickets([...specs, ["A-99", "todo"]], outside));
-      const placed = (layout: GraphLayout) =>
-        layout.nodes.filter((n) => !n.inGrid).map((n) => [n.id, n.x, n.y]);
-      expect(placed(after)).toEqual(placed(before));
-      expect(after.edges).toEqual(before.edges);
-      expect(after.grid!.count).toBe((before.grid?.count ?? 0) + 1);
+      // A wider shelf moves every column right by the same amount, and
+      // nothing up or down.
+      const dx = after.columns[0].x - before.columns[0].x;
+      const placed = (layout: GraphLayout, shift: number) =>
+        layout.nodes.filter((n) => !n.inShelf).map((n) => [n.id, n.x + shift, n.y]);
+      expect(placed(after, 0)).toEqual(placed(before, dx));
+      const moved = (layout: GraphLayout, shift: number) =>
+        layout.edges.map((e) => ({ ...e, start: { ...e.start, x: e.start.x + shift }, end: { ...e.end, x: e.end.x + shift }, via: e.via.map((p) => ({ ...p, x: p.x + shift })) }));
+      expect(moved(after, 0)).toEqual(moved(before, dx));
+      expect(after.shelf!.count).toBe((before.shelf?.count ?? 0) + 1);
     }
   });
 

@@ -35,13 +35,15 @@
 // - A node's column is the longest path of non-back edges leading into it
 //   (raised to 1 by an external blocker). Column 0 is Ready.
 // - A Ready ticket with no edge at all, that no agent holds, leaves the
-//   column for the grid below the graph (topology.grid, in ticket order). One
-//   an agent holds (in_progress or agent_review) stays at the top of Ready
-//   with the other held tickets, linked or not. A ticket in a later column
-//   with no edge, which only hidden blockers put there, sits at the bottom of
-//   its column, below every group of linked tickets. Which tickets are linked
-//   is decided on the input alone, so a ticket moves between the grid and the
-//   graph as it gains or loses edges.
+//   column for the shelf (topology.shelf, in ticket order): balanced columns
+//   of their own left of it, still under Ready's header. The Ready column
+//   the linked tickets keep stays the last of Ready, next to Blocked · 1
+//   step. A ticket an agent holds (in_progress or agent_review) stays at the
+//   top of that column with the other held tickets, linked or not. A ticket
+//   in a later column with no edge, which only hidden blockers put there,
+//   sits at the bottom of its column, below every group of linked tickets.
+//   Which tickets are linked is decided on the input alone, so a ticket moves
+//   between the shelf and the graph as it gains or loses edges.
 // - A forward edge that spans more than one column gets a waypoint (a dummy
 //   node) in every column it crosses. Waypoints are ordered and placed like
 //   cards of no height, so the edge is drawn through a gap of its own rather
@@ -84,16 +86,25 @@
 // held tickets of several components top Ready above another card of one of
 // them, those components can't be stacked apart and share one band. A card
 // with no edge in a later column sits below the last band, bandGap under it.
-// The grid starts gridGap below the lowest card or long edge's run, three
-// cards across, aligned to the first three columns. Edge ends spread down a
-// card side, ordered by the height of what is at the other end, with back
-// edges at the top, where they turn up to their lanes.
+//
+// The shelf starts at the origin, and every column, the linked Ready column
+// first, starts right of it, shelfGap after it. Its columns balance against
+// the linked graph's height, the bottom of the last band (graphShelf.ts has
+// the rule); with no band that height is 0, which leaves the shelf square.
+// Each shelf column stacks its own cards from the origin down, rowGap apart.
+// When every Ready ticket is on the shelf, the linked Ready column is empty
+// and takes no room: it sits at the shelf's right edge with no width, so the
+// next column starts one gap after the shelf.
+//
+// Edge ends spread down a card side, ordered by the height of what is at the
+// other end, with back edges at the top, where they turn up to their lanes.
 //
 // Everything is ordered by ticket (project prefix, then number, then id)
 // before any decision is made, so the output does not depend on the order of
 // the input array or of any dependsOn list.
 
 import type { Ticket, TicketRef } from "../api/client";
+import { balanceShelf, placeShelf } from "./graphShelf";
 import { isActive, isDone } from "./status";
 
 // Upstream and downstream chains through a node, for hover highlighting.
@@ -113,10 +124,10 @@ export interface GraphNode<T extends GraphTicket = GraphTicket> {
   ticket: T;
   /** Unfinished-dependency steps from Ready; 0 is the Ready column. */
   column: number;
-  /** Position among the column's cards, 0 at the top; for a card in the grid, its place in the grid. */
+  /** Position among the column's cards, 0 at the top; for a card on the shelf, its place in shelf order. */
   row: number;
-  /** A Ready ticket with no edges that no agent holds, drawn in the grid below the graph. */
-  inGrid: boolean;
+  /** A Ready ticket with no edges that no agent holds, on the shelf left of the linked Ready column. */
+  inShelf: boolean;
   /** Held by an agent: in_progress or agent_review. Sorted to the top of Ready. */
   active: boolean;
   /** Distinct dependencies that are done. */
@@ -159,21 +170,21 @@ export interface WaypointEntry {
 export type LayerEntry = CardEntry | WaypointEntry;
 
 export interface GraphTopology<T extends GraphTicket = GraphTicket> {
-  /** Ordered by column, then row, then the grid's cards in grid order. */
+  /** The shelf's cards in shelf order, then the rest by column, then row. */
   nodes: GraphNode<T>[];
   /** Ordered by blocker, then blocked ticket, in ticket order. */
   edges: GraphEdge[];
   /**
-   * Card ids per column, top to bottom, without the grid. Only column 0 can
-   * be empty: when its tickets are all in the grid, or every would-be Ready
+   * Card ids per column, top to bottom, without the shelf. Only column 0 can
+   * be empty: when its tickets are all on the shelf, or every would-be Ready
    * ticket is held back by an external blocker.
    */
   columns: string[][];
   /** Per column, top to bottom, its cards and the waypoints of the long edges crossing it. */
   layers: LayerEntry[][];
-  /** Ids of the Ready tickets placed in the grid below the graph, in ticket order. */
-  grid: string[];
-  /** Node count per column. Ready's includes the grid, since those tickets are ready too. */
+  /** Ids of the Ready tickets on the shelf, left of the linked Ready column, in ticket order. */
+  shelf: string[];
+  /** Node count per column. Ready's includes the shelf, since those tickets are ready too. */
   columnCounts: number[];
 }
 
@@ -207,22 +218,22 @@ export interface PositionOptions {
    * between the last band and the cards below it that no edge touches.
    */
   bandGap?: number;
+  /** Horizontal space between two columns of the shelf. */
+  shelfColumnGap?: number;
   /**
-   * Vertical space from the lowest card of the graph, or from the origin when
-   * the columns are empty, to the grid's first row. The page puts the grid's
-   * header in it.
+   * Horizontal space between the shelf and the linked Ready column right of
+   * it. A gap it has no value for is columnGap.
    */
-  gridGap?: number;
+  shelfGap?: number;
 }
 
 export const DEFAULT_NODE_SIZE: Size = { width: 280, height: 96 };
 export const DEFAULT_COLUMN_GAP = 80;
 export const DEFAULT_ROW_GAP = 16;
-export const DEFAULT_GRID_GAP = 64;
 /** Twice the row gap, so the space between two groups reads as more than the space inside one. */
 export const DEFAULT_BAND_GAP = 32;
-/** Cards per row of the grid, each under one of the first columns. */
-export const GRID_COLUMNS = 3;
+/** Narrower than a gap between columns, which holds edges; the shelf's hold none. */
+export const DEFAULT_SHELF_COLUMN_GAP = 24;
 
 export interface PositionedNode<T extends GraphTicket = GraphTicket> extends GraphNode<T> {
   x: number;
@@ -253,18 +264,21 @@ export interface PositionedColumn {
   x: number;
   /** Widest card in the column, or the default width if it is empty. */
   width: number;
-  /** topology.columnCounts[index], so Ready's includes the grid. */
+  /** topology.columnCounts[index], so Ready's includes the shelf. */
   count: number;
 }
 
-/** Where the grid of unlinked Ready tickets sits, below the graph. */
-export interface PositionedGrid {
-  /** Left edge of the first card, which is Ready's left edge. */
+/** Where the shelf of Ready tickets nothing links sits, left of the linked Ready column. */
+export interface PositionedShelf {
+  /** Left edge of its first column, the origin's x. */
   x: number;
-  /** Top of the first row of cards. */
+  /** Top of its columns, the origin's y. */
   y: number;
   width: number;
+  /** From the top to the bottom of its tallest column. */
   height: number;
+  /** Its columns, left to right: left edge, width (the widest card) and card count. */
+  columns: { x: number; width: number; count: number }[];
   count: number;
 }
 
@@ -272,11 +286,11 @@ export interface GraphLayout<T extends GraphTicket = GraphTicket> {
   nodes: PositionedNode<T>[];
   edges: PositionedEdge[];
   columns: PositionedColumn[];
-  /** Null when no ticket is in the grid. */
-  grid: PositionedGrid | null;
-  /** Extent from (0, 0), origin included, to the right edge of the last column or of the grid. */
+  /** Null when no ticket is on the shelf. */
+  shelf: PositionedShelf | null;
+  /** Extent from (0, 0), origin included, to the right edge of the last column, or of the shelf. */
   width: number;
-  /** Extent from (0, 0), origin included, to the lowest card, the grid's included. */
+  /** Extent from (0, 0), origin included, to the lowest card, the shelf's included. */
   height: number;
 }
 
@@ -360,10 +374,10 @@ export function computeGraphTopology<T extends GraphTicket>(tickets: readonly T[
   );
 
   const active = open.map((t) => isActive(t.status));
-  const inGrid = open.map((_, v) => column[v] === 0 && !linked[v] && !active[v]);
+  const inShelf = open.map((_, v) => column[v] === 0 && !linked[v] && !active[v]);
 
   // The layered graph the ordering works on. Entries below `count` are the
-  // nodes, grid ones left unused; the rest are waypoints. `up` and `down`
+  // nodes, shelf ones left unused; the rest are waypoints. `up` and `down`
   // join each entry to its neighbours one column left and right, along the
   // forward edges only.
   const entryColumn = [...column];
@@ -424,7 +438,7 @@ export function computeGraphTopology<T extends GraphTicket>(tickets: readonly T[
   const members = new Map<number, number[]>();
   const held = new Uint8Array(count);
   for (let x = 0; x < entries; x++) {
-    if (x < count && inGrid[x]) continue;
+    if (x < count && inShelf[x]) continue;
     const root = find(x);
     const list = members.get(root);
     if (list) list.push(x);
@@ -455,22 +469,23 @@ export function computeGraphTopology<T extends GraphTicket>(tickets: readonly T[
   // group, and each component's own order within that.
   for (const row of rows) row.sort((a, b) => group[a] - group[b]);
 
-  const grid = open.map((_, v) => v).filter((v) => inGrid[v]);
-  const nodeOf = (v: number, row: number, gridded: boolean): GraphNode<T> => ({
+  const shelf = open.map((_, v) => v).filter((v) => inShelf[v]);
+  const nodeOf = (v: number, row: number, shelved: boolean): GraphNode<T> => ({
     id: open[v].id,
     ticket: open[v],
     column: column[v],
     row,
-    inGrid: gridded,
+    inShelf: shelved,
     active: active[v],
     satisfiedDependencyCount: satisfied[v],
     externalBlockerCount: external[v],
     dependencyTotal: total[v],
   });
   const cards = rows.map((row) => row.filter((x) => x < count));
+  // Left to right, as the page draws them: the shelf, then the columns.
   const nodes = [
+    ...shelf.map((v, row) => nodeOf(v, row, true)),
     ...cards.flatMap((vs) => vs.map((v, row) => nodeOf(v, row, false))),
-    ...grid.map((v, row) => nodeOf(v, row, true)),
   ];
   const columns = cards.map((vs) => vs.map((v) => open[v].id));
   const layers = rows.map((row) =>
@@ -479,8 +494,8 @@ export function computeGraphTopology<T extends GraphTicket>(tickets: readonly T[
     ),
   );
   const columnCounts = columns.map((ids) => ids.length);
-  if (columnTotal > 0) columnCounts[0] += grid.length;
-  return { nodes, edges, columns, layers, grid: grid.map((v) => open[v].id), columnCounts };
+  if (columnTotal > 0) columnCounts[0] += shelf.length;
+  return { nodes, edges, columns, layers, shelf: shelf.map((v) => open[v].id), columnCounts };
 }
 
 // Orders one component's layers (its columns, left to right, each seeded in
@@ -738,20 +753,11 @@ export function positionGraph<T extends GraphTicket>(
   const columnGap = options.columnGap ?? DEFAULT_COLUMN_GAP;
   const rowGap = options.rowGap ?? DEFAULT_ROW_GAP;
   const origin = options.origin ?? { x: 0, y: 0 };
-  const gridGap = options.gridGap ?? DEFAULT_GRID_GAP;
   const bandGap = options.bandGap ?? DEFAULT_BAND_GAP;
+  const shelfColumnGap = options.shelfColumnGap ?? DEFAULT_SHELF_COLUMN_GAP;
+  const shelfGap = options.shelfGap ?? columnGap;
   const sizeOf = (id: string) => options.sizes?.get(id) ?? defaultSize;
   const gapAfter = (column: number) => options.columnGaps?.[column] ?? columnGap;
-
-  const columns: PositionedColumn[] = [];
-  let x = origin.x;
-  topology.columns.forEach((ids, index) => {
-    // A loop rather than Math.max(...), which throws on very large arrays.
-    let width = ids.length === 0 ? defaultSize.width : 0;
-    for (const id of ids) width = Math.max(width, sizeOf(id).width);
-    columns.push({ index, x, width, count: topology.columnCounts[index] });
-    x += width + gapAfter(index);
-  });
 
   // Number the layers' entries column by column and join them along the
   // forward edges, as the first stage did: a waypoint has no height.
@@ -817,7 +823,9 @@ export function positionGraph<T extends GraphTicket>(
   const touched = new Uint8Array(heights.length);
   for (const list of waypoints) for (const e of list) touched[e] = 1;
   for (const edge of topology.edges) touched[cardEntry.get(edge.from)!] = touched[cardEntry.get(edge.to)!] = 1;
-  stackBands(stacks, heights, down, linked, touched, y, { top: origin.y, bandGap, rowGap });
+  // The linked graph's height, which the shelf balances against: 0 with no
+  // band, which leaves the shelf square.
+  const graphHeight = stackBands(stacks, heights, down, linked, touched, y, { top: origin.y, bandGap, rowGap }) - origin.y;
   let bottom = -Infinity;
   stacks.forEach((stack, c) =>
     stack.forEach((e) => {
@@ -826,8 +834,34 @@ export function positionGraph<T extends GraphTicket>(
     }),
   );
 
+  // The shelf at the origin, in balanced columns, and the columns right of it.
   const byId = new Map(topology.nodes.map((n) => [n.id, n]));
   const placed = new Map<string, PositionedNode<T>>();
+  let shelf: PositionedShelf | null = null;
+  let x = origin.x;
+  if (topology.shelf.length > 0) {
+    const sizes = topology.shelf.map(sizeOf);
+    const gaps = { columnGap: shelfColumnGap, rowGap };
+    const at = placeShelf(sizes, balanceShelf(sizes, graphHeight, gaps), origin, gaps);
+    topology.shelf.forEach((id, i) => {
+      placed.set(id, { ...byId.get(id)!, ...at.cards[i], ...sizes[i] });
+    });
+    shelf = { x: origin.x, y: origin.y, width: at.width, height: at.height, columns: at.columns, count: sizes.length };
+    bottom = Math.max(bottom, origin.y + at.height);
+    x += at.width;
+  }
+
+  const columns: PositionedColumn[] = [];
+  topology.columns.forEach((ids, index) => {
+    // An empty linked Ready column beside the shelf takes no room.
+    const collapsed = index === 0 && shelf !== null && ids.length === 0;
+    if (index === 0 && shelf !== null && !collapsed) x += shelfGap;
+    // A loop rather than Math.max(...), which throws on very large arrays.
+    let width = collapsed ? 0 : ids.length === 0 ? defaultSize.width : 0;
+    for (const id of ids) width = Math.max(width, sizeOf(id).width);
+    columns.push({ index, x, width, count: topology.columnCounts[index] });
+    x += width + gapAfter(index);
+  });
   topology.columns.forEach((ids, c) =>
     ids.forEach((id) => {
       const size = sizeOf(id);
@@ -835,34 +869,6 @@ export function positionGraph<T extends GraphTicket>(
       placed.set(id, { ...byId.get(id)!, x: columns[c].x, y: cardTop, width: size.width, height: size.height });
     }),
   );
-
-  // The grid: three across under the first three columns, or where they
-  // would be, each row as tall as its tallest card.
-  let grid: PositionedGrid | null = null;
-  if (topology.grid.length > 0) {
-    const slots: number[] = [];
-    for (let i = 0; i < GRID_COLUMNS; i++) {
-      const previous = i === 0 ? origin.x : slots[i - 1] + (columns[i - 1]?.width ?? defaultSize.width) + gapAfter(i - 1);
-      slots.push(columns[i]?.x ?? previous);
-    }
-    const gridTop = (bottom === -Infinity ? origin.y : bottom) + gridGap;
-    let rowTop = gridTop;
-    let right = origin.x;
-    for (let start = 0; start < topology.grid.length; start += GRID_COLUMNS) {
-      const row = topology.grid.slice(start, start + GRID_COLUMNS);
-      let rowHeight = 0;
-      row.forEach((id, i) => {
-        const size = sizeOf(id);
-        placed.set(id, { ...byId.get(id)!, x: slots[i], y: rowTop, width: size.width, height: size.height });
-        rowHeight = Math.max(rowHeight, size.height);
-        right = Math.max(right, slots[i] + size.width);
-      });
-      rowTop += rowHeight + rowGap;
-    }
-    const height = rowTop - rowGap - gridTop;
-    grid = { x: slots[0], y: gridTop, width: right - slots[0], height, count: topology.grid.length };
-    bottom = gridTop + height;
-  }
 
   const nodes = topology.nodes.map((n) => placed.get(n.id)!);
   const cardCentre = (id: string) => centre(cardEntry.get(id)!);
@@ -873,8 +879,8 @@ export function positionGraph<T extends GraphTicket>(
     nodes,
     edges,
     columns,
-    grid,
-    width: Math.max(columnsRight, grid ? grid.x + grid.width : origin.x),
+    shelf,
+    width: Math.max(columnsRight, shelf ? shelf.x + shelf.width : origin.x),
     height: Math.max(origin.y, bottom),
   };
 }

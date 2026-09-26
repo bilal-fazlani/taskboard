@@ -20,6 +20,7 @@ import {
   planGutters,
   routeEdges,
   selfLoopPath,
+  sideRoom,
   slotOffset,
 } from "./graphEdges";
 import {
@@ -327,7 +328,12 @@ describe("routeEdges", () => {
     for (const c of [1, 2]) expect(layout.columns[c].count).toBeGreaterThan(1);
     expect(lanes).toBe(3);
     // Three back edges fit the narrowest gutters.
-    expect(gutters).toEqual({ gaps: [MIN_COLUMN_GAP, MIN_COLUMN_GAP, MIN_COLUMN_GAP], left: BACK_EDGE_GUTTER, right: BACK_EDGE_GUTTER });
+    expect(gutters).toEqual({
+      gaps: [MIN_COLUMN_GAP, MIN_COLUMN_GAP, MIN_COLUMN_GAP],
+      left: BACK_EDGE_GUTTER,
+      shelf: MIN_COLUMN_GAP,
+      right: BACK_EDGE_GUTTER,
+    });
   });
 
   it("gives each right-to-left edge its own lane, shortest spans nearest the cards", () => {
@@ -598,5 +604,57 @@ describe("routeEdges with crowded gaps", () => {
     }
     // Runs left of Ready stay on the canvas.
     for (const e of into(0)) expect(verticalRuns(e.d)[1].x).toBeGreaterThan(0);
+  });
+});
+
+// The page with a shelf: Ready tickets nothing links fill balanced columns
+// left of the linked Ready column, and 16 two-ticket cycles send 16 back
+// edges down into Ready, more than the narrowest gap has room for.
+describe("routeEdges beside the shelf", () => {
+  const tickets: GraphTicket[] = [];
+  for (let i = 1; i <= 16; i++) tickets.push(ticket(`W-${2 * i - 1}`, [`W-${2 * i}`]), ticket(`W-${2 * i}`, [`W-${2 * i - 1}`]));
+  for (let i = 1; i <= 20; i++) tickets.push(ticket(`Z-${i}`));
+  const topology = computeGraphTopology(tickets);
+  const gutters = planGutters(topology);
+  const layout = positionGraph(topology, {
+    columnGap: MIN_COLUMN_GAP,
+    columnGaps: gutters.gaps,
+    shelfGap: gutters.shelf,
+    origin: { x: gutters.left, y: 40 + LANE_CLEARANCE + lanesHeight(laneCount(topology)) },
+  });
+  const back = routeEdges(layout).filter((e) => e.lane !== null);
+  const shelf = layout.shelf!;
+  const ready = layout.columns[0];
+
+  it("builds the graph the test is about", () => {
+    expect(topology.shelf).toHaveLength(20);
+    expect(back).toHaveLength(16);
+    expect(shelf.columns.length).toBeGreaterThan(1);
+  });
+
+  it("widens the gap between the shelf and Ready for the runs into Ready, and keeps the left edge narrow", () => {
+    expect(gutters.shelf).toBe(sideRoom(16) + GUTTER_OFFSET / 2);
+    expect(gutters.shelf).toBeGreaterThan(MIN_COLUMN_GAP);
+    expect(gutters.left).toBe(BACK_EDGE_GUTTER);
+    expect(shelf.x).toBe(BACK_EDGE_GUTTER);
+    expect(ready.x - (shelf.x + shelf.width)).toBe(gutters.shelf);
+    // Without a shelf the same runs need the room left of Ready.
+    expect(planGutters({ ...topology, shelf: [] }).left).toBe(gutters.shelf);
+  });
+
+  it("runs every back edge into Ready down the gap between the shelf and Ready", () => {
+    for (const e of back) {
+      const x = verticalRuns(e.d)[1].x;
+      expect(x).toBeGreaterThan(shelf.x + shelf.width);
+      expect(x).toBeLessThan(ready.x);
+    }
+  });
+
+  it("never draws a back edge through a card, the shelf's included", () => {
+    for (const e of back) {
+      for (const node of layout.nodes) {
+        expect(pathHitsRect(e.d, node), `${e.from}->${e.to} crosses ${node.id}`).toBe(false);
+      }
+    }
   });
 });

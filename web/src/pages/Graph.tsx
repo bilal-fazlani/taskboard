@@ -48,7 +48,7 @@ import {
   routeEdges,
 } from "../lib/graphEdges";
 import { entrySize, mergeSizes, pruneSizes } from "../lib/graphSizes";
-import { columnHeading, gridHeading } from "../lib/graphText";
+import { columnHeading } from "../lib/graphText";
 import { isDone } from "../lib/status";
 import {
   FIT_PADDING,
@@ -83,15 +83,13 @@ const BAND_GAP = 2 * ROW_GAP;
 // edges: room for the column headers above. Each back edge adds a lane
 // between the headers and the cards.
 const CARDS_TOP = 52;
-// Space between the lowest card of the graph and the first row of the grid of
-// unlinked Ready tickets. The grid's header sits in its lower part, its top
-// GRID_HEADER_ABOVE above the grid's cards.
-const GRID_GAP = 88;
-const GRID_HEADER_ABOVE = 28;
-// The note in a Ready column whose tickets are all in the grid. It is short
-// enough to clear the grid's header when nothing else is on the graph, and
-// the grid starts GRID_GAP below the origin.
-const GRID_NOTE_HEIGHT = 40;
+// Space between two columns of the shelf, the Ready tickets nothing links
+// left of the linked Ready column. No edge runs there, so it is narrower than
+// a gap between the graph's columns.
+const SHELF_COLUMN_GAP = 24;
+// Where the separator between the shelf and the linked Ready column starts:
+// below Ready's header, which spans both.
+const SHELF_SEPARATOR_TOP = 24;
 
 const ARROW = "graph-arrow";
 const BACK_ARROW = "graph-arrow-back";
@@ -191,8 +189,8 @@ const FIT_INSETS: Insets = { top: FIT_PADDING, right: FIT_PADDING, bottom: 16 + 
 const TOOL_BUTTON =
   "flex items-center justify-center w-7 h-7 rounded text-slate-400 transition-colors hover:text-slate-200 hover:bg-slate-800 disabled:text-slate-700 disabled:hover:bg-transparent";
 
-// A column's header, and the grid's in the same style. With filters set in
-// dim mode, the count is the matching cards out of all of them. In hide mode
+// A column's header; Ready's spans the shelf too. With filters set in dim
+// mode, the count is the matching cards out of all of them. In hide mode
 // every card shown matches, so it's a plain count.
 function Heading({
   title,
@@ -333,11 +331,13 @@ export default function Graph() {
   const topology = useMemo(() => computeGraphTopology(shownTickets), [shownTickets]);
   // Back edges' vertical runs need room in the gaps and beside the outer
   // columns, which depends only on the topology. Each gap gets the width its
-  // own runs need, so one crowded gap doesn't widen the others.
+  // own runs need, so one crowded gap doesn't widen the others. With a
+  // shelf, the runs into Ready come down between it and the linked column.
   const gutters = useMemo(() => {
     const plan = planGutters(topology);
     return {
       columnGaps: plan.gaps,
+      shelfGap: plan.shelf,
       right: plan.right,
       origin: { x: plan.left, y: CARDS_TOP + lanesHeight(laneCount(topology)) },
     };
@@ -352,8 +352,9 @@ export default function Graph() {
         columnGaps: gutters.columnGaps,
         rowGap: ROW_GAP,
         bandGap: BAND_GAP,
+        shelfColumnGap: SHELF_COLUMN_GAP,
+        shelfGap: gutters.shelfGap,
         origin: gutters.origin,
-        gridGap: GRID_GAP,
       }),
     [topology, sizes, gutters],
   );
@@ -375,18 +376,13 @@ export default function Graph() {
     [filterState.active, hiding, topology, filters, docMatches],
   );
   const dimmed = (id: string) => matching !== null && !matching.has(id);
-  // Matching cards per column, for the column headers, and in the grid, whose
-  // cards Ready's count includes too.
+  // Matching cards per column, for the column headers. The shelf's cards are
+  // in Ready, so Ready's count includes them.
   const matchingCounts = useMemo(() => {
     if (!matching) return null;
     const columns = topology.columnCounts.map(() => 0);
-    let grid = 0;
-    for (const node of topology.nodes) {
-      if (!matching.has(node.id)) continue;
-      columns[node.column]++;
-      if (node.inGrid) grid++;
-    }
-    return { columns, grid };
+    for (const node of topology.nodes) if (matching.has(node.id)) columns[node.column]++;
+    return columns;
   }, [matching, topology]);
   const repos = useMemo(() => repoOptions(projectTickets, filters.repo), [projectTickets, filters.repo]);
   // Adjacency once per topology; the chains once per pick, not per render.
@@ -816,27 +812,21 @@ export default function Graph() {
               if (!e.currentTarget.contains(e.relatedTarget)) onHighlight({ type: "focusLeftGraph" });
             }}
           >
-            {layout.columns.map((column) => (
-              <Heading
-                key={column.index}
-                title={columnHeading(column.index)}
-                count={column.count}
-                matching={matchingCounts?.columns[column.index]}
-                left={column.x}
-                top={0}
-                width={column.width}
-              />
-            ))}
-            {layout.grid && (
-              <Heading
-                title={gridHeading()}
-                count={layout.grid.count}
-                matching={matchingCounts?.grid}
-                left={layout.grid.x}
-                top={layout.grid.y - GRID_HEADER_ABOVE}
-                width={layout.grid.width}
-              />
-            )}
+            {/* Ready's header spans the shelf and the linked Ready column. */}
+            {layout.columns.map((column) => {
+              const left = column.index === 0 && layout.shelf ? layout.shelf.x : column.x;
+              return (
+                <Heading
+                  key={column.index}
+                  title={columnHeading(column.index)}
+                  count={column.count}
+                  matching={matchingCounts?.[column.index]}
+                  left={left}
+                  top={0}
+                  width={column.x + column.width - left}
+                />
+              );
+            })}
             {/* A separator down the middle of each gap. */}
             {layout.columns.slice(1).map((column, i) => (
               <div
@@ -845,22 +835,24 @@ export default function Graph() {
                 style={{ left: (layout.columns[i].x + layout.columns[i].width + column.x) / 2, height: canvasHeight }}
               />
             ))}
+            {/* A quieter one between the shelf and the linked Ready column,
+                below Ready's header, when that column holds cards. */}
+            {layout.shelf && ready && ready.width > 0 && (
+              <div
+                className="absolute border-l border-dotted border-slate-800"
+                style={{
+                  left: (layout.shelf.x + layout.shelf.width + ready.x) / 2,
+                  top: SHELF_SEPARATOR_TOP,
+                  height: canvasHeight - SHELF_SEPARATOR_TOP,
+                }}
+              />
+            )}
             {ready && ready.count === 0 && (
               <div
                 className="absolute flex items-center justify-center text-xs text-slate-700 border border-dashed border-slate-800 rounded-lg"
                 style={{ left: ready.x, top: origin.y, width: ready.width, height: CARD_SIZE.height }}
               >
                 Nothing ready to start
-              </div>
-            )}
-            {/* Ready's header counts the grid's tickets, so an empty column
-                says where they went. */}
-            {ready && ready.count > 0 && topology.columns[0].length === 0 && (
-              <div
-                className="absolute flex items-center justify-center text-xs text-slate-700 border border-dashed border-slate-800 rounded-lg"
-                style={{ left: ready.x, top: origin.y, width: ready.width, height: GRID_NOTE_HEIGHT }}
-              >
-                All Ready tickets are unlinked — see below
               </div>
             )}
 

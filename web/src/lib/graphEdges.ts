@@ -202,6 +202,12 @@ export interface Routable {
   columns: readonly unknown[];
 }
 
+/** What gutter planning reads: a topology fits, shelf and all. */
+export interface GutterPlannable extends Routable {
+  /** The Ready tickets on the shelf left of the linked Ready column; none if left out. */
+  shelf?: readonly unknown[];
+}
+
 interface LanePlan {
   /** Lane by index into topology.edges, for right-to-left edges only. */
   lane: Map<number, number>;
@@ -258,8 +264,17 @@ export function lanesHeight(count: number): number {
 export interface GutterPlan {
   /** Width each gap between column i and i + 1 needs, at least MIN_COLUMN_GAP. */
   gaps: number[];
-  /** Room needed left of Ready, at least BACK_EDGE_GUTTER. */
+  /**
+   * Room needed left of everything, at least BACK_EDGE_GUTTER: left of Ready,
+   * or of the shelf when there is one.
+   */
   left: number;
+  /**
+   * Width the gap between the shelf and the linked Ready column needs, at
+   * least MIN_COLUMN_GAP. The runs into Ready come down in it, so it takes
+   * the room they would need left of Ready without a shelf.
+   */
+  shelf: number;
   /** Room needed right of the last column, at least BACK_EDGE_GUTTER. */
   right: number;
 }
@@ -269,9 +284,10 @@ export interface GutterPlan {
  * is known before the cards are positioned. A gap holds its left column's
  * outgoing runs and its right column's incoming ones with at least
  * CURVE_ROOM between the two groups, past CURVE_CLEARANCE on either side, for
- * the forward edges' curves.
+ * the forward edges' curves. With a shelf, the runs into Ready come down
+ * between the shelf and Ready rather than left of everything.
  */
-export function planGutters(topology: Routable): GutterPlan {
+export function planGutters(topology: GutterPlannable): GutterPlan {
   const { outCount, inCount } = planLanes(topology);
   const last = topology.columns.length - 1;
   const gaps: number[] = [];
@@ -279,9 +295,12 @@ export function planGutters(topology: Routable): GutterPlan {
     gaps.push(Math.max(MIN_COLUMN_GAP, curveLead(outCount[c]) + curveLead(inCount[c + 1]) + CURVE_ROOM));
   }
   const edgeRoom = (slots: number) => Math.max(BACK_EDGE_GUTTER, sideRoom(slots) + GUTTER_OFFSET / 2);
+  const intoReady = last >= 0 ? inCount[0] : 0;
+  const shelved = (topology.shelf?.length ?? 0) > 0;
   return {
     gaps,
-    left: edgeRoom(last >= 0 ? inCount[0] : 0),
+    left: edgeRoom(shelved ? 0 : intoReady),
+    shelf: Math.max(MIN_COLUMN_GAP, edgeRoom(intoReady)),
     right: edgeRoom(last >= 0 ? outCount[last] : 0),
   };
 }

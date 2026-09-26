@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { BrowserRouter } from "react-router-dom";
 import type { Board as BoardData, Project, Ticket, TicketRef } from "../api/client";
 import { LAST_PROJECT_KEY } from "../lib/defaultProject";
@@ -740,10 +740,11 @@ describe("Hide mode across the views", () => {
   });
 });
 
-// Ready tickets that nothing links leave the Ready column for a grid below
-// the graph. ACP-1 is held by an agent, so it stays in the column though
+// Ready tickets that nothing links leave the linked Ready column for the
+// shelf, balanced columns of their own on its left, under the one Ready
+// header. ACP-1 is held by an agent, so it stays in the linked column though
 // nothing links it; ACP-2 blocks ACP-3; ACP-4 and ACP-5 link nothing.
-describe("Dependencies grid of unlinked Ready tickets", () => {
+describe("Dependencies shelf of unlinked Ready tickets", () => {
   const G1 = ticket("ACP", 1, { status: "in_progress" });
   const G2 = ticket("ACP", 2);
   const G3 = ticket("ACP", 3, { dependsOn: [ref(G2)] });
@@ -751,83 +752,134 @@ describe("Dependencies grid of unlinked Ready tickets", () => {
   const G5 = ticket("ACP", 5, { priority: "high" });
   const canvas = () => document.querySelector<HTMLElement>("[data-graph-canvas]")!;
   const card = (key: string) => screen.getByRole("button", { name: new RegExp(`^${key} `) });
-  const headings = () =>
-    [...canvas().querySelectorAll("h3")].map((h) => `${h.textContent} ${h.nextElementSibling!.textContent}`);
+  const headers = () => [...canvas().querySelectorAll("h3")].map((h) => h.parentElement!);
+  const headings = () => headers().map((h) => `${h.firstElementChild!.textContent} ${h.lastElementChild!.textContent}`);
   const at = (key: string) => ({ left: parseFloat(card(key).style.left), top: parseFloat(card(key).style.top) });
 
   beforeEach(() => serves([G1, G2, G3, G4, G5], [project("ACP")]));
 
-  it("lays them out under the graph, under the first columns, with a header of their own", async () => {
+  it("lays them out left of the linked Ready column, under one Ready header", async () => {
     await mount(<Graph />, "/?project=ACP");
     await layout();
-    // Ready still counts every Ready ticket, the grid's included.
-    expect(headings()).toEqual(["Ready 4", "Blocked · 1 step 1", "Ready · no links 2"]);
+    // One Ready header, counting every Ready ticket, the shelf's included.
+    expect(headings()).toEqual(["Ready 4", "Blocked · 1 step 1"]);
+    // Two cards square up in one column, from the top of the graph.
+    expect(at("ACP-5").left).toBe(at("ACP-4").left);
+    expect(at("ACP-4").top).toBe(at("ACP-1").top);
+    expect(at("ACP-5").top).toBe(at("ACP-4").top + MEASURES.offsetHeight + 16);
+    // The linked Ready column is right of the shelf, the held ticket on top.
     expect(at("ACP-1").left).toBe(at("ACP-2").left);
-    expect(at("ACP-4").left).toBe(at("ACP-1").left);
-    expect(at("ACP-5").left).toBe(at("ACP-3").left);
-    expect(at("ACP-5").top).toBe(at("ACP-4").top);
-    const lowest = Math.max(...["ACP-1", "ACP-2", "ACP-3"].map((key) => at(key).top + MEASURES.offsetHeight));
-    expect(at("ACP-4").top).toBeGreaterThan(lowest);
-    // The held ticket tops Ready.
+    expect(at("ACP-1").left).toBeGreaterThan(at("ACP-4").left + MEASURES.offsetWidth);
     expect(at("ACP-1").top).toBeLessThan(at("ACP-2").top);
+    expect(at("ACP-3").left).toBeGreaterThan(at("ACP-2").left);
+    // Ready's header spans the shelf and the linked column.
+    const [ready, blocked] = headers();
+    expect(parseFloat(ready.style.left)).toBe(at("ACP-4").left);
+    expect(parseFloat(ready.style.left) + parseFloat(ready.style.width)).toBe(at("ACP-1").left + MEASURES.offsetWidth);
+    expect(parseFloat(blocked.style.left)).toBe(at("ACP-3").left);
   });
 
-  it("says where Ready's tickets went when every one is in the grid", async () => {
+  it("leaves Ready one column when nothing is on the shelf", async () => {
+    serves([G1, G2, G3], [project("ACP")]);
+    await mount(<Graph />, "/?project=ACP");
+    await layout();
+    expect(headings()).toEqual(["Ready 2", "Blocked · 1 step 1"]);
+    const [ready] = headers();
+    expect(parseFloat(ready.style.left)).toBe(at("ACP-1").left);
+    expect(parseFloat(ready.style.width)).toBe(MEASURES.offsetWidth);
+  });
+
+  it("puts Blocked right after the shelf when every Ready ticket is on it", async () => {
     // ACP-3 waits on another project's ticket, so it is one step on and
     // links nothing; ACP-4 and ACP-5 are Ready and link nothing either.
     serves([LDR1, ticket("ACP", 3, { dependsOn: [ref(LDR1)] }), G4, G5], [project("ACP"), project("LDR")]);
     await mount(<Graph />, "/?project=ACP");
     await layout();
-    expect(headings()).toEqual(["Ready 2", "Blocked · 1 step 1", "Ready · no links 2"]);
-    const note = screen.getByText("All Ready tickets are unlinked — see below");
+    expect(headings()).toEqual(["Ready 2", "Blocked · 1 step 1"]);
     expect(shows("Nothing ready to start")).toBe(false);
-    // In the Ready column, above the grid's header.
-    expect(parseFloat(note.style.left)).toBe(at("ACP-4").left);
-    const gridHeader = [...canvas().querySelectorAll("h3")].find((h) => h.textContent === "Ready · no links")!.parentElement!;
-    expect(parseFloat(note.style.top) + parseFloat(note.style.height)).toBeLessThan(parseFloat(gridHeader.style.top));
+    const [ready, blocked] = headers();
+    expect(parseFloat(ready.style.left)).toBe(at("ACP-4").left);
+    expect(parseFloat(ready.style.width)).toBe(MEASURES.offsetWidth);
+    expect(parseFloat(blocked.style.left)).toBe(at("ACP-3").left);
+    expect(at("ACP-3").left).toBeGreaterThan(at("ACP-4").left + MEASURES.offsetWidth);
   });
 
-  it("keeps the note clear of the grid's header when nothing else is on the graph", async () => {
+  it("shows only the shelf when nothing else is on the graph", async () => {
     serves([G4, G5], [project("ACP")]);
     await mount(<Graph />, "/?project=ACP");
     await layout();
-    expect(headings()).toEqual(["Ready 2", "Ready · no links 2"]);
-    const note = screen.getByText("All Ready tickets are unlinked — see below");
-    const gridHeader = [...canvas().querySelectorAll("h3")].find((h) => h.textContent === "Ready · no links")!.parentElement!;
-    expect(parseFloat(note.style.top) + parseFloat(note.style.height)).toBeLessThan(parseFloat(gridHeader.style.top));
+    expect(headings()).toEqual(["Ready 2"]);
+    expect(at("ACP-5").left).toBe(at("ACP-4").left);
   });
 
-  it("has no such note while Ready holds a linked or held card", async () => {
-    await mount(<Graph />, "/?project=ACP");
-    await layout();
-    expect(shows("All Ready tickets are unlinked — see below")).toBe(false);
-  });
-
-  it("says nothing is ready, rather than pointing at the grid, when Ready is empty", async () => {
+  it("says nothing is ready when Ready is empty", async () => {
     serves([LDR1, ticket("ACP", 3, { dependsOn: [ref(LDR1)] })], [project("ACP"), project("LDR")]);
     await mount(<Graph />, "/?project=ACP");
     await layout();
     expect(shows("Nothing ready to start")).toBe(true);
-    expect(shows("All Ready tickets are unlinked — see below")).toBe(false);
   });
 
-  it("reaches the grid last with Tab, after the graph", async () => {
+  it("reaches the shelf first with Tab, left to right", async () => {
     await mount(<Graph />, "/?project=ACP");
     await layout();
     const order = [...canvas().querySelectorAll<HTMLElement>("[data-ticket-id]")].map((el) => el.getAttribute("aria-label")!.split(" ")[0]);
-    expect(order).toEqual(["ACP-1", "ACP-2", "ACP-3", "ACP-4", "ACP-5"]);
+    expect(order).toEqual(["ACP-4", "ACP-5", "ACP-1", "ACP-2", "ACP-3"]);
     for (const key of order) expect(card(key).tabIndex).toBe(0);
   });
 
-  it("dims the grid's cards the filters don't match, and counts its matches", async () => {
+  it("dims the shelf's cards the filters don't match, and counts its matches in Ready", async () => {
     await mount(<Graph />, "/?project=ACP&priority=high");
     await layout();
     expect(card("ACP-4").className).toContain("opacity-20");
     expect(card("ACP-5").className).not.toContain("opacity-20");
-    expect(headings()).toEqual(["Ready 1 of 4", "Blocked · 1 step 0 of 1", "Ready · no links 1 of 2"]);
+    expect(headings()).toEqual(["Ready 1 of 4", "Blocked · 1 step 0 of 1"]);
   });
 
-  it("frames a matching card in the grid on Fit", async () => {
+  it("leaves out the shelf's cards the filters don't match in hide mode", async () => {
+    await mount(<Graph />, "/?project=ACP&priority=high&unmatched=hide");
+    await layout();
+    expect(screen.queryByRole("button", { name: /^ACP-4 / })).toBeNull();
+    expect(headings()).toEqual(["Ready 1"]);
+    expect(card("ACP-5")).toBeTruthy();
+  });
+
+  it("lights a shelf card on hover and dims the rest, and opens it on click", async () => {
+    mockApi.tickets.get.mockResolvedValue(G4);
+    await mount(<Graph />, "/?project=ACP");
+    await layout();
+    await act(async () => fireEvent.pointerMove(card("ACP-4")));
+    expect(card("ACP-4").className).toContain("*:border-slate-200!");
+    expect(card("ACP-1").className).toContain("opacity-22");
+    await act(async () => fireEvent.click(within(card("ACP-4")).getByText("ACP ticket 4")));
+    expect(new URLSearchParams(window.location.search).get("ticket")).toBe("ACP-4");
+    expect((screen.getByRole("dialog").querySelector('[aria-label="Title"]') as HTMLInputElement).value).toBe("ACP ticket 4");
+  });
+
+  it("fits the shelf and the graph into the first view, and again after hiding re-lays them out", async () => {
+    const onScreen = (key: string) => {
+      const [, x, y, k] = /translate\(([-\d.]+)px, ([-\d.]+)px\) scale\(([\d.]+)\)/.exec(canvas().style.transform)!.map(Number);
+      const { left, top } = at(key);
+      return (
+        x + k * left >= 0 &&
+        y + k * top >= 0 &&
+        x + k * (left + MEASURES.offsetWidth) <= MEASURES.clientWidth &&
+        y + k * (top + MEASURES.offsetHeight) <= MEASURES.clientHeight
+      );
+    };
+    await mount(<Graph />, "/?project=ACP");
+    await layout();
+    for (const key of ["ACP-1", "ACP-2", "ACP-3", "ACP-4", "ACP-5"]) expect(onScreen(key), key).toBe(true);
+    const whole = canvas().style.transform;
+    await act(async () => screen.getByRole("radio", { name: "Hide" }).click());
+    await toggleFilter("Priority", "High");
+    await layout();
+    expect(screen.queryByRole("button", { name: /^ACP-4 / })).toBeNull();
+    // Re-fitted to what hiding left: ACP-5 alone, larger.
+    expect(canvas().style.transform).not.toBe(whole);
+    expect(onScreen("ACP-5")).toBe(true);
+  });
+
+  it("frames a matching card on the shelf on Fit", async () => {
     await mount(<Graph />, "/?project=ACP&priority=high");
     await layout();
     const whole = canvas().style.transform;
