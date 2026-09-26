@@ -1183,6 +1183,37 @@ describe("fields", () => {
     await screen.findByText("Release");
     expect(screen.getAllByText("in progress")).toHaveLength(2);
   });
+
+  it("shows the full ticket's delivery last in the fields column, below Blocks, and leaves Save alone", async () => {
+    mockApi.tickets.get.mockResolvedValue(
+      makeTicket({
+        blocks: [{ id: "t5", key: "AUTH-5", title: "Release", status: "todo" }],
+        delivery: {
+          branch: "auth-7-login",
+          landedCommits: [
+            { sha: "6bafa19c0ffee51d2a7b3e4f5a6b7c8d9e0f1a2b", repo: "acme/auth-web" },
+            { sha: "a198cc5", repo: "acme/auth-api" },
+          ],
+        },
+      }),
+    );
+    renderEditor();
+    const section = await screen.findByTestId("delivery-section");
+    const fields = screen.getByRole("complementary", { name: "Ticket fields" });
+    expect(fields.lastElementChild).toBe(section);
+    expect(within(section).getByText("auth-7-login")).toBeTruthy();
+    expect(within(section).getByText("6bafa19")).toBeTruthy();
+    expect(within(section).getByText(/2 in 2 repos/)).toBeTruthy();
+    expect(saveButton()).toBeNull();
+  });
+
+  it("has no Delivery section while the ticket has no delivery", async () => {
+    renderEditor();
+    await waitFor(() => expect(mockApi.tickets.get).toHaveBeenCalledWith("t1"));
+    await act(async () => {});
+    expect(screen.queryByTestId("delivery-section")).toBeNull();
+    expect(screen.queryByText("Delivery")).toBeNull();
+  });
 });
 
 describe("deleting", () => {

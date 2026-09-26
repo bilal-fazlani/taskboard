@@ -116,6 +116,26 @@ export interface Ticket {
   documentCount?: number;
   /** The documents, without content. Only the full ticket carries it. */
   documents?: DocumentMeta[];
+  /** Where the ticket's work lives and where it landed. Only the full ticket
+   * carries it, and only when a field is set. */
+  delivery?: Delivery;
+}
+
+/** A ticket's delivery fields, set by agents through MCP, the CLI or the API.
+ * Each field is left out when it is not set. */
+export interface Delivery {
+  branch?: string;
+  worktree?: string;
+  prUrl?: string;
+  /** The commits the ticket landed as, in the order they were given. */
+  landedCommits?: LandedCommit[];
+}
+
+/** One commit a ticket landed as: a lowercase sha (7 to 64 hex characters,
+ * short or full) and the repo it landed in. */
+export interface LandedCommit {
+  sha: string;
+  repo: string;
 }
 
 /** One change of a ticket's status. The first, written at creation, has an empty fromStatus. */

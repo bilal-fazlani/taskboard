@@ -17,6 +17,7 @@ import ImageUploadStatus from "./ImageUploadStatus";
 import LabelPicker from "./LabelPicker";
 import RepoPicker from "./RepoPicker";
 import DependencyPicker, { TicketRefLabel } from "./DependencyPicker";
+import DeliverySection from "./DeliverySection";
 import { activityEntries } from "../lib/activity";
 import { documentWindowKey } from "../lib/documents";
 import { useEscape } from "../lib/escapeStack";
@@ -1036,6 +1037,9 @@ export default function TicketEditor({
                 </p>
               </div>
             )}
+
+            {/* Last in this column; renders nothing until an agent sets a field. */}
+            <DeliverySection delivery={detail.delivery} />
           </aside>
         </div>
 
