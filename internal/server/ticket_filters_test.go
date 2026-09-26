@@ -53,7 +53,7 @@ func TestListTicketsHTTPFilters(t *testing.T) {
 	create := func(projectID, title, status string, labels []string, dependsOn ...string) *models.Ticket {
 		t.Helper()
 		tk, err := store.CreateTicket(models.CreateTicketRequest{
-			ProjectID: projectID, Title: title, Status: status, Priority: "high", Labels: labels, DependsOn: dependsOn,
+			ProjectID: projectID, Title: title, Status: status, Priority: "high", Labels: labels, DependsOn: models.DependOn(dependsOn...),
 		})
 		if err != nil {
 			t.Fatal(err)

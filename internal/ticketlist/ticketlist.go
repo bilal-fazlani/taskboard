@@ -93,15 +93,22 @@ type Summary struct {
 	Epic      string       `json:"epic,omitempty"`
 	Labels    []string     `json:"labels,omitempty"`
 	DependsOn []Dependency `json:"dependsOn,omitempty"`
+	// SurfacedFrom is the key of the ticket this one was surfaced from.
+	SurfacedFrom string `json:"surfacedFrom,omitempty"`
 	// Subtasks is the ticket's subtask progress, done/total (e.g. "2/5").
 	Subtasks string `json:"subtasks,omitempty"`
 	URL      string `json:"url"`
 }
 
 // Dependency is a ticket the summarised ticket depends on, and its status.
+// Kind is set only for a conflict_only dependency; one without a kind needs
+// work, the default, which keeps the summary short. Note is set when the
+// dependency has one.
 type Dependency struct {
 	Key    string `json:"key"`
 	Status string `json:"status"`
+	Kind   string `json:"kind,omitempty"`
+	Note   string `json:"note,omitempty"`
 }
 
 // Summarize is the summary of t, linking to the web UI at base. It reads
@@ -122,7 +129,14 @@ func Summarize(t models.Ticket, base string) Summary {
 		s.Labels = append(s.Labels, l.Name)
 	}
 	for _, d := range t.DependsOn {
-		s.DependsOn = append(s.DependsOn, Dependency{Key: d.Key, Status: d.Status})
+		dep := Dependency{Key: d.Key, Status: d.Status, Note: d.Note}
+		if d.Kind == models.DependencyConflictOnly {
+			dep.Kind = d.Kind
+		}
+		s.DependsOn = append(s.DependsOn, dep)
+	}
+	if t.SurfacedFrom != nil {
+		s.SurfacedFrom = t.SurfacedFrom.Key
 	}
 	if len(t.Subtasks) > 0 {
 		done := 0

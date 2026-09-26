@@ -110,6 +110,8 @@ func ticketCommands() *cobra.Command {
 
 	var createProject, createPriority, createDue, createEpic string
 	var createRepos, createLabels, createDependsOn []string
+	var createSurfacedFrom string
+	var createDependsOnNotes []string
 	createCmd := &cobra.Command{
 		Use:   "create",
 		Short: "Create a new ticket",
@@ -132,7 +134,14 @@ func ticketCommands() *cobra.Command {
 				req.Epic = &createEpic
 			}
 			req.Labels = createLabels
-			req.DependsOn = createDependsOn
+			if len(createDependsOn) > 0 || len(createDependsOnNotes) > 0 {
+				if req.DependsOn, err = dependenciesFromFlags(createDependsOn, createDependsOnNotes, store.ResolveTicketID); err != nil {
+					return err
+				}
+			}
+			if createSurfacedFrom != "" {
+				req.SurfacedFrom = &createSurfacedFrom
+			}
 			t, err := store.CreateTicket(req)
 			if err != nil {
 				return err
@@ -153,7 +162,9 @@ func ticketCommands() *cobra.Command {
 	createCmd.Flags().StringVar(&createEpic, "epic", "", "epic name (case-insensitive) or id, within --project")
 	createCmd.Flags().StringSliceVar(&createRepos, "repo", nil, "repository identifier; comma-separated or repeated")
 	createCmd.Flags().StringSliceVar(&createLabels, "label", nil, "label name; comma-separated or repeated")
-	createCmd.Flags().StringSliceVar(&createDependsOn, "depends-on", nil, "ticket ID or key this depends on; comma-separated or repeated")
+	createCmd.Flags().StringSliceVar(&createDependsOn, "depends-on", nil, dependsOnFlagHelp)
+	createCmd.Flags().StringArrayVar(&createDependsOnNotes, "depends-on-note", nil, dependsOnNoteFlagHelp)
+	createCmd.Flags().StringVar(&createSurfacedFrom, "surfaced-from", "", "ticket ID or key of the ticket during whose work this one was found")
 
 	var moveStatus, moveNote string
 	moveCmd := &cobra.Command{
@@ -236,6 +247,8 @@ func ticketCommands() *cobra.Command {
 
 	var (
 		updTitle, updDescription, updStatus, updPriority, updDue, updEpic, updNote string
+		updSurfacedFrom                                                            string
+		updDependsOnNotes                                                          []string
 		updRepos, updLabels, updLabelAlias, updDependsOn                           []string
 		updAppendDescription                                                       string
 		updBranch, updWorktree, updPRURL                                           string
@@ -253,6 +266,14 @@ func ticketCommands() *cobra.Command {
 			"--epic follows the same rule as --due: omit it to leave the epic alone, or " +
 			"pass --epic=\"\" or --epic=none to clear it; anything else names an epic " +
 			"(by name, case-insensitive, or id) in the ticket's own project.\n\n" +
+			"Each --depends-on entry may end in a kind: BILL-2:conflict_only when the " +
+			"ticket waits for BILL-2 only to avoid a conflict, BILL-2:needs_work (the " +
+			"default) when it needs BILL-2's work. --depends-on-note BILL-2=\"store.go, mcp.go\" " +
+			"gives a listed dependency a note, such as the files it waits on. The list " +
+			"given is the whole set, kinds and notes included, so a dependency passed " +
+			"without a kind or note needs work and has none. " +
+			"--surfaced-from follows the same rule as --epic: omit it to leave the " +
+			"link alone, or pass --surfaced-from=\"\" or --surfaced-from=none to remove it.\n\n" +
 			"--append-description adds text to the end of the description instead of " +
 			"replacing it, leaving the existing text untouched: on a non-empty " +
 			"description the text starts a new paragraph (a blank line before it), on " +
@@ -293,6 +314,9 @@ func ticketCommands() *cobra.Command {
 			if cmd.Flags().Changed("epic") {
 				req.Epic = &updEpic
 			}
+			if cmd.Flags().Changed("surfaced-from") {
+				req.SurfacedFrom = &updSurfacedFrom
+			}
 			// Like --labels, a non-nil slice replaces the set, so --repo=""
 			// clears it.
 			if cmd.Flags().Changed("repo") {
@@ -309,10 +333,12 @@ func ticketCommands() *cobra.Command {
 				combined = append(combined, updLabelAlias...)
 				req.Labels = combined
 			}
+			if cmd.Flags().Changed("depends-on-note") && !cmd.Flags().Changed("depends-on") {
+				return fmt.Errorf("--depends-on-note needs --depends-on: the dependencies are replaced as a whole, so list them all")
+			}
 			if cmd.Flags().Changed("depends-on") {
-				req.DependsOn = updDependsOn
-				if req.DependsOn == nil {
-					req.DependsOn = []string{}
+				if req.DependsOn, err = dependenciesFromFlags(updDependsOn, updDependsOnNotes, store.ResolveTicketID); err != nil {
+					return err
 				}
 			}
 			if req.Delivery, err = deliveryUpdateFromFlags(cmd, updBranch, updWorktree, updPRURL, updLandedCommits); err != nil {
@@ -345,7 +371,9 @@ func ticketCommands() *cobra.Command {
 	updateCmd.Flags().StringSliceVar(&updRepos, "repo", nil, "replace repos; comma-separated or repeated, empty value clears")
 	updateCmd.Flags().StringSliceVar(&updLabels, "labels", nil, "replace labels; comma-separated or repeated, empty value clears")
 	updateCmd.Flags().StringSliceVar(&updLabelAlias, "label", nil, "alias for --labels")
-	updateCmd.Flags().StringSliceVar(&updDependsOn, "depends-on", nil, "replace dependencies; comma-separated or repeated, empty value clears")
+	updateCmd.Flags().StringSliceVar(&updDependsOn, "depends-on", nil, "replace dependencies: "+dependsOnFlagHelp+"; empty value clears")
+	updateCmd.Flags().StringArrayVar(&updDependsOnNotes, "depends-on-note", nil, dependsOnNoteFlagHelp)
+	updateCmd.Flags().StringVar(&updSurfacedFrom, "surfaced-from", "", `ticket ID or key this was found during; "" or "none" removes the link`)
 	updateCmd.Flags().StringVar(&updBranch, "branch", "", "the branch the work is on; empty value clears")
 	updateCmd.Flags().StringVar(&updWorktree, "worktree", "", "the worktree path the work is in; empty value clears")
 	updateCmd.Flags().StringVar(&updPRURL, "pr-url", "", "the pull request's http or https url; empty value clears")
@@ -465,18 +493,20 @@ func formatTicketDetail(t models.Ticket) string {
 		fmt.Fprintf(&b, "Due: %s\n", t.DueDate.Format("2006-01-02"))
 	}
 	if len(t.DependsOn) > 0 {
-		keys := make([]string, len(t.DependsOn))
-		for i, d := range t.DependsOn {
-			keys[i] = d.Key
-		}
-		fmt.Fprintf(&b, "Depends on: %s\n", strings.Join(keys, ", "))
+		fmt.Fprintf(&b, "Depends on: %s\n", dependencyKeys(t.DependsOn))
 	}
 	if len(t.Blocks) > 0 {
-		keys := make([]string, len(t.Blocks))
-		for i, d := range t.Blocks {
-			keys[i] = d.Key
+		fmt.Fprintf(&b, "Blocks: %s\n", dependencyKeys(t.Blocks))
+	}
+	if t.SurfacedFrom != nil {
+		fmt.Fprintf(&b, "Surfaced from: %s\n", t.SurfacedFrom.Key)
+	}
+	if len(t.Surfaced) > 0 {
+		keys := make([]string, len(t.Surfaced))
+		for i, r := range t.Surfaced {
+			keys[i] = r.Key
 		}
-		fmt.Fprintf(&b, "Blocks: %s\n", strings.Join(keys, ", "))
+		fmt.Fprintf(&b, "Surfaced: %s\n", strings.Join(keys, ", "))
 	}
 	b.WriteString(formatDelivery(t.Delivery))
 	if len(t.Subtasks) > 0 {

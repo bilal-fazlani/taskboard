@@ -956,6 +956,160 @@ describe("linked tickets", () => {
   });
 });
 
+describe("typed links", () => {
+  const conflictDep = {
+    id: "t3",
+    key: "AUTH-3",
+    title: "Session store",
+    status: "todo",
+    kind: "conflict_only" as const,
+    note: "internal/auth/session.go",
+  };
+  const settle = async () => {
+    await waitFor(() => expect(mockApi.tickets.get).toHaveBeenCalled());
+    await act(async () => {});
+  };
+
+  it("shows each dependency's kind and note, dashed when conflict only", async () => {
+    const ticket = makeTicket({
+      dependsOn: [{ id: "t2", key: "AUTH-2", title: "Build login UI", status: "todo", kind: "needs_work" }, conflictDep],
+    });
+    mockApi.tickets.get.mockResolvedValue(ticket);
+    renderEditor(ticket);
+    await settle();
+    expect(screen.getByRole("button", { name: "Dependency on AUTH-2: needs work. Switch to conflict only" })).toBeTruthy();
+    const pill = screen.getByRole("button", { name: "Dependency on AUTH-3: conflict only. Switch to needs work" });
+    expect(pill.closest("div.rounded-md")!.className).toContain("border-dashed");
+    expect(screen.getByRole("button", { name: "Edit note on AUTH-3: internal/auth/session.go" })).toBeTruthy();
+  });
+
+  it("saves a switched kind as the whole list of dependency objects", async () => {
+    const ticket = makeTicket({ dependsOn: [{ id: "t2", key: "AUTH-2", title: "Build login UI", status: "todo" }, conflictDep] });
+    mockApi.tickets.get.mockResolvedValue(ticket);
+    const { onUpdate } = renderEditor(ticket);
+    await settle();
+    fireEvent.click(screen.getByRole("button", { name: "Dependency on AUTH-2: needs work. Switch to conflict only" }));
+    fireEvent.click(saveButton()!);
+    expect(onUpdate).toHaveBeenCalledWith("t1", {
+      dependsOn: [
+        { ticket: "t2", kind: "conflict_only", note: "" },
+        { ticket: "t3", kind: "conflict_only", note: "internal/auth/session.go" },
+      ],
+    });
+  });
+
+  it("adds a note inline and saves it, Enter keeping it", async () => {
+    const { onUpdate } = renderEditor();
+    await settle();
+    fireEvent.click(screen.getByRole("button", { name: "Add a note on AUTH-2" }));
+    const field = screen.getByRole("textbox", { name: "Note on AUTH-2" });
+    fireEvent.change(field, { target: { value: "  web/src/Login.tsx  " } });
+    fireEvent.keyDown(field, { key: "Enter" });
+    expect(screen.queryByRole("textbox", { name: "Note on AUTH-2" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Edit note on AUTH-2: web/src/Login.tsx" })).toBeTruthy();
+    fireEvent.click(saveButton()!);
+    expect(onUpdate).toHaveBeenCalledWith("t1", {
+      dependsOn: [{ ticket: "t2", kind: "needs_work", note: "web/src/Login.tsx" }],
+    });
+  });
+
+  it("puts a note back on Escape, leaving the editor open and clean", async () => {
+    const ticket = makeTicket({ dependsOn: [conflictDep] });
+    mockApi.tickets.get.mockResolvedValue(ticket);
+    const { onClose } = renderEditor(ticket);
+    await settle();
+    fireEvent.click(screen.getByRole("button", { name: "Edit note on AUTH-3: internal/auth/session.go" }));
+    const field = screen.getByRole("textbox", { name: "Note on AUTH-3" });
+    fireEvent.change(field, { target: { value: "something else" } });
+    fireEvent.keyDown(field, { key: "Escape" });
+    expect(screen.queryByRole("textbox", { name: "Note on AUTH-3" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Edit note on AUTH-3: internal/auth/session.go" })).toBeTruthy();
+    expect(saveButton()).toBeNull();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("clears a note emptied in the field", async () => {
+    const ticket = makeTicket({ dependsOn: [conflictDep] });
+    mockApi.tickets.get.mockResolvedValue(ticket);
+    const { onUpdate } = renderEditor(ticket);
+    await settle();
+    fireEvent.click(screen.getByRole("button", { name: "Edit note on AUTH-3: internal/auth/session.go" }));
+    const field = screen.getByRole("textbox", { name: "Note on AUTH-3" });
+    fireEvent.change(field, { target: { value: " " } });
+    fireEvent.blur(field);
+    fireEvent.click(saveButton()!);
+    expect(onUpdate).toHaveBeenCalledWith("t1", { dependsOn: [{ ticket: "t3", kind: "conflict_only", note: "" }] });
+  });
+
+  it("adds a dependency as needing work", async () => {
+    mockApi.tickets.list.mockResolvedValue([makeTicket({ id: "t9", number: 9, title: "Audit log" })]);
+    const { onUpdate } = renderEditor();
+    await settle();
+    fireEvent.change(screen.getByPlaceholderText("Search tickets to add..."), { target: { value: "audit" } });
+    fireEvent.click(await screen.findByRole("button", { name: /Audit log/ }));
+    fireEvent.click(saveButton()!);
+    expect(onUpdate).toHaveBeenCalledWith("t1", {
+      dependsOn: [
+        { ticket: "t2", kind: "needs_work", note: "" },
+        { ticket: "t9", kind: "needs_work", note: "" },
+      ],
+    });
+  });
+
+  it("shows the kind and note of the tickets it blocks, read only", async () => {
+    mockApi.tickets.get.mockResolvedValue(
+      makeTicket({ blocks: [{ id: "t5", key: "AUTH-5", title: "Release", status: "todo", kind: "conflict_only", note: "go.mod" }] }),
+    );
+    renderEditor();
+    await screen.findByText("Release");
+    expect(screen.getByText("conflict only").tagName).toBe("SPAN");
+    expect(screen.getByText("go.mod")).toBeTruthy();
+  });
+
+  it("shows the ticket it was surfaced from, opens it, and saves its removal as a clear", async () => {
+    const from = { id: "t8", key: "AUTH-8", title: "Hardening run", status: "done" };
+    const ticket = makeTicket({ surfacedFrom: from });
+    mockApi.tickets.get.mockResolvedValue(ticket);
+    const onOpenTicket = vi.fn();
+    const { onUpdate } = renderEditor(ticket, { onOpenTicket });
+    await settle();
+    fireEvent.click(screen.getByRole("button", { name: "Open AUTH-8: Hardening run" }));
+    expect(onOpenTicket).toHaveBeenCalledWith("t8");
+    fireEvent.click(screen.getByRole("button", { name: "Remove surfaced from AUTH-8" }));
+    expect(screen.getByPlaceholderText("Search the ticket this was found during...")).toBeTruthy();
+    fireEvent.click(saveButton()!);
+    expect(onUpdate).toHaveBeenCalledWith("t1", { surfacedFrom: "" });
+  });
+
+  it("sets the ticket it was surfaced from by search, loading tickets only once the box is focused", async () => {
+    mockApi.tickets.list.mockResolvedValue([
+      makeTicket({ id: "t1" }),
+      makeTicket({ id: "t8", number: 8, title: "Hardening run" }),
+    ]);
+    const { onUpdate } = renderEditor();
+    await settle();
+    const calls = mockApi.tickets.list.mock.calls.length;
+    const box = screen.getByPlaceholderText("Search the ticket this was found during...");
+    await act(async () => fireEvent.focus(box));
+    expect(mockApi.tickets.list.mock.calls.length).toBe(calls + 1);
+    fireEvent.change(box, { target: { value: "hardening" } });
+    fireEvent.click(await screen.findByRole("button", { name: /Hardening run/ }));
+    expect(screen.getByRole("button", { name: "Remove surfaced from AUTH-8" })).toBeTruthy();
+    fireEvent.click(saveButton()!);
+    expect(onUpdate).toHaveBeenCalledWith("t1", { surfacedFrom: "t8" });
+  });
+
+  it("lists the tickets surfaced here, read only", async () => {
+    mockApi.tickets.get.mockResolvedValue(
+      makeTicket({ surfaced: [{ id: "t6", key: "AUTH-6", title: "Guard gap", status: "todo" }] }),
+    );
+    renderEditor();
+    expect(await screen.findByText("Surfaced here")).toBeTruthy();
+    expect(screen.getByText("Guard gap")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Remove .*AUTH-6/ })).toBeNull();
+  });
+});
+
 describe("subtasks", () => {
   it("adds, toggles and deletes subtasks without marking the ticket dirty", async () => {
     mockApi.tickets.addSubtask.mockResolvedValue(sub("s2", "Deploy"));

@@ -143,7 +143,7 @@ func TestFailedCreateTicketDoesNotAdvanceCounter(t *testing.T) {
 	seedTicket(t, s, p.ID, "One")
 
 	if _, err := s.CreateTicket(models.CreateTicketRequest{
-		ProjectID: p.ID, Title: "Bad", DependsOn: []string{"BILL-99"},
+		ProjectID: p.ID, Title: "Bad", DependsOn: models.DependOn("BILL-99"),
 	}); err == nil {
 		t.Fatal("CreateTicket with an unknown dependency succeeded")
 	}

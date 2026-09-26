@@ -146,6 +146,9 @@ taskboard label list
 taskboard ticket create --project <ID> --title "Implement login" --priority high \
   --label backend --repo acme/auth-api --repo acme/auth-web
 taskboard ticket update <ID> --labels backend,urgent --depends-on AUTH-1
+taskboard ticket update AUTH-3 --depends-on AUTH-1,AUTH-2:conflict_only \
+  --depends-on-note "AUTH-2=internal/auth/session.go, web/src/Login.tsx"   # AUTH-2 only to avoid a conflict in those files
+taskboard ticket create --project AUTH --title "Found on the way" --surfaced-from AUTH-3
 taskboard ticket update <ID> --repo acme/auth-api,acme/auth-web  # replaces the set
 taskboard ticket update AUTH-1 --append-description "Worktree: ~/w/auth-1"  # adds a paragraph
 taskboard ticket update AUTH-1 --branch auth-1-login --worktree ~/w/auth-1 \
@@ -277,11 +280,32 @@ required when a ticket leaves `agent_review`: say why, either that it was
 approved and landed, or the findings it was sent back for. The web UI, HTTP
 API and CLI accept a note but never require one.
 
+#### Ticket links
+
+`dependsOn` is a list of objects, `{"ticket": "AUTH-2", "kind": "conflict_only",
+"note": "internal/auth/session.go"}`, over MCP and the HTTP API. `ticket` is an
+id or display key. `kind` is `needs_work` (the default: the ticket needs the
+other one's work) or `conflict_only` (it waits for the other one only so the
+two don't change the same files at once); both keep a ticket out of `ready`
+until the other is done. `note` is optional free text, such as the files a
+conflict-only dependency waits on. Every write replaces the whole list, kinds
+and notes included, and `[]` clears it; a plain string entry is a 400 that
+names the object shape. Every `dependsOn` and `blocks` entry a ticket returns
+carries its `kind`, and its `note` when it has one. On the CLI, `--depends-on`
+takes `KEY` or `KEY:kind`, and `--depends-on-note KEY=text` (repeatable, commas
+kept) gives one of them a note.
+
+`surfacedFrom` names the ticket during whose work a ticket was found (at most
+one). It is set like `epic`: omit it to leave it, pass `""` or `"none"` to
+remove it; `--surfaced-from` on the CLI. A ticket returns `surfacedFrom`, and
+the full ticket also lists the tickets surfaced from it as `surfaced`.
+
 #### Ticket summaries and paging
 
 `list_tickets` takes `summary: true` to return each ticket as its `key`,
 `title`, `status`, `priority`, `epic`, `labels`, `dependsOn` (each with its
-`key` and `status`), `subtasks` progress (`"2/5"`) and `url`: enough to pick
+`key` and `status`, `kind: "conflict_only"` on one it waits for only to
+avoid a conflict, and its `note` if any), `surfacedFrom` (a key), `subtasks` progress (`"2/5"`) and `url`: enough to pick
 tickets, a small fraction of the full form. `limit` (1 to 200, default 50) and
 `offset` page through long lists. With `summary`, `limit` or `offset` the
 answer is one page, `{tickets, total, offset, limit, hasMore, nextOffset}`;

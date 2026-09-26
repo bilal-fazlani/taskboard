@@ -28,7 +28,7 @@ func TestListTicketsToolFilters(t *testing.T) {
 	create := func(projectID, title, status string, labels []string, dependsOn ...string) *models.Ticket {
 		t.Helper()
 		tk, err := s.store.CreateTicket(models.CreateTicketRequest{
-			ProjectID: projectID, Title: title, Status: status, Labels: labels, DependsOn: dependsOn,
+			ProjectID: projectID, Title: title, Status: status, Labels: labels, DependsOn: models.DependOn(dependsOn...),
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -169,7 +169,7 @@ func TestListTicketsToolSummary(t *testing.T) {
 	epic := "Invoices"
 	tk, err := s.store.CreateTicket(models.CreateTicketRequest{
 		ProjectID: p.ID, Title: "Send invoices", Description: "A long description that the summary leaves out",
-		Priority: "high", Epic: &epic, Labels: []string{"api", "backend"}, DependsOn: []string{dep.ID}, Repos: []string{"acme/billing"},
+		Priority: "high", Epic: &epic, Labels: []string{"api", "backend"}, DependsOn: models.DependOn(dep.ID), Repos: []string{"acme/billing"},
 	})
 	if err != nil {
 		t.Fatal(err)

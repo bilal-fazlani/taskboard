@@ -819,6 +819,34 @@ var deliveryProp = schemaProp{
 	},
 }
 
+// dependsOnHelp documents create_ticket's and update_ticket's dependsOn,
+// whose entries are models.DependencyInput, shared with HTTP.
+const dependsOnHelp = "The tickets this ticket depends on, each an object {ticket, kind, note}. The list is always the whole set: " +
+	"on update it replaces the ticket's dependencies, kinds and notes included, and [] clears them. " +
+	"kind is needs_work (the default) when this ticket needs the other one's work, or conflict_only when it only waits for it " +
+	"so the two don't change the same files at once. note is optional free text; for a conflict_only dependency, name the files there " +
+	"instead of writing \"Depends on BILL-2 only to avoid a conflict in <files>\" into the description. " +
+	"Informational only: dependencies never block a status change."
+
+// dependencySchema is the schema of one dependsOn entry.
+var dependencySchema = &jsonSchema{
+	Type: "object",
+	Properties: map[string]schemaProp{
+		"ticket": {Type: "string", Description: "Ticket ID or display key like BILL-2, case-insensitive"},
+		"kind": {
+			Type:        "string",
+			Description: "needs_work (default): needs the other ticket's work. conflict_only: waits for it only to avoid a merge conflict.",
+			Enum:        models.DependencyKinds,
+		},
+		"note": {Type: "string", Description: "Optional note, such as the files a conflict_only dependency waits on"},
+	},
+	Required: []string{"ticket"},
+}
+
+// surfacedFromHelp documents create_ticket's and update_ticket's surfacedFrom.
+const surfacedFromHelp = "Ticket ID or display key of the ticket during whose work this one was found (\"surfaced during BILL-2, out of scope there\"). " +
+	"At most one per ticket. On update, omit it or pass null to leave it unchanged; pass \"\" or \"none\" to remove it."
+
 // noteParamDescription documents the note move_ticket and update_ticket take.
 const noteParamDescription = "Why the status is changing, saved with the change in the ticket's status history. " +
 	"Required when moving a ticket out of agent_review: say why it is leaving review, either that it was approved and landed, " +
@@ -1111,7 +1139,9 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 		},
 		{
 			Name: "get_ticket",
-			Description: "Get detailed ticket information including subtasks, labels, the epic it belongs to (if any), the tickets it depends on, the tickets it blocks, " +
+			Description: "Get detailed ticket information including subtasks, labels, the epic it belongs to (if any), " +
+				"the tickets it depends on and the tickets it blocks (each with its kind: needs_work, or conflict_only when it waits only to avoid a conflict, and its note if any), " +
+				"the ticket it was surfaced from (surfacedFrom) and the tickets surfaced from it (surfaced), " +
 				"its documents (name, format, size, updated time and a link; read one with get_document), " +
 				"its delivery (branch, worktree, prUrl and landedCommits, each commit a sha with its repo; left out when none is set), " +
 				"and its status history (newest first, each change with its note; the first entry, with an empty fromStatus, is its creation). " +
@@ -1152,8 +1182,12 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 					},
 					"dependsOn": {
 						Type:        "array",
-						Description: "Ticket IDs or display keys like BILL-2 that this ticket depends on. Informational only: dependencies never block a status change.",
-						Items:       &jsonSchema{Type: "string"},
+						Description: dependsOnHelp,
+						Items:       dependencySchema,
+					},
+					"surfacedFrom": {
+						Type:        "string",
+						Description: surfacedFromHelp,
 					},
 					"full": fullProp(ticketWhole),
 				},
@@ -1189,8 +1223,12 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 					},
 					"dependsOn": {
 						Type:        "array",
-						Description: "Ticket IDs or display keys like BILL-2 that this ticket depends on. Informational only: dependencies never block a status change.",
-						Items:       &jsonSchema{Type: "string"},
+						Description: dependsOnHelp,
+						Items:       dependencySchema,
+					},
+					"surfacedFrom": {
+						Type:        "string",
+						Description: surfacedFromHelp,
 					},
 					"appendDescription": {
 						Type:        "string",

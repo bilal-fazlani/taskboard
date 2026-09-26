@@ -504,10 +504,21 @@ func (s *Server) getTicket(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, t)
 }
 
+// ticketJSONError is the message for a ticket body that didn't decode: a
+// dependsOn entry that isn't a dependency object says so and names the
+// shape, and anything else is "invalid JSON" as before.
+func ticketJSONError(err error) string {
+	var de *models.DependencyInputError
+	if errors.As(err, &de) {
+		return de.Error()
+	}
+	return "invalid JSON"
+}
+
 func (s *Server) createTicket(w http.ResponseWriter, r *http.Request) {
 	var req models.CreateTicketRequest
 	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON")
+		writeError(w, http.StatusBadRequest, ticketJSONError(err))
 		return
 	}
 	if req.ProjectID == "" || req.Title == "" {
@@ -525,7 +536,7 @@ func (s *Server) createTicket(w http.ResponseWriter, r *http.Request) {
 func (s *Server) updateTicket(w http.ResponseWriter, r *http.Request) {
 	var req models.UpdateTicketRequest
 	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON")
+		writeError(w, http.StatusBadRequest, ticketJSONError(err))
 		return
 	}
 	t, err := s.store.UpdateTicket(chi.URLParam(r, "id"), req)

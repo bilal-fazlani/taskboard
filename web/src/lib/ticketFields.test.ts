@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Ticket } from "../api/client";
+import type { DependencyKind, Ticket } from "../api/client";
 import { changedFields, editedWrite, ticketFields, toDateInputValue, type TicketFields } from "./ticketFields";
 
 function makeTicket(overrides: Partial<Ticket> = {}): Ticket {
@@ -46,8 +46,23 @@ describe("ticketFields", () => {
       epic: "e1",
       repos: ["acme/auth-web"],
       labels: ["frontend"],
-      dependsOn: ["t2"],
+      dependsOn: [d("t2")],
+      surfacedFrom: "",
     });
+  });
+
+  it("reads each dependency's kind and note, needs_work and no note when the API leaves them out", () => {
+    const fields = ticketFields(
+      makeTicket({
+        dependsOn: [
+          { id: "t2", key: "AUTH-2", title: "Build login UI", status: "todo" },
+          { id: "t3", key: "AUTH-3", title: "Session store", status: "todo", kind: "conflict_only", note: "store.go" },
+        ],
+        surfacedFrom: { id: "t9", key: "AUTH-9", title: "Audit", status: "done" },
+      }),
+    );
+    expect(fields.dependsOn).toEqual([d("t2"), d("t3", "conflict_only", "store.go")]);
+    expect(fields.surfacedFrom).toBe("t9");
   });
 
   it("reads a ticket without an epic, which the API leaves out, as no epic", () => {
@@ -59,6 +74,9 @@ describe("ticketFields", () => {
     expect(bare).toMatchObject({ repos: [], labels: [], dependsOn: [], dueDate: "" });
   });
 });
+
+/** A dependency as the fields hold it. */
+const d = (ticket: string, kind: DependencyKind = "needs_work", note = "") => ({ ticket, kind, note });
 
 const base = ticketFields(makeTicket());
 const edited = (overrides: Partial<TicketFields>): TicketFields => ({ ...base, ...overrides });
@@ -76,31 +94,44 @@ describe("changedFields", () => {
     expect(changedFields(base, edited({ labels: ["frontend"] }))).toEqual([]);
     expect(changedFields(base, edited({ labels: [] }))).toEqual(["labels"]);
     expect(changedFields(base, edited({ repos: ["acme/auth-web", "acme/api"] }))).toEqual(["repos"]);
-    expect(changedFields(base, edited({ dependsOn: ["t3", "t2"] }))).toEqual(["dependsOn"]);
-    expect(changedFields(base, edited({ dependsOn: ["t3"] }))).toEqual(["dependsOn"]);
+    expect(changedFields(base, edited({ dependsOn: [d("t3"), d("t2")] }))).toEqual(["dependsOn"]);
+    expect(changedFields(base, edited({ dependsOn: [d("t3")] }))).toEqual(["dependsOn"]);
   });
 
   it("reads repos, labels and dependencies as sets, so another order is no change", () => {
     const many = edited({
       repos: ["acme/auth-web", "acme/api"],
       labels: ["frontend", "urgent"],
-      dependsOn: ["t2", "t3"],
+      dependsOn: [d("t2"), d("t3")],
     });
     const reordered = edited({
       repos: ["acme/api", "acme/auth-web"],
       labels: ["urgent", "frontend"],
-      dependsOn: ["t3", "t2"],
+      dependsOn: [d("t3"), d("t2")],
     });
     expect(changedFields(many, reordered)).toEqual([]);
     expect(editedWrite(many, reordered)).toEqual({});
   });
 
   it("still sees a swap of one member for another as a change", () => {
-    const many = edited({ labels: ["frontend", "urgent"], dependsOn: ["t2", "t3"] });
-    expect(changedFields(many, edited({ labels: ["frontend", "backend"], dependsOn: ["t3", "t4"] }))).toEqual([
+    const many = edited({ labels: ["frontend", "urgent"], dependsOn: [d("t2"), d("t3")] });
+    expect(changedFields(many, edited({ labels: ["frontend", "backend"], dependsOn: [d("t3"), d("t4")] }))).toEqual([
       "labels",
       "dependsOn",
     ]);
+  });
+
+  it("sees a changed kind or note on the same dependency as a change", () => {
+    expect(changedFields(base, edited({ dependsOn: [d("t2", "conflict_only")] }))).toEqual(["dependsOn"]);
+    expect(changedFields(base, edited({ dependsOn: [d("t2", "needs_work", "store.go")] }))).toEqual(["dependsOn"]);
+    expect(changedFields(base, edited({ dependsOn: [d("t2")] }))).toEqual([]);
+  });
+
+  it("counts a set, changed or removed surfaced-from link as a change", () => {
+    expect(changedFields(base, edited({ surfacedFrom: "t9" }))).toEqual(["surfacedFrom"]);
+    const linked = edited({ surfacedFrom: "t9" });
+    expect(changedFields(linked, edited({ surfacedFrom: "t8" }))).toEqual(["surfacedFrom"]);
+    expect(changedFields(linked, edited({ surfacedFrom: "" }))).toEqual(["surfacedFrom"]);
   });
 
   it("counts clearing the due date as a change", () => {
@@ -146,6 +177,25 @@ describe("editedWrite", () => {
     expect(editedWrite(base, edited({ title: "New" }))).toEqual({ title: "New" });
   });
 
+  it("sends the whole dependency list, kinds and notes included, when any of it changed", () => {
+    const current = edited({ dependsOn: [d("t2", "conflict_only", "store.go"), d("t3")] });
+    const write = editedWrite(base, current);
+    expect(write).toEqual({
+      dependsOn: [
+        { ticket: "t2", kind: "conflict_only", note: "store.go" },
+        { ticket: "t3", kind: "needs_work", note: "" },
+      ],
+    });
+    current.dependsOn[0].note = "later";
+    expect(write.dependsOn?.[0].note).toBe("store.go");
+  });
+
+  it("sends a removed surfaced-from link as the API's explicit clear", () => {
+    const linked = edited({ surfacedFrom: "t9" });
+    const write = editedWrite(linked, edited({ surfacedFrom: "" }));
+    expect(write).toEqual({ surfacedFrom: "" });
+  });
+
   it("sends collections as copies, so later edits cannot reach a sent payload", () => {
     const current = edited({ labels: ["frontend", "urgent"] });
     const write = editedWrite(base, current);
@@ -164,7 +214,8 @@ describe("editedWrite", () => {
       epic: "",
       repos: ["acme/api"],
       labels: ["urgent"],
-      dependsOn: [],
+      dependsOn: [d("t3", "conflict_only", "store.go")],
+      surfacedFrom: "t9",
     };
     expect(editedWrite(base, all)).toEqual(all);
   });

@@ -60,6 +60,14 @@ type Ticket struct {
 	DependsOn []TicketRef     `json:"dependsOn,omitempty"`
 	Blocks    []TicketRef     `json:"blocks,omitempty"`
 
+	// SurfacedFrom is the ticket during whose work this one was found, if
+	// any. Lists and the full ticket both carry it.
+	SurfacedFrom *TicketRef `json:"surfacedFrom,omitempty"`
+	// Surfaced is the tickets found during this one's work: those whose
+	// SurfacedFrom is this ticket. Only the full ticket carries it, as with
+	// Blocks.
+	Surfaced []TicketRef `json:"surfaced,omitempty"`
+
 	// ReviewRounds is how many times the ticket has entered agent_review,
 	// counted from its status history. A ticket created in agent_review
 	// counts that as its first round. Tickets older than the history have
@@ -108,6 +116,12 @@ type TicketRef struct {
 	Key    string `json:"key"`
 	Title  string `json:"title"`
 	Status string `json:"status"`
+	// Kind is the dependency's kind (DependencyKinds) on a dependsOn or
+	// blocks entry, and empty everywhere else.
+	Kind string `json:"kind,omitempty"`
+	// Note is the dependency's note on a dependsOn or blocks entry, left
+	// out when it has none.
+	Note string `json:"note,omitempty"`
 }
 
 // DisplayKey returns the human-readable ticket key like "AUTH-1"
@@ -207,9 +221,14 @@ type CreateTicketRequest struct {
 	DueDate *string `json:"dueDate,omitempty"`
 	// Epic follows the same contract as UpdateTicketRequest.Epic; on create a
 	// nil pointer, a pointer to "" and a pointer to "none" all mean no epic.
-	Epic      *string  `json:"epic,omitempty"`
-	Labels    []string `json:"labels,omitempty"`
-	DependsOn []string `json:"dependsOn,omitempty"`
+	Epic   *string  `json:"epic,omitempty"`
+	Labels []string `json:"labels,omitempty"`
+	// DependsOn is the ticket's dependencies, each an object with its
+	// ticket, kind and note (see DependencyInput).
+	DependsOn []DependencyInput `json:"dependsOn,omitempty"`
+	// SurfacedFrom follows the same contract as UpdateTicketRequest's; on
+	// create a nil pointer, "" and "none" all mean no link.
+	SurfacedFrom *string `json:"surfacedFrom,omitempty"`
 }
 
 type UpdateTicketRequest struct {
@@ -244,10 +263,19 @@ type UpdateTicketRequest struct {
 	// epic id or name (case-insensitive) in the ticket's own project; a
 	// value that matches no epic there is an ErrInvalidInput. On any error
 	// nothing in the request is applied.
-	Epic      *string  `json:"epic,omitempty"`
-	Position  *float64 `json:"position,omitempty"`
-	Labels    []string `json:"labels,omitempty"`
-	DependsOn []string `json:"dependsOn,omitempty"`
+	Epic     *string  `json:"epic,omitempty"`
+	Position *float64 `json:"position,omitempty"`
+	Labels   []string `json:"labels,omitempty"`
+	// DependsOn, when non-nil, replaces the ticket's dependencies with
+	// these, kinds and notes included; an empty non-nil list clears them.
+	// Each entry is an object (see DependencyInput); a plain string is a
+	// DependencyInputError.
+	DependsOn []DependencyInput `json:"dependsOn,omitempty"`
+	// SurfacedFrom has the Epic contract: nil leaves the link unchanged, ""
+	// or "none" (any case) removes it, only spaces is an ErrInvalidInput, and
+	// anything else is a ticket id or display key, which must not be the
+	// ticket itself or one surfaced from it, directly or further down.
+	SurfacedFrom *string `json:"surfacedFrom,omitempty"`
 	// Note goes into the status history with the change, when the request
 	// changes the status. It is otherwise ignored.
 	Note string `json:"note,omitempty"`

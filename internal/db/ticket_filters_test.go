@@ -12,7 +12,7 @@ import (
 func seedFilterTicket(t *testing.T, s *Store, projectID, title, status string, labels []string, dependsOn ...string) *models.Ticket {
 	t.Helper()
 	tk, err := s.CreateTicket(models.CreateTicketRequest{
-		ProjectID: projectID, Title: title, Status: status, Labels: labels, DependsOn: dependsOn,
+		ProjectID: projectID, Title: title, Status: status, Labels: labels, DependsOn: models.DependOn(dependsOn...),
 	})
 	if err != nil {
 		t.Fatalf("seeding ticket %q: %v", title, err)

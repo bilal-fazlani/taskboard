@@ -40,6 +40,7 @@ func (s *Store) ClearData() error {
 		"ticket_landed_commits",
 		"ticket_delivery",
 		"project_journal_entries",
+		"ticket_surfaced_from",
 		"ticket_dependencies",
 		"ticket_labels",
 		"subtasks",
@@ -435,7 +436,7 @@ func splitStatusFilter(values []string) ([]string, error) {
 	return out, nil
 }
 
-// attachListDetails fills Repos, Labels, Subtasks, DependsOn, ReviewRounds and DocumentCount
+// attachListDetails fills Repos, Labels, Subtasks, DependsOn, SurfacedFrom, ReviewRounds and DocumentCount
 // for a page of tickets using one query per relation rather than one per ticket. Blocks is not filled;
 // no list view renders it.
 func (s *Store) attachListDetails(tickets []models.Ticket) error {
@@ -452,6 +453,7 @@ func (s *Store) attachListDetails(tickets []models.Ticket) error {
 		tickets[i].Labels = nil
 		tickets[i].Subtasks = nil
 		tickets[i].DependsOn = nil
+		tickets[i].SurfacedFrom = nil
 		tickets[i].ReviewRounds = 0
 		tickets[i].DocumentCount = 0
 	}
@@ -461,6 +463,9 @@ func (s *Store) attachListDetails(tickets []models.Ticket) error {
 		return err
 	}
 	if err := s.attachDocumentCounts(tickets, index, placeholders, ids); err != nil {
+		return err
+	}
+	if err := s.attachSurfacedFrom(tickets, index, placeholders, ids); err != nil {
 		return err
 	}
 
@@ -534,7 +539,7 @@ func (s *Store) attachListDetails(tickets []models.Ticket) error {
 	// project prefix; keeping them identical means that is one fix, not two.
 	depRows, err := s.db.Query(
 		`SELECT d.ticket_id, t.id,
-		COALESCE(p.prefix, '') || '-' || t.number, t.title, t.status
+		COALESCE(p.prefix, '') || '-' || t.number, t.title, t.status, d.kind, d.note
 		FROM ticket_dependencies d
 		JOIN tickets t ON t.id = d.blocked_by_id
 		LEFT JOIN projects p ON p.id = t.project_id
@@ -546,7 +551,7 @@ func (s *Store) attachListDetails(tickets []models.Ticket) error {
 	for depRows.Next() {
 		var ticketID string
 		var r models.TicketRef
-		if err := depRows.Scan(&ticketID, &r.ID, &r.Key, &r.Title, &r.Status); err != nil {
+		if err := depRows.Scan(&ticketID, &r.ID, &r.Key, &r.Title, &r.Status, &r.Kind, &r.Note); err != nil {
 			return err
 		}
 		if i, ok := index[ticketID]; ok {
@@ -602,6 +607,12 @@ func (s *Store) GetTicket(id string) (*models.Ticket, error) {
 		return nil, err
 	}
 	if t.Blocks, err = s.getTicketBlocks(t.ID); err != nil {
+		return nil, err
+	}
+	if t.SurfacedFrom, err = s.getTicketSurfacedFrom(t.ID); err != nil {
+		return nil, err
+	}
+	if t.Surfaced, err = s.getTicketSurfaced(t.ID); err != nil {
 		return nil, err
 	}
 	if t.ReviewRounds, err = s.getTicketReviewRounds(t.ID); err != nil {
@@ -688,9 +699,15 @@ func (s *Store) CreateTicket(req models.CreateTicketRequest) (*models.Ticket, er
 	}
 	// t.ID is already assigned above, so the self-reference check still applies
 	// even though the row itself is not inserted yet.
-	var depIDs []string
+	var deps []dependency
 	if len(req.DependsOn) > 0 {
-		if depIDs, err = resolveTicketRefs(tx, t.ID, req.DependsOn); err != nil {
+		if deps, err = resolveDependencies(tx, t.ID, req.DependsOn); err != nil {
+			return nil, err
+		}
+	}
+	var surfacedFrom *string
+	if req.SurfacedFrom != nil {
+		if surfacedFrom, err = resolveSurfacedFrom(tx, t.ID, *req.SurfacedFrom); err != nil {
 			return nil, err
 		}
 	}
@@ -722,12 +739,12 @@ func (s *Store) CreateTicket(req models.CreateTicketRequest) (*models.Ticket, er
 		}
 	}
 
-	for _, depID := range depIDs {
-		if _, err := tx.Exec(
-			"INSERT OR IGNORE INTO ticket_dependencies (ticket_id, blocked_by_id) VALUES (?, ?)",
-			t.ID, depID,
-		); err != nil {
-			return nil, fmt.Errorf("attaching dependency: %w", err)
+	if err := replaceDependencies(tx, t.ID, deps); err != nil {
+		return nil, err
+	}
+	if surfacedFrom != nil {
+		if err := setSurfacedFrom(tx, t.ID, surfacedFrom); err != nil {
+			return nil, err
 		}
 	}
 
@@ -785,9 +802,15 @@ func (s *Store) UpdateTicket(id string, req models.UpdateTicketRequest, opts ...
 			return nil, err
 		}
 	}
-	var depIDs []string
+	var deps []dependency
 	if req.DependsOn != nil {
-		if depIDs, err = resolveTicketRefs(tx, id, req.DependsOn); err != nil {
+		if deps, err = resolveDependencies(tx, id, req.DependsOn); err != nil {
+			return nil, err
+		}
+	}
+	var surfacedFrom *string
+	if req.SurfacedFrom != nil {
+		if surfacedFrom, err = resolveSurfacedFrom(tx, id, *req.SurfacedFrom); err != nil {
 			return nil, err
 		}
 	}
@@ -904,16 +927,13 @@ func (s *Store) UpdateTicket(id string, req models.UpdateTicketRequest, opts ...
 	}
 
 	if req.DependsOn != nil {
-		if _, err := tx.Exec("DELETE FROM ticket_dependencies WHERE ticket_id = ?", id); err != nil {
-			return nil, fmt.Errorf("clearing dependencies: %w", err)
+		if err := replaceDependencies(tx, id, deps); err != nil {
+			return nil, err
 		}
-		for _, depID := range depIDs {
-			if _, err := tx.Exec(
-				"INSERT OR IGNORE INTO ticket_dependencies (ticket_id, blocked_by_id) VALUES (?, ?)",
-				id, depID,
-			); err != nil {
-				return nil, fmt.Errorf("attaching dependency: %w", err)
-			}
+	}
+	if req.SurfacedFrom != nil {
+		if err := setSurfacedFrom(tx, id, surfacedFrom); err != nil {
+			return nil, err
 		}
 	}
 
@@ -1185,36 +1205,6 @@ func parseDueDate(raw string) (*time.Time, error) {
 	return &parsed, nil
 }
 
-// resolveTicketRefs maps ticket IDs or display keys like "BILL-2" to ticket IDs.
-// Keys are unique per project, so a key resolves on prefix and number together,
-// which is what allows dependencies to cross projects. selfID is the ticket
-// declaring the dependency and may be empty when it has no ID yet.
-func resolveTicketRefs(q dbtx, selfID string, refs []string) ([]string, error) {
-	ids := make([]string, 0, len(refs))
-	seen := make(map[string]bool, len(refs))
-
-	for _, ref := range refs {
-		trimmed := strings.TrimSpace(ref)
-		if trimmed == "" {
-			continue
-		}
-
-		id, err := lookupTicketRef(q, trimmed)
-		if err != nil {
-			return nil, err
-		}
-		if selfID != "" && id == selfID {
-			return nil, invalidInput("ticket %q cannot depend on itself", trimmed)
-		}
-		if seen[id] {
-			continue
-		}
-		seen[id] = true
-		ids = append(ids, id)
-	}
-	return ids, nil
-}
-
 // crockfordAlphabet is the Base32 alphabet ULIDs are encoded with (no I, L, O
 // or U, to avoid confusion with 1 and 0).
 const crockfordAlphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
@@ -1319,7 +1309,7 @@ func lookupTicketRef(q dbtx, ref string) (string, error) {
 // case-insensitive PREFIX-NUMBER display key. This is the single resolver
 // every CLI command and MCP tool that takes a ticket id calls before passing
 // it to an ID-based store method such as GetTicket or UpdateTicket. Reused
-// by resolveTicketRefs above, so dependsOn, and every other ticket-id entry
+// by resolveDependencies (ticket_links.go), so dependsOn, and every other ticket-id entry
 // point, resolve references identically.
 func (s *Store) ResolveTicketID(ref string) (string, error) {
 	trimmed := strings.TrimSpace(ref)
@@ -1775,23 +1765,23 @@ func scanTicketRefs(rows *sql.Rows) ([]models.TicketRef, error) {
 
 // getTicketDependsOn returns the tickets this ticket declares a dependency on.
 func (s *Store) getTicketDependsOn(ticketID string) ([]models.TicketRef, error) {
-	rows, err := s.db.Query(ticketRefSelect+
+	rows, err := s.db.Query(dependencyRefSelect+
 		` JOIN ticket_dependencies d ON d.blocked_by_id = t.id
 		WHERE d.ticket_id = ? ORDER BY t.number`, ticketID)
 	if err != nil {
 		return nil, err
 	}
-	return scanTicketRefs(rows)
+	return scanDependencyRefs(rows)
 }
 
 // getTicketBlocks returns the tickets that declare a dependency on this one.
 // Nothing writes this direction; it is the same table read backwards.
 func (s *Store) getTicketBlocks(ticketID string) ([]models.TicketRef, error) {
-	rows, err := s.db.Query(ticketRefSelect+
+	rows, err := s.db.Query(dependencyRefSelect+
 		` JOIN ticket_dependencies d ON d.ticket_id = t.id
 		WHERE d.blocked_by_id = ? ORDER BY t.number`, ticketID)
 	if err != nil {
 		return nil, err
 	}
-	return scanTicketRefs(rows)
+	return scanDependencyRefs(rows)
 }

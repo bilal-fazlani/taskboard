@@ -8,7 +8,7 @@
 // changed the same field, the user's value is what gets sent: they were told
 // the ticket changed and kept editing anyway.
 
-import type { Ticket, TicketWrite } from "../api/client";
+import type { DependencyWrite, Ticket, TicketWrite } from "../api/client";
 
 /** The fields the editor edits, as its controls hold them. */
 export interface TicketFields {
@@ -23,8 +23,10 @@ export interface TicketFields {
   repos: string[];
   /** Label names, which is what the API takes. */
   labels: string[];
-  /** Dependency ids, which is what the API takes. */
-  dependsOn: string[];
+  /** Dependencies by ticket id, with their kind and note, which is what the API takes. */
+  dependsOn: DependencyWrite[];
+  /** The id of the ticket this one was surfaced from, or "" for none. */
+  surfacedFrom: string;
 }
 
 export type FieldKey = keyof TicketFields;
@@ -39,6 +41,7 @@ export const FIELD_KEYS: readonly FieldKey[] = [
   "repos",
   "labels",
   "dependsOn",
+  "surfacedFrom",
 ];
 
 // The API returns dueDate as an RFC 3339 timestamp at midnight UTC (e.g.
@@ -64,16 +67,27 @@ export function ticketFields(ticket: Ticket): TicketFields {
     epic: ticket.epic?.id ?? "",
     repos: ticket.repos || [],
     labels: (ticket.labels || []).map((l) => l.name),
-    dependsOn: (ticket.dependsOn || []).map((d) => d.id),
+    dependsOn: (ticket.dependsOn || []).map(dependencyWrite),
+    surfacedFrom: ticket.surfacedFrom?.id ?? "",
   };
 }
 
+/** A dependency as the API takes it back: its ticket's id, its kind and its note. */
+export function dependencyWrite(ref: { id: string; kind?: DependencyWrite["kind"]; note?: string }): DependencyWrite {
+  return { ticket: ref.id, kind: ref.kind ?? "needs_work", note: ref.note ?? "" };
+}
+
 // Repos, labels and dependencies are sets: the server keeps no order for
-// them and may list the same ones in another order, which is no change.
-function same(a: string | string[], b: string | string[]): boolean {
+// them and may list the same ones in another order, which is no change. A
+// dependency is the same only with the same kind and note.
+function member(value: string | DependencyWrite): string {
+  return typeof value === "string" ? value : [value.ticket, value.kind, value.note ?? ""].join("\u0000");
+}
+
+function same(a: TicketFields[FieldKey], b: TicketFields[FieldKey]): boolean {
   if (Array.isArray(a) && Array.isArray(b)) {
-    const inA = new Set(a);
-    const inB = new Set(b);
+    const inA = new Set(a.map(member));
+    const inB = new Set(b.map(member));
     return inA.size === inB.size && [...inA].every((value) => inB.has(value));
   }
   return a === b;
@@ -97,8 +111,11 @@ export function editedWrite(base: TicketFields, current: TicketFields): TicketWr
     switch (key) {
       case "repos":
       case "labels":
-      case "dependsOn":
         write[key] = [...current[key]];
+        break;
+      case "dependsOn":
+        // The API replaces the whole list, kinds and notes included.
+        write.dependsOn = current.dependsOn.map((d) => ({ ...d }));
         break;
       default:
         write[key] = current[key];

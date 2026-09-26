@@ -103,7 +103,7 @@ func jsonFields(v any) map[string]json.RawMessage {
 // A ticket's position is left out, since move_ticket moves the ticket to the
 // end of its new column as a side effect of every move.
 var (
-	ticketFields   = []string{"title", "description", "status", "priority", "dueDate", "epic", "repos", "labels", "dependsOn", "delivery"}
+	ticketFields   = []string{"title", "description", "status", "priority", "dueDate", "epic", "repos", "labels", "dependsOn", "delivery", "surfacedFrom"}
 	projectFields  = []string{"name", "prefix", "description", "agentInstructions", "icon", "color", "status"}
 	epicFields     = []string{"name", "description"}
 	labelFields    = []string{"name", "color"}

@@ -99,11 +99,26 @@ export interface EpicList {
   noEpic: EpicProgress;
 }
 
+/** needs_work: builds on the other ticket. conflict_only: waits for it only so the two don't change the same files. */
+export type DependencyKind = "needs_work" | "conflict_only";
+
 export interface TicketRef {
   id: string;
   key: string;
   title: string;
   status: string;
+  /** On a dependsOn or blocks entry: the dependency's kind. Left out elsewhere. */
+  kind?: DependencyKind;
+  /** On a dependsOn or blocks entry: its note, left out when it has none. */
+  note?: string;
+}
+
+/** One dependsOn entry as the API takes it; a write sends the whole list. */
+export interface DependencyWrite {
+  /** The ticket's id or display key. */
+  ticket: string;
+  kind: DependencyKind;
+  note?: string;
 }
 
 export interface Subtask {
@@ -132,6 +147,10 @@ export interface Ticket {
   subtasks: Subtask[];
   dependsOn: TicketRef[];
   blocks: TicketRef[];
+  /** The ticket this one was found during; left out when there is none. */
+  surfacedFrom?: TicketRef;
+  /** The tickets found during this one. Only the full ticket carries it. */
+  surfaced?: TicketRef[];
   /** Left out when the ticket has no epic. */
   epic?: EpicRef;
   /** How many times the ticket has entered agent_review. Optional because
@@ -213,8 +232,9 @@ export type DocumentOwnerRef = { ticketId: string } | { epicId: string };
 
 /**
  * Fields accepted when creating or updating a ticket. Deliberately NOT
- * Partial<Ticket>: the API takes label names and dependency IDs-or-keys as
- * strings, whereas a Ticket carries resolved Label and TicketRef objects.
+ * Partial<Ticket>: the API takes label names as strings and dependencies as
+ * {ticket, kind, note} objects, whereas a Ticket carries resolved Label and
+ * TicketRef objects.
  */
 export interface TicketWrite {
   projectId?: string;
@@ -226,7 +246,10 @@ export interface TicketWrite {
   position?: number;
   repos?: string[];
   labels?: string[];
-  dependsOn?: string[];
+  /** The whole list of dependencies, kinds and notes included. */
+  dependsOn?: DependencyWrite[];
+  /** The ticket this one was found during, by id or key; "" removes the link, and leaving it out leaves it alone. */
+  surfacedFrom?: string;
   /** An epic's name or id in the ticket's project; "" clears it, and leaving it out leaves it alone. */
   epic?: string;
   /** Saved in the ticket's history with a status change; ignored without one. */

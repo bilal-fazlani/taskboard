@@ -12,7 +12,7 @@ import (
 )
 
 // printTicketLines prints each ticket on one line in full: key, title,
-// status, priority, repos, labels, epic, dependencies, id and url.
+// status, priority, repos, labels, epic, dependencies, surfaced from, id and url.
 func printTicketLines(w io.Writer, tickets []models.Ticket) {
 	base := weburl.Base()
 	for _, t := range tickets {
@@ -32,11 +32,10 @@ func printTicketLines(w io.Writer, tickets []models.Ticket) {
 			line += " epic:" + t.Epic.Name
 		}
 		if len(t.DependsOn) > 0 {
-			keys := make([]string, len(t.DependsOn))
-			for i, d := range t.DependsOn {
-				keys[i] = d.Key
-			}
-			line += " depends on " + strings.Join(keys, ", ")
+			line += " depends on " + dependencyKeys(t.DependsOn)
+		}
+		if t.SurfacedFrom != nil {
+			line += " surfaced from " + t.SurfacedFrom.Key
 		}
 		fmt.Fprintf(w, "%s  (%s)  %s\n", line, t.ID, weburl.Ticket(base, weburl.Ref(t)))
 	}
@@ -57,9 +56,12 @@ func printSummaryLines(w io.Writer, summaries []ticketlist.Summary) {
 		if len(s.DependsOn) > 0 {
 			deps := make([]string, len(s.DependsOn))
 			for i, d := range s.DependsOn {
-				deps[i] = d.Key + " " + d.Status
+				deps[i] = d.Key + " " + d.Status + dependencyDetail(d.Kind, d.Note)
 			}
 			parts = append(parts, "depends on: "+strings.Join(deps, ", "))
+		}
+		if s.SurfacedFrom != "" {
+			parts = append(parts, "surfaced from: "+s.SurfacedFrom)
 		}
 		if s.Subtasks != "" {
 			parts = append(parts, "subtasks: "+s.Subtasks)

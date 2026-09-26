@@ -173,7 +173,7 @@ func TestUpdateTicketLeavesOmittedFieldsUnchanged(t *testing.T) {
 		"dueDate":     due,
 		"repos":       []string{"acme/billing-api", "acme/billing-web"},
 		"labels":      []string{"web", "hardening"},
-		"dependsOn":   []string{blocker.ID},
+		"dependsOn":   []map[string]string{{"ticket": blocker.ID}},
 	})
 	url := r.url + "/api/tickets/" + ticket.ID
 
@@ -242,7 +242,7 @@ func TestUpdateTicketClearsFieldsSentEmpty(t *testing.T) {
 		"dueDate":   due,
 		"repos":     []string{"acme/billing-api"},
 		"labels":    []string{"web"},
-		"dependsOn": []string{blocker.ID},
+		"dependsOn": []map[string]string{{"ticket": blocker.ID}},
 	})
 
 	cleared := rawUpdate(t, r.url+"/api/tickets/"+ticket.ID,

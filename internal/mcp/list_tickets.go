@@ -30,7 +30,8 @@ type listTicketsArgs struct {
 // form, and how to get the next page.
 var (
 	listTicketsFormHelp = "To pick tickets, pass summary: true: each ticket comes back as its key, title, status, priority, epic, labels, " +
-		"the keys and statuses of the tickets it depends on, subtask progress (done/total) and url, a small fraction of the full form; " +
+		"the keys and statuses of the tickets it depends on (kind: conflict_only on one it waits for only to avoid a conflict, and its note if any), " +
+		"the key of the ticket it was surfaced from (surfacedFrom), subtask progress (done/total) and url, a small fraction of the full form; " +
 		"then read the ones you need with get_ticket. Leave summary out only when you need every ticket's full details " +
 		"(description, subtasks, repos, dates), and page through them with a small limit. " +
 		"Without summary, limit or offset the answer is an array of every match in full. " +

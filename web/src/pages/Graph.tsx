@@ -49,6 +49,7 @@ import {
 } from "../lib/graphEdges";
 import { entrySize, mergeSizes, pruneSizes } from "../lib/graphSizes";
 import { columnHeading } from "../lib/graphText";
+import { CONFLICT_ONLY_DASH, conflictOnlyEdges, edgeKey } from "../lib/graphEdgeKinds";
 import { isDone } from "../lib/status";
 import {
   FIT_PADDING,
@@ -359,6 +360,13 @@ export default function Graph() {
     [topology, sizes, gutters],
   );
   const edges = useMemo(() => routeEdges(layout), [layout]);
+  // Dependencies that wait only to avoid a conflict are drawn dashed, and
+  // the legend saying so shows only while at least one such edge is drawn.
+  const conflictOnly = useMemo(() => conflictOnlyEdges(shownTickets), [shownTickets]);
+  const drawsConflictOnly = useMemo(
+    () => edges.some((edge) => conflictOnly.has(edgeKey(edge.from, edge.to))),
+    [edges, conflictOnly],
+  );
   // Cards a live refresh just changed or brought in glow for two seconds.
   // Only open tickets are watched, so a ticket that left for done is simply
   // gone from the next fetch and never flashes on its way out. Every
@@ -882,6 +890,8 @@ export default function Graph() {
                       faded ? (chains ? "opacity-12" : FILTERED_OUT) : ""
                     }`}
                     strokeWidth={lit ? LIT_EDGE_WIDTH : EDGE_WIDTH}
+                    strokeDasharray={conflictOnly.has(edgeKey(edge.from, edge.to)) ? CONFLICT_ONLY_DASH : undefined}
+                    data-conflict-only={conflictOnly.has(edgeKey(edge.from, edge.to)) || undefined}
                     markerEnd={`url(#${marker})`}
                   />
                 );
@@ -941,6 +951,34 @@ export default function Graph() {
                 )}
               </div>
             ))}
+          </div>
+        )}
+
+        {hasGraph && drawsConflictOnly && (
+          <div
+            data-graph-legend
+            className="absolute bottom-4 left-4 z-10 flex items-center gap-4 rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-[11px] text-slate-400 shadow-lg shadow-black/40 cursor-default"
+          >
+            <span className="flex items-center gap-1.5">
+              <svg width="28" height="6" aria-hidden="true">
+                <line x1="0" y1="3" x2="28" y2="3" className="stroke-slate-500" strokeWidth="1.5" />
+              </svg>
+              needs work
+            </span>
+            <span className="flex items-center gap-1.5">
+              <svg width="28" height="6" aria-hidden="true">
+                <line
+                  x1="0"
+                  y1="3"
+                  x2="28"
+                  y2="3"
+                  className="stroke-slate-500"
+                  strokeWidth="1.5"
+                  strokeDasharray={CONFLICT_ONLY_DASH}
+                />
+              </svg>
+              conflict only
+            </span>
           </div>
         )}
 

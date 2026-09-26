@@ -7,6 +7,7 @@ import {
   type Ticket,
   type Project,
   type Subtask,
+  type TicketRef,
   type TicketWrite,
 } from "../api/client";
 import ActivityList from "./ActivityList";
@@ -16,7 +17,7 @@ import DocumentsSection from "./DocumentsSection";
 import ImageUploadStatus from "./ImageUploadStatus";
 import LabelPicker from "./LabelPicker";
 import RepoPicker from "./RepoPicker";
-import DependencyPicker, { TicketRefLabel } from "./DependencyPicker";
+import DependencyPicker, { KindPill, SurfacedFromPicker, TicketRefLabel } from "./DependencyPicker";
 import DeliverySection from "./DeliverySection";
 import { activityEntries } from "../lib/activity";
 import { documentWindowKey } from "../lib/documents";
@@ -28,6 +29,7 @@ import { actionErrorMessage, deleteErrorMessage, saveErrorMessage } from "../lib
 import { STATUSES, STATUS_LABELS, STATUS_STYLES, isStatus } from "../lib/status";
 import {
   changedFields,
+  dependencyWrite,
   editedWrite,
   ticketFields,
   toDateInputValue,
@@ -105,6 +107,7 @@ export default function TicketEditor({
   const [repos, setRepos] = useState<string[]>(ticket.repos || []);
   const [labels, setLabels] = useState<string[]>((ticket.labels || []).map((l) => l.name));
   const [dependsOn, setDependsOn] = useState(ticket.dependsOn || []);
+  const [surfacedFrom, setSurfacedFrom] = useState<TicketRef | null>(ticket.surfacedFrom ?? null);
   const [subtasks, setSubtasks] = useState<Subtask[]>(ticket.subtasks || []);
   const [newSubtask, setNewSubtask] = useState("");
   const [dirty, setDirty] = useState(false);
@@ -153,7 +156,8 @@ export default function TicketEditor({
     epic,
     repos,
     labels,
-    dependsOn: dependsOn.map((d) => d.id),
+    dependsOn: dependsOn.map(dependencyWrite),
+    surfacedFrom: surfacedFrom?.id ?? "",
   });
 
   // Fills every control from a ticket and forgets the edits, which is what a
@@ -170,6 +174,7 @@ export default function TicketEditor({
     setRepos(full.repos || []);
     setLabels((full.labels || []).map((l) => l.name));
     setDependsOn(full.dependsOn || []);
+    setSurfacedFrom(full.surfacedFrom ?? null);
     setSubtasks(full.subtasks || []);
     baseRef.current = ticketFields(full);
     dirtyRef.current = false;
@@ -1006,6 +1011,19 @@ export default function TicketEditor({
             </div>
 
             <div>
+              <h3 className={SECTION_HEADING}>Surfaced from</h3>
+              <SurfacedFromPicker
+                value={surfacedFrom}
+                excludeTicketId={ticket.id}
+                onOpen={openLinked}
+                onChange={(next) => {
+                  setSurfacedFrom(next);
+                  markDirty();
+                }}
+              />
+            </div>
+
+            <div>
               <h3 className={SECTION_HEADING}>Depends on</h3>
               <DependencyPicker
                 value={dependsOn}
@@ -1016,6 +1034,12 @@ export default function TicketEditor({
                   markDirty();
                 }}
               />
+              {dependsOn.length > 0 && (
+                <p className="mt-1 text-[11px] text-slate-600">
+                  Needs work: builds on that ticket. Conflict only: waits so the two don&apos;t change the same files.
+                  Click to switch.
+                </p>
+              )}
             </div>
 
             {detail.blocks && detail.blocks.length > 0 && (
@@ -1024,17 +1048,45 @@ export default function TicketEditor({
                 {detail.blocks.map((ref) => (
                   <div
                     key={ref.id}
-                    className="mb-1.5 flex items-center gap-2 rounded-md border border-slate-800 bg-slate-900/60 px-2.5 py-1.5 opacity-75 hover:opacity-100"
+                    className={`mb-1.5 rounded-md border bg-slate-900/60 px-2.5 py-1.5 opacity-75 hover:opacity-100 ${
+                      ref.kind === "conflict_only" ? "border-dashed border-slate-700" : "border-slate-800"
+                    }`}
                   >
-                    <TicketRefLabel ticketRef={ref} onOpen={openLinked} />
-                    <span className="rounded-full bg-slate-800 px-2 py-0.5 text-[10px] text-slate-400">
-                      {ref.status.replace("_", " ")}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <TicketRefLabel ticketRef={ref} onOpen={openLinked} />
+                      <KindPill ticketRef={ref} />
+                      <span className="shrink-0 rounded-full bg-slate-800 px-2 py-0.5 text-[10px] text-slate-400">
+                        {ref.status.replace("_", " ")}
+                      </span>
+                    </div>
+                    {ref.note && (
+                      <p className="mt-0.5 truncate pl-[60px] text-[11px] text-slate-500" title={ref.note}>
+                        {ref.note}
+                      </p>
+                    )}
                   </div>
                 ))}
                 <p className="mt-1 text-[11px] text-slate-600">
                   Read only. Derived from other tickets that depend on this one.
                 </p>
+              </div>
+            )}
+
+            {detail.surfaced && detail.surfaced.length > 0 && (
+              <div>
+                <h3 className={SECTION_HEADING}>Surfaced here</h3>
+                {detail.surfaced.map((ref) => (
+                  <div
+                    key={ref.id}
+                    className="mb-1.5 flex items-center gap-2 rounded-md border border-slate-800 bg-slate-900/60 px-2.5 py-1.5 opacity-75 hover:opacity-100"
+                  >
+                    <TicketRefLabel ticketRef={ref} onOpen={openLinked} />
+                    <span className="shrink-0 rounded-full bg-slate-800 px-2 py-0.5 text-[10px] text-slate-400">
+                      {ref.status.replace("_", " ")}
+                    </span>
+                  </div>
+                ))}
+                <p className="mt-1 text-[11px] text-slate-600">Read only. Tickets found during this one&apos;s work.</p>
               </div>
             )}
 

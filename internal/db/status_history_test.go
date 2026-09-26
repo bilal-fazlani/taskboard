@@ -156,7 +156,7 @@ func TestCreateTicketWritesTheBirthRow(t *testing.T) {
 func TestFailedCreateTicketWritesNoHistory(t *testing.T) {
 	s := newTestStore(t)
 	p := seedProject(t, s, "Agent Control Plane", "ACP")
-	if _, err := s.CreateTicket(models.CreateTicketRequest{ProjectID: p.ID, Title: "Bad", DependsOn: []string{"ACP-99"}}); err == nil {
+	if _, err := s.CreateTicket(models.CreateTicketRequest{ProjectID: p.ID, Title: "Bad", DependsOn: models.DependOn("ACP-99")}); err == nil {
 		t.Fatal("expected an unresolvable dependency to fail")
 	}
 	var n int

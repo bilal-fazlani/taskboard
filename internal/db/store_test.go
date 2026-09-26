@@ -540,7 +540,7 @@ func TestDependencyDirections(t *testing.T) {
 	dependent, err := s.CreateTicket(models.CreateTicketRequest{
 		ProjectID: p.ID,
 		Title:     "Portal UI",
-		DependsOn: []string{blocker.ID},
+		DependsOn: models.DependOn(blocker.ID),
 	})
 	if err != nil {
 		t.Fatalf("CreateTicket: %v", err)
@@ -586,7 +586,7 @@ func TestDependencyStatusReflectsBlocker(t *testing.T) {
 	p := seedProject(t, s, "Billing", "BILL")
 	blocker := seedTicket(t, s, p.ID, "Blocker")
 	dependent, err := s.CreateTicket(models.CreateTicketRequest{
-		ProjectID: p.ID, Title: "Dependent", DependsOn: []string{blocker.ID},
+		ProjectID: p.ID, Title: "Dependent", DependsOn: models.DependOn(blocker.ID),
 	})
 	if err != nil {
 		t.Fatalf("CreateTicket: %v", err)
@@ -610,7 +610,7 @@ func TestDeletingBlockerRemovesReverseLink(t *testing.T) {
 	p := seedProject(t, s, "Billing", "BILL")
 	blocker := seedTicket(t, s, p.ID, "Blocker")
 	dependent, err := s.CreateTicket(models.CreateTicketRequest{
-		ProjectID: p.ID, Title: "Dependent", DependsOn: []string{blocker.ID},
+		ProjectID: p.ID, Title: "Dependent", DependsOn: models.DependOn(blocker.ID),
 	})
 	if err != nil {
 		t.Fatalf("CreateTicket: %v", err)
@@ -758,7 +758,7 @@ func TestDependencyResolvesByDisplayKey(t *testing.T) {
 	blocker := seedTicket(t, s, p.ID, "Blocker") // BILL-1
 
 	dependent, err := s.CreateTicket(models.CreateTicketRequest{
-		ProjectID: p.ID, Title: "Dependent", DependsOn: []string{"BILL-1"},
+		ProjectID: p.ID, Title: "Dependent", DependsOn: models.DependOn("BILL-1"),
 	})
 	if err != nil {
 		t.Fatalf("CreateTicket: %v", err)
@@ -774,7 +774,7 @@ func TestDependencyKeyIsCaseInsensitive(t *testing.T) {
 	seedTicket(t, s, p.ID, "Blocker")
 
 	got, err := s.CreateTicket(models.CreateTicketRequest{
-		ProjectID: p.ID, Title: "Dependent", DependsOn: []string{"bill-1"},
+		ProjectID: p.ID, Title: "Dependent", DependsOn: models.DependOn("bill-1"),
 	})
 	if err != nil {
 		t.Fatalf("CreateTicket: %v", err)
@@ -791,7 +791,7 @@ func TestDependencyCrossProject(t *testing.T) {
 	authTicket := seedTicket(t, s, auth.ID, "Login") // AUTH-1
 
 	got, err := s.CreateTicket(models.CreateTicketRequest{
-		ProjectID: billing.ID, Title: "Portal", DependsOn: []string{"AUTH-1"},
+		ProjectID: billing.ID, Title: "Portal", DependsOn: models.DependOn("AUTH-1"),
 	})
 	if err != nil {
 		t.Fatalf("CreateTicket: %v", err)
@@ -809,7 +809,7 @@ func TestDependencyUnresolvableIsAnError(t *testing.T) {
 	p := seedProject(t, s, "Billing", "BILL")
 
 	_, err := s.CreateTicket(models.CreateTicketRequest{
-		ProjectID: p.ID, Title: "Dependent", DependsOn: []string{"NOPE-42"},
+		ProjectID: p.ID, Title: "Dependent", DependsOn: models.DependOn("NOPE-42"),
 	})
 	if err == nil {
 		t.Fatal("expected an error for an unresolvable dependency")
@@ -825,7 +825,7 @@ func TestDependencySelfReferenceIsAnError(t *testing.T) {
 	tk := seedTicket(t, s, p.ID, "Solo")
 
 	_, err := s.UpdateTicket(tk.ID, models.UpdateTicketRequest{
-		DependsOn: []string{tk.ID},
+		DependsOn: models.DependOn(tk.ID),
 	})
 	if err == nil {
 		t.Fatal("expected an error for a self-dependency")
@@ -842,7 +842,7 @@ func TestDependencyDuplicatesCollapse(t *testing.T) {
 
 	got, err := s.CreateTicket(models.CreateTicketRequest{
 		ProjectID: p.ID, Title: "Dependent",
-		DependsOn: []string{blocker.ID, "BILL-1", blocker.ID},
+		DependsOn: models.DependOn(blocker.ID, "BILL-1", blocker.ID),
 	})
 	if err != nil {
 		t.Fatalf("CreateTicket: %v", err)
@@ -1123,7 +1123,7 @@ func TestListTicketsCarriesLabelsAndDependenciesButNotBlocks(t *testing.T) {
 		ProjectID: p.ID,
 		Title:     "Dependent",
 		Labels:    []string{"frontend"},
-		DependsOn: []string{blocker.ID},
+		DependsOn: models.DependOn(blocker.ID),
 	}); err != nil {
 		t.Fatalf("CreateTicket: %v", err)
 	}
@@ -1260,7 +1260,7 @@ func TestFailedCreateTicketWritesNothing(t *testing.T) {
 		ProjectID: p.ID,
 		Title:     "Half written",
 		Labels:    []string{"newthing"},
-		DependsOn: []string{"NOPE-9"},
+		DependsOn: models.DependOn("NOPE-9"),
 	})
 	if err == nil {
 		t.Fatal("expected an error for an unresolvable dependency")
@@ -1294,7 +1294,7 @@ func TestFailedUpdateTicketWritesNothing(t *testing.T) {
 	_, err := s.UpdateTicket(tk.ID, models.UpdateTicketRequest{
 		Title:     &newTitle,
 		Labels:    []string{"newthing"},
-		DependsOn: []string{"NOPE-9"},
+		DependsOn: models.DependOn("NOPE-9"),
 	})
 	if err == nil {
 		t.Fatal("expected an error for an unresolvable dependency")
@@ -1728,7 +1728,7 @@ func TestDependencyResolvesKeyWithHyphenatedPrefix(t *testing.T) {
 	blocker := seedTicket(t, s, p.ID, "Blocker") // MY-APP-1
 
 	got, err := s.CreateTicket(models.CreateTicketRequest{
-		ProjectID: p.ID, Title: "Dependent", DependsOn: []string{"MY-APP-1"},
+		ProjectID: p.ID, Title: "Dependent", DependsOn: models.DependOn("MY-APP-1"),
 	})
 	if err != nil {
 		t.Fatalf("CreateTicket with a hyphenated prefix key: %v", err)
