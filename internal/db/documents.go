@@ -88,6 +88,20 @@ func DocumentFormatFromFilename(filename string) (string, bool) {
 	return format, ok
 }
 
+// DocumentFileFormat decides the format of a document read from a file, as
+// `doc add --file` and MCP's path argument do: format when one is given
+// ("jpg" read as jpeg), else the format the file's extension names, else ""
+// (the store's default, markdown).
+func DocumentFileFormat(filename, format string) string {
+	if format == "" {
+		format, _ = DocumentFormatFromFilename(filename)
+	}
+	if format == "jpg" {
+		format = models.DocumentFormatJPEG
+	}
+	return format
+}
+
 // DocumentNameFromFilename turns a file's name into a document name and
 // format: the extension picks the format and is removed, every character the
 // name rules refuse becomes a space, and the result is trimmed and checked.

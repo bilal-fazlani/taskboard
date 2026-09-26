@@ -106,24 +106,16 @@ func documentCommands() *cobra.Command {
 					}
 					return fmt.Errorf("provide --name when reading standard input")
 				}
-				n, f, err := db.DocumentNameFromFilename(addFile)
+				n, _, err := db.DocumentNameFromFilename(addFile)
 				if err != nil {
 					return err
 				}
 				name = n
-				if format == "" {
-					format = f
-				}
-			} else if format == "" && addFile != "-" {
-				// A typed name still takes the format from a known extension,
-				// so --name Report --file report.html is an HTML document.
-				if f, ok := db.DocumentFormatFromFilename(addFile); ok {
-					format = f
-				}
 			}
-			if format == "jpg" {
-				format = models.DocumentFormatJPEG
-			}
+			// A typed name still takes the format from a known extension, so
+			// --name Report --file report.html is an HTML document; standard
+			// input ("-") has none.
+			format = db.DocumentFileFormat(addFile, format)
 			data, err := readDocumentFile(cmd, addFile)
 			if err != nil {
 				return err

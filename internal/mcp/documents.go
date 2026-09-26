@@ -17,7 +17,8 @@ import (
 const documentIDDescription = "Document ID, or its name (with or without its extension: .md, .html, .png, .jpg, .gif or .webp) together with ticket, or with epic"
 const documentDataDescription = "An image file's bytes in base64 (a data: URL prefix is fine): PNG, JPEG, GIF or WebP, at most 8 MB. " +
 	"The content must really be that format; SVG is refused. Location, camera and other metadata are removed on upload " +
-	"without re-encoding the picture."
+	"without re-encoding the picture. For a file on this machine, pass path instead: data puts the whole file " +
+	"through your context."
 const documentTicketDescription = "Ticket ID or display key (e.g. BILL-2), case-insensitive; the owner to look a name up in"
 const documentEpicDescription = "Epic ID, or its name together with project; instead of ticket"
 const documentProjectDescription = "Project ID or prefix (case-insensitive); required when epic is a name"
@@ -66,6 +67,9 @@ func (s *MCPServer) documentToolDefinitions() []toolDef {
 				"for longer write-ups (plans, research notes, findings, reports) that would clutter the description. " +
 				"Or attach an image (a screenshot, a mock) by passing data, its file in base64, instead of content, " +
 				"with format png, jpeg, gif or webp, or a name ending in that extension (\"Login screen.png\"). " +
+				"For a file you have locally, pass path, its absolute path, instead of content or data: this MCP server's " +
+				"own process reads it, so the file never passes through your context; prefer it to content and data " +
+				"whenever the file is on this machine. Pass only one of content, data or path. " +
 				"Names hold letters, digits, spaces, _ and - only, with no extension, and are unique per ticket or " +
 				"epic ignoring case. Content is at most 8 MB." +
 				shortAnswerHelp(documentHolds, "created: true", documentWhole) +
@@ -75,9 +79,12 @@ func (s *MCPServer) documentToolDefinitions() []toolDef {
 				Properties: documentOwnerProps("Ticket ID or display key (e.g. BILL-2), case-insensitive", map[string]schemaProp{
 					"name": {Type: "string", Description: "Document name: letters, digits, spaces, _ and - only; no extension, " +
 						"except that an image's name may end in its format's extension (.png, .jpg, .jpeg, .gif, .webp)"},
-					"content": {Type: "string", Description: "The whole document, as markdown or HTML"},
+					"content": {Type: "string", Description: "The whole document, as markdown or HTML; for a file on this machine, pass path instead"},
 					"data":    {Type: "string", Description: documentDataDescription + " Pass it instead of content."},
-					"format": {Type: "string", Description: "markdown (default) or html for content; png, jpeg, gif or webp for data. " +
+					"path": {Type: "string", Description: documentPathDescription + " Pass it instead of content or data; " +
+						"format, when given, overrides the extension."},
+					"format": {Type: "string", Description: "markdown (default) or html for content; png, jpeg, gif or webp for data; " +
+						"for path, taken from its extension unless given. " +
 						"HTML is shown in a sandboxed frame that may run scripts and load from the internet; people cannot edit it in the web UI.",
 						Enum: []string{models.DocumentFormatMarkdown, models.DocumentFormatHTML,
 							models.DocumentFormatPNG, models.DocumentFormatJPEG, models.DocumentFormatGIF, models.DocumentFormatWebP}},
@@ -90,6 +97,9 @@ func (s *MCPServer) documentToolDefinitions() []toolDef {
 			Name: "update_document",
 			Description: "Rename a document and/or replace its content. content replaces the whole document; there " +
 				"are no partial edits. An image's picture is replaced with data instead, a new file of the same format. " +
+				"For a file you have locally, pass path, its absolute path, instead of content or data: this MCP server's " +
+				"own process reads it, so the file never passes through your context; prefer it to content and data " +
+				"whenever the file is on this machine. " +
 				"The format never changes. Renaming an image also rewrites every reference to it by name in its owner's " +
 				"text (the ticket's description and the ticket's or epic's markdown and HTML documents), in the same " +
 				"form, together with the rename: each rewritten document gets a new revision. The result's " +
@@ -102,9 +112,11 @@ func (s *MCPServer) documentToolDefinitions() []toolDef {
 				Properties: documentOwnerProps(documentTicketDescription, map[string]schemaProp{
 					"id":      {Type: "string", Description: documentIDDescription},
 					"name":    {Type: "string", Description: "New name: letters, digits, spaces, _ and - only; no extension"},
-					"content": {Type: "string", Description: "The whole new content"},
+					"content": {Type: "string", Description: "The whole new content; for a file on this machine, pass path instead"},
 					"data":    {Type: "string", Description: documentDataDescription + " Replaces an image's picture; it must be the image's format."},
-					"full":    fullProp(documentWhole),
+					"path": {Type: "string", Description: documentPathDescription + " Replaces a text document's content or an " +
+						"image's picture, instead of content or data; its extension must be the document's format, when it names one."},
+					"full": fullProp(documentWhole),
 				}),
 				Required: []string{"id"},
 			},
@@ -180,6 +192,7 @@ func (s *MCPServer) callDocumentTool(name string, args json.RawMessage) (result 
 			Format  string  `json:"format"`
 			Content string  `json:"content"`
 			Data    *string `json:"data"`
+			Path    *string `json:"path"`
 			fullArg
 		}
 		if err := decodeArgs(args, &a); err != nil {
@@ -188,9 +201,41 @@ func (s *MCPServer) callDocumentTool(name string, args json.RawMessage) (result 
 		if a.Data != nil && a.Content != "" {
 			return nil, true, fmt.Errorf("pass content for a text document or data for an image, not both")
 		}
+		if a.Path != nil && (a.Content != "" || a.Data != nil) {
+			return nil, true, errOnePathContentOrData
+		}
 		owner, err := s.requireDocumentOwner(a.documentOwnerArgs)
 		if err != nil {
 			return nil, true, err
+		}
+		if a.Path != nil {
+			name, format, err := imageNameAndFormat(a.Name, a.Format)
+			if err != nil {
+				return nil, true, err
+			}
+			format = documentPathFormat(*a.Path, format)
+			file, err := readDocumentPath(*a.Path)
+			if err != nil {
+				return nil, true, err
+			}
+			var d *models.Document
+			if models.IsImageFormat(format) || format == "svg" {
+				d, err = s.store.CreateImageDocument(models.CreateImageRequest{
+					TicketID: owner.TicketID, EpicID: owner.EpicID, Name: name, Format: format, Data: file,
+				})
+			} else {
+				content, textErr := documentPathText(*a.Path, file)
+				if textErr != nil {
+					return nil, true, textErr
+				}
+				d, err = s.store.CreateDocument(models.CreateDocumentRequest{
+					TicketID: owner.TicketID, EpicID: owner.EpicID, Name: name, Format: format, Content: content,
+				})
+			}
+			if err != nil {
+				return nil, true, err
+			}
+			return s.documentResult(d, createdChange, a.Full), true, nil
 		}
 		if a.Data != nil {
 			data, err := decodeImageData(*a.Data)
@@ -224,16 +269,20 @@ func (s *MCPServer) callDocumentTool(name string, args json.RawMessage) (result 
 			Name    *string `json:"name"`
 			Content *string `json:"content"`
 			Data    *string `json:"data"`
+			Path    *string `json:"path"`
 			fullArg
 		}
 		if err := decodeArgs(args, &a); err != nil {
 			return nil, true, err
 		}
-		if a.Name == nil && a.Content == nil && a.Data == nil {
-			return nil, true, fmt.Errorf("nothing to update: provide a name and/or content")
+		if a.Name == nil && a.Content == nil && a.Data == nil && a.Path == nil {
+			return nil, true, fmt.Errorf("nothing to update: provide a name and/or content, data or path")
 		}
 		if a.Data != nil && a.Content != nil {
 			return nil, true, fmt.Errorf("pass content for a text document or data for an image, not both")
+		}
+		if a.Path != nil && (a.Content != nil || a.Data != nil) {
+			return nil, true, errOnePathContentOrData
 		}
 		id, err := s.resolveDocumentRefOrError(a.ID, a.documentOwnerArgs)
 		if err != nil {
@@ -246,14 +295,37 @@ func (s *MCPServer) callDocumentTool(name string, args json.RawMessage) (result 
 		if before == nil {
 			return nil, true, fmt.Errorf("document not found")
 		}
-		if a.Data != nil {
-			data, err := decodeImageData(*a.Data)
+		var picture []byte
+		replacePicture := false
+		if a.Path != nil {
+			file, err := readDocumentPath(*a.Path)
 			if err != nil {
 				return nil, true, err
 			}
+			if err := checkPathFitsDocument(*a.Path, before); err != nil {
+				return nil, true, err
+			}
+			if models.IsImageFormat(before.Format) {
+				picture, replacePicture = file, true
+			} else {
+				content, err := documentPathText(*a.Path, file)
+				if err != nil {
+					return nil, true, err
+				}
+				a.Content = &content
+			}
+		}
+		if a.Data != nil {
+			picture, err = decodeImageData(*a.Data)
+			if err != nil {
+				return nil, true, err
+			}
+			replacePicture = true
+		}
+		if replacePicture {
 			// The picture and the name together: a refusal of either
 			// leaves both as they were.
-			d, err := s.store.ReplaceDocumentImage(id, data, a.Name)
+			d, err := s.store.ReplaceDocumentImage(id, picture, a.Name)
 			if err != nil {
 				return nil, true, err
 			}
@@ -298,6 +370,10 @@ func (s *MCPServer) callDocumentTool(name string, args json.RawMessage) (result 
 	}
 	return nil, false, nil
 }
+
+// errOnePathContentOrData refuses a call that passes path together with
+// content or data: the document's content comes from one of them.
+var errOnePathContentOrData = fmt.Errorf("pass one of content, data or path, not several")
 
 // documentOwnerArgs are the arguments that name a document's owner: ticket
 // (id or display key), or epic (id, or name together with project).

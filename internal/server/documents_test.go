@@ -4,7 +4,10 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -499,5 +502,32 @@ func TestSearchDocumentsOverHTTP(t *testing.T) {
 		if status != http.StatusOK || got.TicketIDs == nil || !slices.Equal(got.TicketIDs, tc.want) {
 			t.Errorf("search %s: %d %#v, want %#v", tc.query, status, got.TicketIDs, tc.want)
 		}
+	}
+}
+
+// TestDocumentAPITakesNoPath: the HTTP API has no path argument, since it can
+// be reached from elsewhere (through ngrok) and a path would let a remote
+// caller make the server read its local files. A path sent anyway is ignored:
+// the file is never read into a document.
+func TestDocumentAPITakesNoPath(t *testing.T) {
+	r := serve(t)
+	tk, d := seedTicketDocument(t, r)
+	secret := filepath.Join(t.TempDir(), "secret.md")
+	if err := os.WriteFile(secret, []byte("top secret"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	created, status := doRequest[models.Document](t, http.MethodPost, r.url+"/api/documents",
+		`{"ticketId":"`+tk.ID+`","name":"Notes","path":`+strconv.Quote(secret)+`}`)
+	if status != http.StatusCreated || created.Content != "" || created.Format != models.DocumentFormatMarkdown {
+		t.Fatalf("create with path: %d %+v", status, created)
+	}
+
+	body, status := errorBody(t, http.MethodPut, r.url+"/api/documents/"+d.ID, `{"path":`+strconv.Quote(secret)+`}`)
+	if status != http.StatusBadRequest || !strings.HasPrefix(body.Error, "nothing to update") {
+		t.Fatalf("update with path: %d %q", status, body.Error)
+	}
+	if cur, _ := r.srv.store.GetDocument(d.ID); cur.Content != "# Spec\n" {
+		t.Fatalf("update with path changed the content: %q", cur.Content)
 	}
 }
