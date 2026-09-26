@@ -1,6 +1,7 @@
 import { Calendar, Check, CheckCircle2, EyeOff, Layers, Paperclip } from "lucide-react";
 import type { EpicRef, Ticket } from "../api/client";
 import { attentionClasses } from "../lib/attention";
+import { formatDueDate } from "../lib/dueDate";
 import type { GraphNode } from "../lib/graphLayout";
 import { hiddenBlockersText, satisfiedDependenciesText } from "../lib/graphText";
 import { AGENT_REVIEW_STATUS, STATUS_COLORS, STATUS_LABELS, STATUS_STYLES, isStatus } from "../lib/status";
@@ -196,7 +197,7 @@ export default function TicketCard({
       {ticket.dueDate && (
         <div className="flex items-center gap-1.5 text-xs text-slate-500">
           <Calendar className="w-3 h-3" />
-          {new Date(ticket.dueDate).toLocaleDateString()}
+          {formatDueDate(ticket.dueDate)}
         </div>
       )}
       <CardFooter ticket={ticket} />

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import type { Ticket } from "../api/client";
 import {
@@ -182,6 +182,37 @@ describe("TicketCard's review rounds", () => {
     render(<TicketCard ticket={makeTicket({ reviewRounds: 4 })} />);
     expect(screen.queryByTestId("card-review-rounds")).toBeNull();
     expect(screen.queryByText(/review ×/)).toBeNull();
+  });
+});
+
+// ACP-53: the card must show the stored calendar date, not
+// `new Date(ticket.dueDate).toLocaleDateString()`'s local-timezone reading of
+// it. Run under a negative UTC offset (America/Los_Angeles) so a revert to
+// that local-timezone reading fails this test on any machine, not only
+// west-of-UTC ones.
+describe("TicketCard's due date", () => {
+  const originalTz = process.env.TZ;
+
+  beforeEach(() => {
+    process.env.TZ = "America/Los_Angeles";
+  });
+
+  afterEach(() => {
+    if (originalTz === undefined) {
+      delete process.env.TZ;
+    } else {
+      process.env.TZ = originalTz;
+    }
+  });
+
+  it("shows the stored calendar date via the shared helper", () => {
+    render(<TicketCard ticket={makeTicket({ dueDate: "2026-10-01T00:00:00Z" })} />);
+    expect(screen.getByText("10/1/2026")).toBeTruthy();
+  });
+
+  it("shows nothing without a due date", () => {
+    render(<TicketCard ticket={makeTicket()} />);
+    expect(screen.queryByText(/\d+\/\d+\/\d+/)).toBeNull();
   });
 });
 

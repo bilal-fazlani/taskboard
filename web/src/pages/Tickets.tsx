@@ -20,6 +20,7 @@ import { useFilters } from "../hooks/useFilters";
 import { useLiveRefresh } from "../hooks/useLiveRefresh";
 import { useTicketParam } from "../hooks/useTicketParam";
 import { awaitingProject } from "../lib/defaultProject";
+import { formatDueDate } from "../lib/dueDate";
 import { nextEpicSort, sortByEpic, type EpicSort } from "../lib/epicSort";
 import { inProject, matchesFilters, repoOptions } from "../lib/filters";
 import { STATUS_LABELS, STATUS_STYLES, isStatus, isDone } from "../lib/status";
@@ -283,7 +284,7 @@ export default function Tickets() {
                     {ticket.dueDate ? (
                       <span className="inline-flex items-center gap-1 text-xs text-slate-500">
                         <Calendar className="w-3 h-3" />
-                        {new Date(ticket.dueDate).toLocaleDateString()}
+                        {formatDueDate(ticket.dueDate)}
                       </span>
                     ) : (
                       <span className="text-xs text-slate-700">—</span>
