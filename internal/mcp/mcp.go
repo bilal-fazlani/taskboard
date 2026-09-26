@@ -194,7 +194,11 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 		if err := decodeArgs(args, &a); err != nil {
 			return nil, err
 		}
-		return s.store.ListProjects(a.Status)
+		projects, err := s.store.ListProjects(a.Status)
+		if err != nil {
+			return nil, err
+		}
+		return shortenProjectDescriptions(projects), nil
 
 	case "get_project":
 		var a struct {
@@ -755,13 +759,72 @@ const (
 		"verify commands, commit style). get_project returns them; the board never acts on them."
 )
 
+// projectDescriptionPreviewLimit caps how many characters of a project's
+// description list_projects returns, so listing many projects stays cheap
+// even when a description runs long. get_project always returns the full text.
+const projectDescriptionPreviewLimit = 300
+
+// projectListItem is one entry in list_projects: a project with its
+// description shortened to a preview. Description shadows the field
+// embedded from models.Project so the preview is what gets marshalled.
+type projectListItem struct {
+	models.Project
+	Description          string `json:"description,omitempty"`
+	DescriptionTruncated bool   `json:"descriptionTruncated"`
+}
+
+// shortenProjectDescriptions replaces each project's full description with a
+// preview: its first paragraph (the text before the first blank line),
+// capped at projectDescriptionPreviewLimit characters. DescriptionTruncated
+// says whether the preview leaves anything out, so a caller knows to fetch
+// the project with get_project for the rest.
+func shortenProjectDescriptions(projects []models.Project) []projectListItem {
+	items := make([]projectListItem, len(projects))
+	for i, p := range projects {
+		short, truncated := shortProjectDescription(p.Description)
+		items[i] = projectListItem{Project: p, Description: short, DescriptionTruncated: truncated}
+	}
+	return items
+}
+
+// shortProjectDescription cuts description down to its first paragraph and,
+// if that is still longer than projectDescriptionPreviewLimit characters, to
+// that many characters (by rune count, so a multi-byte character is never
+// split). "\r\n" line endings are treated the same as "\n", a line holding
+// only whitespace ends a paragraph same as a blank line, and the
+// description's own leading and trailing whitespace never counts as cut. It
+// reports whether the preview leaves out anything beyond that whitespace.
+func shortProjectDescription(description string) (string, bool) {
+	full := strings.TrimSpace(strings.ReplaceAll(description, "\r\n", "\n"))
+	short := full
+	truncated := false
+
+	lines := strings.Split(full, "\n")
+	for i, line := range lines {
+		if i > 0 && strings.TrimSpace(line) == "" {
+			short = strings.TrimRight(strings.Join(lines[:i], "\n"), " \t")
+			truncated = true
+			break
+		}
+	}
+
+	if runes := []rune(short); len(runes) > projectDescriptionPreviewLimit {
+		short = strings.TrimRight(string(runes[:projectDescriptionPreviewLimit]), " \t\r\n")
+		truncated = true
+	}
+
+	return short, truncated
+}
+
 func (s *MCPServer) toolDefinitions() []toolDef {
 	defs := []toolDef{
 		// --- Projects (top-level grouping) ---
 		{
 			Name: "list_projects",
 			Description: "List all projects with optional status filter. Projects are the top-level grouping — use them like epics or initiatives to organize related work. " +
-				"The list leaves out each project's agent instructions; get_project returns them.",
+				"The list leaves out each project's agent instructions, and shortens each description to its first paragraph, " +
+				fmt.Sprintf("capped at %d characters, with descriptionTruncated saying whether it was cut; ", projectDescriptionPreviewLimit) +
+				"get_project returns the full description and the agent instructions.",
 			InputSchema: jsonSchema{
 				Type: "object",
 				Properties: map[string]schemaProp{
@@ -771,7 +834,8 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 		},
 		{
 			Name: "get_project",
-			Description: "Get detailed project information by ID, including its agentInstructions: how agents should work on the project's tickets. " +
+			Description: "Get detailed project information by ID, including its full description (list_projects returns only a short preview) " +
+				"and its agentInstructions: how agents should work on the project's tickets. " +
 				"Before working on a project's tickets, read its agent instructions and follow them. The board itself never acts on them.",
 			InputSchema: jsonSchema{
 				Type:       "object",
