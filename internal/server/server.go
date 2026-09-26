@@ -8,6 +8,8 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
+	"path"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -248,6 +250,14 @@ func (s *Server) setupRoutes(webFS fs.FS) {
 		fileServer := http.FileServer(http.FS(webFS))
 		r.Get("/*", func(w http.ResponseWriter, r *http.Request) {
 			if _, err := fs.Stat(webFS, r.URL.Path[1:]); err != nil {
+				// A missing file is a 404, so a stale bundle reference fails
+				// as one rather than as a parse error of index.html. Any
+				// other path is the web app's to route, including its
+				// not-found page.
+				if isFilePath(r.URL.Path) {
+					http.NotFound(w, r)
+					return
+				}
 				r.URL.Path = "/"
 			}
 			fileServer.ServeHTTP(w, r)
@@ -255,6 +265,13 @@ func (s *Server) setupRoutes(webFS fs.FS) {
 	}
 
 	s.router = r
+}
+
+// isFilePath reports whether urlPath names a file of the web build rather
+// than a client route: anything under /assets/ or with a file extension. The
+// web app's routes have neither.
+func isFilePath(urlPath string) bool {
+	return strings.HasPrefix(urlPath, "/assets/") || path.Ext(urlPath) != ""
 }
 
 // rejectCrossOriginWrites refuses a state-changing request (POST, PUT,
