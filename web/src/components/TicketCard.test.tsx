@@ -25,11 +25,29 @@ function makeTicket(overrides: Partial<Ticket> = {}): Ticket {
     createdAt: "",
     updatedAt: "",
     projectPrefix: "AUTH",
+    repos: [],
     labels: [],
     subtasks: [],
+    dependsOn: [],
+    blocks: [],
     ...overrides,
   };
 }
+
+describe("TicketCard with no labels, description, repos or dependencies", () => {
+  // ACP-51: the API leaves labels, description, repos, dependsOn and blocks
+  // out of the JSON entirely when they're empty (internal/models omitempty);
+  // the API client normalises that to "" and [] before a ticket ever reaches
+  // a component, but a ticket this bare — everything optional at its emptiest
+  // — is exactly what used to crash the label filter (ACP-26). It should
+  // just render with no labels or dependency band shown.
+  it("renders without labels or a dependency band", () => {
+    const ticket = makeTicket({ description: "", repos: [], labels: [], subtasks: [], dependsOn: [], blocks: [] });
+    render(<TicketCard ticket={ticket} />);
+    expect(screen.getByText(ticket.title)).toBeTruthy();
+    expect(screen.queryByText(/dependenc(y|ies)/i)).toBeNull();
+  });
+});
 
 describe("TicketCard on the graph", () => {
   it("shows done against the total, not just the done count", () => {
@@ -70,8 +88,11 @@ const headerTicket = (overrides: Partial<Ticket> = {}): Ticket => ({
   createdAt: "",
   updatedAt: "",
   projectPrefix: "ACP",
+  repos: [],
   labels: [],
   subtasks: [],
+  dependsOn: [],
+  blocks: [],
   ...overrides,
 });
 

@@ -55,7 +55,7 @@ function progress(counts: Partial<Record<string, number>> = {}, lastActivityAt: 
   return { counts: full, total, complete: total > 0 && full.done === total, lastActivityAt };
 }
 
-function epic(name: string, counts: Partial<Record<string, number>> = {}, lastActivityAt: string | null = null, description?: string): Epic {
+function epic(name: string, counts: Partial<Record<string, number>> = {}, lastActivityAt: string | null = null, description = ""): Epic {
   return {
     id: `e-${name}`,
     projectId: "p-ACP",

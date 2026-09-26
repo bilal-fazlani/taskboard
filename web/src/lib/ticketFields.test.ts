@@ -20,6 +20,7 @@ function makeTicket(overrides: Partial<Ticket> = {}): Ticket {
     labels: [{ id: "l1", name: "frontend", color: "#3b82f6" }],
     subtasks: [],
     dependsOn: [{ id: "t2", key: "AUTH-2", title: "Build login UI", status: "todo" }],
+    blocks: [],
     epic: { id: "e1", name: "Login" },
     ...overrides,
   };

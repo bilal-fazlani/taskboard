@@ -1,3 +1,11 @@
+// Project, Ticket, Epic and Board below are the app-facing shapes: every
+// field the Go models mark `omitempty` (internal/models) and that carries no
+// meaning of its own when absent is normalised here at the API boundary, so
+// the rest of the app can read a string or an array without a fallback.
+// agentInstructions, hasAgentInstructions, dueDate, epic and documents are
+// left optional on purpose: their absence means something an empty value
+// doesn't (not fetched, no due date, no epic, ...). See the Raw* types and
+// normalise* functions below `request` for exactly what each one does.
 export interface Project {
   id: string;
   name: string;
@@ -52,7 +60,7 @@ export interface Epic extends EpicProgress {
   id: string;
   projectId: string;
   name: string;
-  description?: string;
+  description: string;
   createdAt: string;
   updatedAt: string;
   /** How many documents the epic has. */
@@ -94,11 +102,11 @@ export interface Ticket {
   createdAt: string;
   updatedAt: string;
   projectPrefix: string;
-  repos?: string[];
+  repos: string[];
   labels: EmbeddedLabel[];
   subtasks: Subtask[];
-  dependsOn?: TicketRef[];
-  blocks?: TicketRef[];
+  dependsOn: TicketRef[];
+  blocks: TicketRef[];
   /** Left out when the ticket has no epic. */
   epic?: EpicRef;
   /** How many times the ticket has entered agent_review. Optional because
@@ -190,6 +198,77 @@ export interface Board {
   columns: BoardColumn[];
 }
 
+// Wire (raw) shapes: what the Go models (internal/models) actually send,
+// `omitempty` fields marked optional exactly as they are on the struct. Kept
+// private to this module — the rest of the app never sees these, only the
+// normalised app-facing types above, produced by the normalise* functions
+// below.
+interface RawProject extends Omit<Project, "description" | "icon" | "color"> {
+  description?: string;
+  icon?: string;
+  color?: string;
+}
+
+interface RawTicket extends Omit<Ticket, "description" | "projectPrefix" | "repos" | "labels" | "subtasks" | "dependsOn" | "blocks"> {
+  description?: string;
+  projectPrefix?: string;
+  repos?: string[];
+  labels?: EmbeddedLabel[];
+  subtasks?: Subtask[];
+  dependsOn?: TicketRef[];
+  blocks?: TicketRef[];
+}
+
+interface RawEpic extends Omit<Epic, "description"> {
+  description?: string;
+}
+
+interface RawEpicList {
+  epics?: RawEpic[];
+  noEpic: EpicProgress;
+}
+
+interface RawBoardColumn extends Omit<BoardColumn, "tickets"> {
+  tickets?: RawTicket[];
+}
+
+interface RawBoard extends Omit<Board, "projectId" | "columns"> {
+  projectId?: string;
+  columns?: RawBoardColumn[];
+}
+
+function normalizeProject(raw: RawProject): Project {
+  return { ...raw, description: raw.description ?? "", icon: raw.icon ?? "", color: raw.color ?? "" };
+}
+
+function normalizeTicket(raw: RawTicket): Ticket {
+  return {
+    ...raw,
+    description: raw.description ?? "",
+    projectPrefix: raw.projectPrefix ?? "",
+    repos: raw.repos ?? [],
+    labels: raw.labels ?? [],
+    subtasks: raw.subtasks ?? [],
+    dependsOn: raw.dependsOn ?? [],
+    blocks: raw.blocks ?? [],
+  };
+}
+
+function normalizeEpic(raw: RawEpic): Epic {
+  return { ...raw, description: raw.description ?? "" };
+}
+
+function normalizeEpicList(raw: RawEpicList): EpicList {
+  return { epics: (raw.epics ?? []).map(normalizeEpic), noEpic: raw.noEpic };
+}
+
+function normalizeBoard(raw: RawBoard): Board {
+  return {
+    projectId: raw.projectId ?? "",
+    columns: (raw.columns ?? []).map((c) => ({ status: c.status, tickets: (c.tickets ?? []).map(normalizeTicket) })),
+  };
+}
+
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
   const res = await fetch(url, {
     headers: { "Content-Type": "application/json" },
@@ -205,18 +284,18 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
 
 export const api = {
   projects: {
-    list: () => request<Project[]>("/api/projects"),
-    get: (id: string) => request<Project>(`/api/projects/${id}`),
+    list: () => request<RawProject[]>("/api/projects").then((raw) => raw.map(normalizeProject)),
+    get: (id: string) => request<RawProject>(`/api/projects/${id}`).then(normalizeProject),
     create: (data: Partial<Project>) =>
-      request<Project>("/api/projects", {
+      request<RawProject>("/api/projects", {
         method: "POST",
         body: JSON.stringify(data),
-      }),
+      }).then(normalizeProject),
     update: (id: string, data: Partial<Project>) =>
-      request<Project>(`/api/projects/${id}`, {
+      request<RawProject>(`/api/projects/${id}`, {
         method: "PUT",
         body: JSON.stringify(data),
-      }),
+      }).then(normalizeProject),
     delete: (id: string) =>
       request<void>(`/api/projects/${id}`, { method: "DELETE" }),
   },
@@ -232,27 +311,27 @@ export const api = {
       const qs = new URLSearchParams(
         Object.entries(params ?? {}).filter(([, v]) => v) as [string, string][]
       ).toString();
-      return request<Ticket[]>(`/api/tickets${qs ? `?${qs}` : ""}`);
+      return request<RawTicket[]>(`/api/tickets${qs ? `?${qs}` : ""}`).then((raw) => raw.map(normalizeTicket));
     },
-    get: (id: string) => request<Ticket>(`/api/tickets/${id}`),
+    get: (id: string) => request<RawTicket>(`/api/tickets/${id}`).then(normalizeTicket),
     create: (data: TicketWrite) =>
-      request<Ticket>("/api/tickets", {
+      request<RawTicket>("/api/tickets", {
         method: "POST",
         body: JSON.stringify(data),
-      }),
+      }).then(normalizeTicket),
     update: (id: string, data: TicketWrite) =>
-      request<Ticket>(`/api/tickets/${id}`, {
+      request<RawTicket>(`/api/tickets/${id}`, {
         method: "PUT",
         body: JSON.stringify(data),
-      }),
+      }).then(normalizeTicket),
     delete: (id: string) =>
       request<void>(`/api/tickets/${id}`, { method: "DELETE" }),
     history: (id: string) => request<StatusChange[]>(`/api/tickets/${id}/history`),
     move: (id: string, status: string, position?: number) =>
-      request<Ticket>(`/api/tickets/${id}/move`, {
+      request<RawTicket>(`/api/tickets/${id}/move`, {
         method: "POST",
         body: JSON.stringify({ status, position }),
-      }),
+      }).then(normalizeTicket),
     addSubtask: (id: string, title: string) =>
       request<Subtask>(`/api/tickets/${id}/subtasks`, {
         method: "POST",
@@ -285,17 +364,17 @@ export const api = {
 
   epics: {
     list: (projectId: string) =>
-      request<EpicList>(`/api/epics?projectId=${encodeURIComponent(projectId)}`),
+      request<RawEpicList>(`/api/epics?projectId=${encodeURIComponent(projectId)}`).then(normalizeEpicList),
     create: (data: { projectId: string; name: string; description?: string }) =>
-      request<Epic>("/api/epics", {
+      request<RawEpic>("/api/epics", {
         method: "POST",
         body: JSON.stringify(data),
-      }),
+      }).then(normalizeEpic),
     update: (id: string, data: { name?: string; description?: string }) =>
-      request<Epic>(`/api/epics/${id}`, {
+      request<RawEpic>(`/api/epics/${id}`, {
         method: "PUT",
         body: JSON.stringify(data),
-      }),
+      }).then(normalizeEpic),
     delete: (id: string) =>
       request<void>(`/api/epics/${id}`, { method: "DELETE" }),
   },
@@ -358,6 +437,6 @@ export const api = {
 
   board: {
     get: (projectId?: string) =>
-      request<Board>(`/api/board${projectId ? `?projectId=${projectId}` : ""}`),
+      request<RawBoard>(`/api/board${projectId ? `?projectId=${projectId}` : ""}`).then(normalizeBoard),
   },
 };

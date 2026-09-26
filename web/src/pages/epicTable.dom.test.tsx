@@ -44,8 +44,11 @@ const ticket = (number: number, epic?: string): Ticket => ({
   createdAt: "",
   updatedAt: "",
   projectPrefix: "ACP",
+  repos: [],
   labels: [],
   subtasks: [],
+  dependsOn: [],
+  blocks: [],
   ...(epic ? { epic: { id: `e-${epic}`, name: epic } } : {}),
 });
 

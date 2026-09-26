@@ -81,13 +81,16 @@ export interface FilterableTicket {
   id?: string;
   number: number;
   title: string;
-  /** The API leaves out an empty description, and empty repos and labels. */
-  description?: string;
+  // description, repos and labels are normalised by the API client
+  // (api/client.ts) to always be a string or an array, even though the API
+  // itself leaves them out of the JSON when they're empty (ACP-51); nothing
+  // here needs to guard against them being missing.
+  description: string;
   status: string;
   priority: string;
   projectPrefix: string;
-  repos?: string[];
-  labels?: readonly { name: string }[] | null;
+  repos: string[];
+  labels: readonly { name: string }[];
   /** The API leaves it out when the ticket has no epic. */
   epic?: { name: string } | null;
 }
@@ -241,11 +244,11 @@ export function matchesFilters(
   if (!anyOf(filters.epic, (e) => (isNoEpic(e) ? !epic : !!epic && same(epic.name, e)))) return false;
   if (!anyOf(filters.status, (s) => ticket.status === s)) return false;
   if (!anyOf(filters.priority, (p) => ticket.priority === p)) return false;
-  if (!anyOf(filters.label, (name) => (ticket.labels ?? []).some((l) => same(l.name, name)))) return false;
-  if (!anyOf(filters.repo, (r) => (ticket.repos ?? []).includes(r))) return false;
+  if (!anyOf(filters.label, (name) => ticket.labels.some((l) => same(l.name, name)))) return false;
+  if (!anyOf(filters.repo, (r) => ticket.repos.includes(r))) return false;
   const q = filters.q.trim().toLowerCase();
   if (q) {
-    const haystacks = [ticketKey(ticket), ticket.title, ticket.description ?? ""];
+    const haystacks = [ticketKey(ticket), ticket.title, ticket.description];
     const inText = haystacks.some((h) => h.toLowerCase().includes(q));
     const inDocuments = ticket.id !== undefined && docMatches?.has(ticket.id) === true;
     if (!inText && !inDocuments) return false;
@@ -331,7 +334,7 @@ export function toggleValue(options: readonly SelectOption[], chosen: readonly s
  */
 export function repoOptions(tickets: readonly Pick<FilterableTicket, "repos">[], selected: readonly string[] = []): string[] {
   const repos = new Set<string>();
-  for (const t of tickets) for (const r of t.repos ?? []) repos.add(r);
+  for (const t of tickets) for (const r of t.repos) repos.add(r);
   for (const r of selected) if (r) repos.add(r);
   return [...repos].sort((a, b) => a.localeCompare(b));
 }

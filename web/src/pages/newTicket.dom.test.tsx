@@ -51,8 +51,11 @@ const ticket = (prefix: string, number: number): Ticket => ({
   createdAt: "",
   updatedAt: "",
   projectPrefix: prefix,
+  repos: [],
   labels: [],
   subtasks: [],
+  dependsOn: [],
+  blocks: [],
 });
 
 // The live-refresh stream, which a test can make deliver the `changed` event

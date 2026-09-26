@@ -61,7 +61,7 @@ describe("matchesFilters", () => {
   it("matches everything with no filters", () => {
     expect(hasFilters(EMPTY_FILTERS)).toBe(false);
     expect(matchesFilters(ticket(), EMPTY_FILTERS)).toBe(true);
-    expect(matchesFilters(ticket({ repos: undefined, labels: [], description: "" }), EMPTY_FILTERS)).toBe(true);
+    expect(matchesFilters(ticket({ repos: [], labels: [], description: "" }), EMPTY_FILTERS)).toBe(true);
   });
 
   it("filters by project prefix, case-insensitively", () => {
@@ -86,10 +86,10 @@ describe("matchesFilters", () => {
     expect(matchesFilters(ticket(), f({ label: ["web"] }))).toBe(true);
     expect(matchesFilters(ticket(), f({ label: ["m2:realtime"] }))).toBe(true);
     expect(matchesFilters(ticket(), f({ label: ["api"] }))).toBe(false);
+    // The API leaves the field out of the JSON when a ticket has no labels;
+    // the client (api/client.ts) normalises that to [] before this ever sees
+    // it (ACP-51), so a ticket with no labels always arrives this way.
     expect(matchesFilters(ticket({ labels: [] }), f({ label: ["web"] }))).toBe(false);
-    // The API leaves the field out when a ticket has no labels.
-    expect(matchesFilters(ticket({ labels: undefined }), f({ label: ["web"] }))).toBe(false);
-    expect(matchesFilters(ticket({ labels: null }), f({ label: ["web"] }))).toBe(false);
   });
 
   it("filters by epic name, case-insensitively", () => {
@@ -116,7 +116,7 @@ describe("matchesFilters", () => {
     expect(matchesFilters(ticket(), f({ repo: ["bilal-fazlani/taskboard"] }))).toBe(true);
     expect(matchesFilters(ticket(), f({ repo: ["Bilal-Fazlani/Taskboard"] }))).toBe(false);
     expect(matchesFilters(ticket(), f({ repo: ["bilal-fazlani"] }))).toBe(false);
-    expect(matchesFilters(ticket({ repos: undefined }), f({ repo: ["bilal-fazlani/taskboard"] }))).toBe(false);
+    expect(matchesFilters(ticket({ repos: [] }), f({ repo: ["bilal-fazlani/taskboard"] }))).toBe(false);
   });
 
   it.each([
@@ -139,7 +139,7 @@ describe("matchesFilters", () => {
   });
 
   it("tolerates a ticket without a description", () => {
-    const t = ticket({ description: undefined });
+    const t = ticket({ description: "" });
     expect(matchesFilters(t, f({ q: "hook" }))).toBe(true);
     expect(matchesFilters(t, f({ q: "sse" }))).toBe(false);
   });
@@ -378,7 +378,7 @@ describe("unmatched mode", () => {
 
 describe("repoOptions", () => {
   it("lists each repo once, sorted, keeping selected ones no ticket has", () => {
-    const tickets = [{ repos: ["z/z", "a/a"] }, { repos: ["a/a"] }, {}];
+    const tickets = [{ repos: ["z/z", "a/a"] }, { repos: ["a/a"] }, { repos: [] }];
     expect(repoOptions(tickets)).toEqual(["a/a", "z/z"]);
     expect(repoOptions(tickets, ["a/a"])).toEqual(["a/a", "z/z"]);
     expect(repoOptions(tickets, ["m/m", "b/b", "a/a"])).toEqual(["a/a", "b/b", "m/m", "z/z"]);

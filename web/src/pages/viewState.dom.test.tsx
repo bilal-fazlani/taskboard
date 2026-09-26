@@ -94,8 +94,11 @@ function makeTicket(number: number, overrides: Partial<Ticket> = {}): Ticket {
     createdAt: "",
     updatedAt: "",
     projectPrefix: "ACP",
+    repos: [],
     labels: [],
     subtasks: [],
+    dependsOn: [],
+    blocks: [],
     ...overrides,
   };
 }

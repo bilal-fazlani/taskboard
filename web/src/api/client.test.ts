@@ -11,6 +11,79 @@ function stubFetch(status: number, body: unknown) {
 
 afterEach(() => vi.unstubAllGlobals());
 
+// The Go models (internal/models) mark labels, subtasks, repos, description
+// and other fields `omitempty`, so the server leaves them out of the JSON
+// entirely when they're empty, rather than sending "" or []. ACP-26's label
+// filter crashed on exactly this. These tests send the API's real shape (the
+// fields simply missing) and check the client always turns it into a ticket,
+// project and board the rest of the app can read without a fallback.
+describe("wire normalisation", () => {
+  it("fills in a ticket's labels, subtasks, repos, description, dependsOn and blocks when the API leaves them out", async () => {
+    stubFetch(200, {
+      id: "t1",
+      projectId: "p1",
+      number: 7,
+      title: "No optional fields",
+      status: "todo",
+      priority: "high",
+      position: 0,
+      createdAt: "",
+      updatedAt: "",
+      // description, projectPrefix, repos, labels, subtasks, dependsOn and
+      // blocks are all omitted, exactly as the API sends an empty ticket.
+    });
+    const ticket = await api.tickets.get("t1");
+    expect(ticket.description).toBe("");
+    expect(ticket.projectPrefix).toBe("");
+    expect(ticket.repos).toEqual([]);
+    expect(ticket.labels).toEqual([]);
+    expect(ticket.subtasks).toEqual([]);
+    expect(ticket.dependsOn).toEqual([]);
+    expect(ticket.blocks).toEqual([]);
+    // dueDate and epic carry meaning when absent (no due date, no epic), so
+    // they stay undefined rather than being filled in.
+    expect(ticket.dueDate).toBeUndefined();
+    expect(ticket.epic).toBeUndefined();
+  });
+
+  it("normalises every ticket in a list response the same way", async () => {
+    stubFetch(200, [{ id: "t1", projectId: "p1", number: 1, title: "A", status: "todo", priority: "low", position: 0, createdAt: "", updatedAt: "" }]);
+    const [ticket] = await api.tickets.list();
+    expect(ticket.labels).toEqual([]);
+    expect(ticket.repos).toEqual([]);
+  });
+
+  it("fills in a project's description, icon and color when the API leaves them out", async () => {
+    stubFetch(200, { id: "p1", name: "Auth", prefix: "AUTH", status: "active", createdAt: "", updatedAt: "" });
+    const project = await api.projects.get("p1");
+    expect(project.description).toBe("");
+    expect(project.icon).toBe("");
+    expect(project.color).toBe("");
+    // agentInstructions carries "not fetched" vs "fetched, none set" meaning,
+    // so it is left as the API sent it: absent here.
+    expect(project.agentInstructions).toBeUndefined();
+  });
+
+  it("fills in an epic's description, including within an epics list response", async () => {
+    stubFetch(200, {
+      epics: [{ id: "e1", projectId: "p1", name: "Graph", createdAt: "", updatedAt: "", counts: {}, total: 0, complete: false, lastActivityAt: null }],
+      noEpic: { counts: {}, total: 0, complete: false, lastActivityAt: null },
+    });
+    const { epics } = await api.epics.list("p1");
+    expect(epics[0].description).toBe("");
+  });
+
+  it("normalises the tickets nested in a board response", async () => {
+    stubFetch(200, {
+      columns: [{ status: "todo", tickets: [{ id: "t1", projectId: "p1", number: 1, title: "A", status: "todo", priority: "low", position: 0, createdAt: "", updatedAt: "" }] }],
+    });
+    const board = await api.board.get("p1");
+    expect(board.projectId).toBe("");
+    expect(board.columns[0].tickets[0].labels).toEqual([]);
+    expect(board.columns[0].tickets[0].repos).toEqual([]);
+  });
+});
+
 describe("api.documents", () => {
   it("creates a document with a POST carrying the owner, name, format and content", async () => {
     const fetch = stubFetch(201, { id: "d9" });

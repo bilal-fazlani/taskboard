@@ -21,6 +21,7 @@ const epic = (name: string, counts: Partial<Record<string, number>> = {}, at: st
   id: `e-${name}`,
   projectId: "p",
   name,
+  description: "",
   createdAt: "",
   updatedAt: "",
   ...progress(counts, at),

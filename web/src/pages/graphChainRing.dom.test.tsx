@@ -93,9 +93,11 @@ function ticket(number: number, deps: number[] = [], status = "in_progress"): Ti
     createdAt: "",
     updatedAt: "",
     projectPrefix: "ACP",
+    repos: [],
     labels: [],
     subtasks: [],
     dependsOn: deps.map((d) => ({ id: `t${d}`, key: `ACP-${d}`, title: `Ticket ${d}`, status: "todo" })),
+    blocks: [],
   };
 }
 

@@ -131,8 +131,11 @@ function ticket(prefix: string, number: number, overrides: Partial<Ticket> = {})
     createdAt: "",
     updatedAt: "",
     projectPrefix: prefix,
+    repos: [],
     labels: [],
     subtasks: [],
+    dependsOn: [],
+    blocks: [],
     ...overrides,
   };
 }

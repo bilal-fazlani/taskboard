@@ -44,8 +44,11 @@ const ticket = (number: number, dueDate?: string): Ticket => ({
   createdAt: "",
   updatedAt: "",
   projectPrefix: "ACP",
+  repos: [],
   labels: [],
   subtasks: [],
+  dependsOn: [],
+  blocks: [],
   ...(dueDate ? { dueDate } : {}),
 });
 
