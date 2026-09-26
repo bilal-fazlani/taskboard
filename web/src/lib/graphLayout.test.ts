@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  DEFAULT_BAND_GAP,
   DEFAULT_COLUMN_GAP,
   DEFAULT_GRID_GAP,
   DEFAULT_NODE_SIZE,
@@ -1052,10 +1053,140 @@ describe("positionGraph", () => {
     // A-1 is linked to nothing and still tops Ready, right above A-2.
     expect(a1.y).toBe(0);
     expect(a2.y).toBe(bottom(a1) + DEFAULT_ROW_GAP);
-    // A-4 sits right below the cards A-2 links to.
+    // A-4 is in no group, so it sits a band gap below the one group, whose
+    // lowest card is A-5.
     expect(a3.y).toBeLessThan(a5.y);
-    expect(a4.y).toBe(bottom(a5) + DEFAULT_ROW_GAP);
+    expect(Math.max(...[a1, a2, a3, a5].map(bottom))).toBe(bottom(a5));
+    expect(a4.y).toBe(bottom(a5) + DEFAULT_BAND_GAP);
     expect(a2.x).toBe(a1.x);
+  });
+
+  // Shaped like ACP's open tickets on 2026-09-26: a wide group from ACP-4,
+  // then a small one from ACP-89. Placed together, the first group's spread
+  // pushed the second down and nothing pulled it back up.
+  const twoGroups: Spec[] = [
+    ["ACP-4", "todo"],
+    ["ACP-5", "todo", ["ACP-4"]],
+    ["ACP-9", "todo", ["ACP-4"]],
+    ["ACP-11", "todo", ["ACP-5", "ACP-9"]],
+    ["ACP-12", "todo", ["ACP-9"]],
+    ["ACP-13", "todo", ["ACP-9"]],
+    ["ACP-14", "todo", ["ACP-11"]],
+    ["ACP-18", "todo", ["ACP-11"]],
+    ["ACP-19", "todo", ["ACP-11"]],
+    ["ACP-89", "todo"],
+    ["ACP-90", "todo", ["ACP-89"]],
+    ["ACP-91", "todo", ["ACP-89"]],
+  ];
+  const firstGroup = ["ACP-4", "ACP-5", "ACP-9", "ACP-11", "ACP-12", "ACP-13", "ACP-14", "ACP-18", "ACP-19"];
+  const secondGroup = ["ACP-89", "ACP-90", "ACP-91"];
+  const extent = (layout: GraphLayout, ids: string[]) => {
+    const n = byId(layout);
+    return {
+      top: Math.min(...ids.map((id) => n.get(id)!.y)),
+      bottom: Math.max(...ids.map((id) => bottom(n.get(id)!))),
+    };
+  };
+
+  it("stacks separate groups of linked tickets a band gap apart, with no empty band between them", () => {
+    const layout = layoutGraph(tickets(twoGroups));
+    const first = extent(layout, firstGroup);
+    const second = extent(layout, secondGroup);
+    expect(first.top).toBe(0);
+    expect(second.top - first.bottom).toBe(DEFAULT_BAND_GAP);
+    expect(layout.height).toBe(second.bottom);
+  });
+
+  it("moves a group's edges, long edges' runs and back edges along with its cards", () => {
+    // The second group gains a long edge, ACP-89 -> ACP-92 across column 1,
+    // and a cycle, ACP-91 -> ACP-89 drawn as a back edge.
+    const specs: Spec[] = [
+      ...twoGroups.map(([key, status, deps]): Spec => (key === "ACP-89" ? [key, status, ["ACP-91"]] : [key, status, deps])),
+      ["ACP-92", "todo", ["ACP-89", "ACP-90"]],
+    ];
+    const layout = layoutGraph(tickets(specs));
+    const n = byId(layout);
+    const first = extent(layout, firstGroup);
+    const second = extent(layout, [...secondGroup, "ACP-92"]);
+    const edge = (from: string, to: string) => layout.edges.find((e) => e.from === from && e.to === to)!;
+
+    const long = edge("ACP-89", "ACP-92");
+    expect(long.via).toHaveLength(2);
+    const run = long.via[0].y;
+    expect(long.via[1].y).toBe(run);
+    // The run moved down with its group, whose band it may top, and stays
+    // clear of the group's cards in column 1.
+    expect(run).toBeGreaterThanOrEqual(first.bottom + DEFAULT_BAND_GAP);
+    expect(Math.min(second.top, run) - first.bottom).toBe(DEFAULT_BAND_GAP);
+    for (const id of ["ACP-90", "ACP-91"]) {
+      const card = n.get(id)!;
+      expect(run <= card.y - DEFAULT_ROW_GAP || run >= bottom(card) + DEFAULT_ROW_GAP, id).toBe(true);
+    }
+    // Every edge, the back edge included, still starts on its blocker's
+    // right side and ends on the blocked card's left side.
+    expect(edge("ACP-91", "ACP-89").back).toBe(true);
+    for (const e of layout.edges) {
+      const from = n.get(e.from)!;
+      const to = n.get(e.to)!;
+      expect(e.start.x).toBe(from.x + from.width);
+      expect(e.start.y).toBeGreaterThanOrEqual(from.y);
+      expect(e.start.y).toBeLessThanOrEqual(bottom(from));
+      expect(e.end.x).toBe(to.x);
+      expect(e.end.y).toBeGreaterThanOrEqual(to.y);
+      expect(e.end.y).toBeLessThanOrEqual(bottom(to));
+    }
+  });
+
+  it("sits cards with only hidden blockers at the bottom of their column, below the last band", () => {
+    // ACP-95 and ACP-96 wait only on a ticket that isn't drawn. Column 1's
+    // last card of a group is ACP-91, but they go below the whole last band.
+    const layout = layoutGraph(
+      tickets([...twoGroups, ["ACP-95", "todo", ["X-1"]], ["ACP-96", "todo", ["X-1"]]], { "X-1": "todo" }),
+    );
+    const n = byId(layout);
+    const last = extent(layout, secondGroup);
+    const [a95, a96] = [n.get("ACP-95")!, n.get("ACP-96")!];
+    expect([a95.column, a96.column]).toEqual([1, 1]);
+    expect(a95.y).toBe(last.bottom + DEFAULT_BAND_GAP);
+    expect(a96.y).toBe(bottom(a95) + DEFAULT_ROW_GAP);
+    expect(extent(layout, secondGroup).top - extent(layout, firstGroup).bottom).toBe(DEFAULT_BAND_GAP);
+    expect(layout.height).toBe(bottom(a96));
+  });
+
+  it("keeps a column with no edges at all packed from the origin", () => {
+    // Nothing is linked: both tickets wait only on hidden blockers, so they
+    // stack from the top of column 1 as before.
+    const layout = layoutGraph(tickets([["A-1", "todo", ["X-1"]], ["A-2", "todo", ["X-1"]]], { "X-1": "todo" }), {
+      origin: { x: 0, y: 20 },
+    });
+    const n = byId(layout);
+    expect(n.get("A-1")!.y).toBe(20);
+    expect(n.get("A-2")!.y).toBe(bottom(n.get("A-1")!) + DEFAULT_ROW_GAP);
+  });
+
+  it("keeps held tickets at the top of Ready when their groups interleave there, as one band", () => {
+    // A-1 and A-4 are held, so they top Ready over A-2, which is in A-1's
+    // group: the two groups can't be stacked apart, and share a band. A-6,
+    // held and linked to nothing, stays with them; A-7's group comes after.
+    const layout = layoutGraph(
+      tickets([
+        ["A-1", "in_progress"],
+        ["A-2", "todo"],
+        ["A-3", "todo", ["A-1", "A-2"]],
+        ["A-4", "agent_review"],
+        ["A-5", "todo", ["A-4"]],
+        ["A-6", "in_progress"],
+        ["A-7", "todo"],
+        ["A-8", "todo", ["A-7"]],
+      ]),
+    );
+    const n = byId(layout);
+    const ready = ["A-1", "A-4", "A-6", "A-2", "A-7"].map((id) => n.get(id)!);
+    expect(ready[0].y).toBe(0);
+    for (let i = 1; i < ready.length; i++) expect(ready[i].y, ready[i].id).toBeGreaterThanOrEqual(bottom(ready[i - 1]) + DEFAULT_ROW_GAP);
+    expect(n.get("A-6")!.y).toBe(bottom(n.get("A-4")!) + DEFAULT_ROW_GAP);
+    const shared = extent(layout, ["A-1", "A-2", "A-3", "A-4", "A-5", "A-6"]);
+    expect(extent(layout, ["A-7", "A-8"]).top - shared.bottom).toBe(DEFAULT_BAND_GAP);
   });
 
   it("lays unlinked Ready tickets out three across below the graph, under the first columns", () => {
@@ -1183,10 +1314,11 @@ describe("positionGraph", () => {
     );
     const { width, height } = DEFAULT_NODE_SIZE;
     const n = byId(layout);
-    expect([n.get("A-2")!.x, n.get("A-2")!.y]).toEqual([0, height + DEFAULT_ROW_GAP]);
+    // Two groups, A-1 -> A-3 and A-2 -> A-4, one band under the other.
+    expect([n.get("A-2")!.x, n.get("A-2")!.y]).toEqual([0, height + DEFAULT_BAND_GAP]);
     expect([n.get("A-3")!.x, n.get("A-3")!.y]).toEqual([width + DEFAULT_COLUMN_GAP, 0]);
     expect(layout.width).toBe(2 * width + DEFAULT_COLUMN_GAP);
-    expect(layout.height).toBe(2 * height + DEFAULT_ROW_GAP);
+    expect(layout.height).toBe(2 * height + DEFAULT_BAND_GAP);
   });
 
   it("joins a back edge from the blocker's right edge to the blocked card's left edge", () => {
@@ -1199,7 +1331,8 @@ describe("positionGraph", () => {
     );
     const { width, height } = DEFAULT_NODE_SIZE;
     const column1 = width + DEFAULT_COLUMN_GAP;
-    const rows = height + DEFAULT_ROW_GAP;
+    // A-3's self-dependency makes it a group of its own, a band below the cycle.
+    const rows = height + DEFAULT_BAND_GAP;
     expect(layout.edges).toEqual([
       { from: "A-1", to: "A-2", back: false, start: { x: width, y: height / 2 }, end: { x: column1, y: height / 2 }, via: [] },
       { from: "A-2", to: "A-1", back: true, start: { x: column1 + width, y: height / 2 }, end: { x: 0, y: height / 2 }, via: [] },
@@ -1249,6 +1382,91 @@ describe("layout stability", () => {
       const input = shuffled(base, random).map((t) => ({ ...t, dependsOn: shuffled(t.dependsOn ?? [], random) }));
       expect(strip(layoutGraph(input))).toEqual(expected);
     }
+  });
+
+  // Each column's cards and waypoints as placed, in the first stage's order:
+  // a waypoint spans nothing, at the height its edge crosses the column.
+  function placedLayers(topology: GraphTopology, layout: GraphLayout) {
+    const node = new Map(layout.nodes.map((n) => [n.id, n]));
+    return topology.layers.map((layer, c) =>
+      layer.map((entry) => {
+        if (entry.kind === "card") {
+          const n = node.get(entry.id)!;
+          return { id: entry.id, top: n.y, bottom: n.y + n.height };
+        }
+        const crossing = c - node.get(topology.edges[entry.edge].from)!.column - 1;
+        const at = layout.edges[entry.edge].via[2 * crossing].y;
+        return { id: `${entry.edge}@${c}`, top: at, bottom: at };
+      }),
+    );
+  }
+
+  // The groups of linked tickets, each with its extent over its cards and
+  // the points its edges cross columns at; and the cards in no group.
+  function groupsOf(topology: GraphTopology, layout: GraphLayout) {
+    const node = new Map(layout.nodes.map((n) => [n.id, n]));
+    const parent = new Map<string, string>();
+    const find = (id: string): string => (parent.get(id) === id ? id : find(parent.get(id)!));
+    for (const edge of topology.edges) {
+      for (const id of [edge.from, edge.to]) if (!parent.has(id)) parent.set(id, id);
+      parent.set(find(edge.from), find(edge.to));
+    }
+    const groups = new Map<string, { ids: string[]; top: number; bottom: number }>();
+    const grow = (root: string, top: number, bottom: number) => {
+      const group = groups.get(root) ?? { ids: [], top: Infinity, bottom: -Infinity };
+      group.top = Math.min(group.top, top);
+      group.bottom = Math.max(group.bottom, bottom);
+      groups.set(root, group);
+      return group;
+    };
+    for (const id of parent.keys()) grow(find(id), node.get(id)!.y, node.get(id)!.y + node.get(id)!.height).ids.push(id);
+    for (const edge of layout.edges) for (const point of edge.via) grow(find(edge.from), point.y, point.y);
+    const loose = layout.nodes.filter((n) => !n.inGrid && !parent.has(n.id));
+    return { groups: [...groups.values()].sort((a, b) => a.top - b.top), loose };
+  }
+
+  it("keeps every column's order, rowGap apart, after stacking the groups", () => {
+    const random = mulberry32(14);
+    for (let graph = 0; graph < 40; graph++) {
+      const topology = computeGraphTopology(tickets(board(random, 30), outside));
+      const layout = positionGraph(topology);
+      for (const column of placedLayers(topology, layout)) {
+        for (let i = 1; i < column.length; i++) {
+          expect(column[i].top, `${column[i - 1].id} then ${column[i].id}`).toBeGreaterThanOrEqual(column[i - 1].bottom + DEFAULT_ROW_GAP);
+        }
+      }
+    }
+  });
+
+  it("stacks every group of linked tickets exactly a band gap below the one before, from the origin", () => {
+    // No held tickets here, so no two groups are merged into one band.
+    const random = mulberry32(15);
+    let stacked = 0;
+    for (let graph = 0; graph < 40; graph++) {
+      // Three small boards that never link to each other, for several groups.
+      const specs = ["A", "B", "C"].flatMap((prefix) => board(random, 10, prefix)).map(([key, , deps]): Spec => [key, "todo", deps]);
+      const topology = computeGraphTopology(tickets(specs, outside));
+      const layout = positionGraph(topology, { origin: { x: 0, y: 20 } });
+      const { groups, loose } = groupsOf(topology, layout);
+      expect(groups[0].top).toBe(20);
+      for (let i = 1; i < groups.length; i++) {
+        expect(groups[i].top - groups[i - 1].bottom).toBe(DEFAULT_BAND_GAP);
+        stacked++;
+      }
+      // Cards in no group sit below the last band, the highest of each
+      // column a band gap below it.
+      const last = groups[groups.length - 1].bottom;
+      const highest = new Map<number, number>();
+      for (const card of loose) highest.set(card.column, Math.min(highest.get(card.column) ?? Infinity, card.y));
+      for (const y of highest.values()) expect(y).toBe(last + DEFAULT_BAND_GAP);
+      // The grid starts gridGap below the lowest card, or long edge's run.
+      const lowest = Math.max(
+        ...layout.nodes.filter((n) => !n.inGrid).map((n) => n.y + n.height),
+        ...layout.edges.flatMap((e) => e.via.map((point) => point.y)),
+      );
+      if (layout.grid) expect(layout.grid.y).toBe(lowest + DEFAULT_GRID_GAP);
+    }
+    expect(stacked).toBeGreaterThan(100);
   });
 
   it("moves no card of the graph when an unlinked ticket arrives, which goes to the grid", () => {
@@ -1360,7 +1578,8 @@ describe("matchingBounds", () => {
       x: origin.x,
       y: origin.y,
       width: 2 * width + DEFAULT_COLUMN_GAP,
-      height: 2 * height + DEFAULT_ROW_GAP,
+      // A-1 -> A-3 and A-2 -> A-4 are two groups, a band apart.
+      height: 2 * height + DEFAULT_BAND_GAP,
     });
     // Every node matching falls back to null rather than to this box, which
     // starts below the headers and stops short of the right-hand gutter.

@@ -39,8 +39,9 @@
 //   an agent holds (in_progress or agent_review) stays at the top of Ready
 //   with the other held tickets, linked or not. A ticket in a later column
 //   with no edge, which only hidden blockers put there, sits at the bottom of
-//   its column. Which tickets are linked is decided on the input alone, so a
-//   ticket moves between the grid and the graph as it gains or loses edges.
+//   its column, below every group of linked tickets. Which tickets are linked
+//   is decided on the input alone, so a ticket moves between the grid and the
+//   graph as it gains or loses edges.
 // - A forward edge that spans more than one column gets a waypoint (a dummy
 //   node) in every column it crosses. Waypoints are ordered and placed like
 //   cards of no height, so the edge is drawn through a gap of its own rather
@@ -70,12 +71,23 @@
 // and to what each blocks, right to left; an entry with no neighbours on one
 // side uses the other, and one with none at all sits tight below the entry
 // above it (at the top of a column, tight above the entry below it); a column
-// with no edges at all stays packed from the top. The whole graph is then
-// shifted so its highest entry starts at the origin, and the grid starts
-// gridGap below its lowest card, three cards across, aligned to the first
-// three columns. Edge ends spread down a card side, ordered by the height of
-// what is at the other end, with back edges at the top, where they turn up
-// to their lanes.
+// with no edges at all stays packed from the top.
+//
+// The rounds fit every component at once, so a wide one can push the next
+// one down through the ordering, and nothing pulls it back up. Stacking the
+// bands (stackBands) undoes that: each component becomes a band, from the
+// top of its highest entry to the bottom of its lowest across every column,
+// and the bands are stacked from the origin down in the order the columns
+// list them, bandGap apart, each keeping its own placement. The bottom of the
+// last band is the linked graph's height. Held tickets linked to nothing go
+// with the band of the card above them in Ready, or below at the top. Where
+// held tickets of several components top Ready above another card of one of
+// them, those components can't be stacked apart and share one band. A card
+// with no edge in a later column sits below the last band, bandGap under it.
+// The grid starts gridGap below the lowest card or long edge's run, three
+// cards across, aligned to the first three columns. Edge ends spread down a
+// card side, ordered by the height of what is at the other end, with back
+// edges at the top, where they turn up to their lanes.
 //
 // Everything is ordered by ticket (project prefix, then number, then id)
 // before any decision is made, so the output does not depend on the order of
@@ -191,6 +203,11 @@ export interface PositionOptions {
   /** Top-left corner of the graph: where Ready starts and the highest card or long edge sits. */
   origin?: Point;
   /**
+   * Vertical space between two bands, each a group of linked tickets, and
+   * between the last band and the cards below it that no edge touches.
+   */
+  bandGap?: number;
+  /**
    * Vertical space from the lowest card of the graph, or from the origin when
    * the columns are empty, to the grid's first row. The page puts the grid's
    * header in it.
@@ -202,6 +219,8 @@ export const DEFAULT_NODE_SIZE: Size = { width: 280, height: 96 };
 export const DEFAULT_COLUMN_GAP = 80;
 export const DEFAULT_ROW_GAP = 16;
 export const DEFAULT_GRID_GAP = 64;
+/** Twice the row gap, so the space between two groups reads as more than the space inside one. */
+export const DEFAULT_BAND_GAP = 32;
 /** Cards per row of the grid, each under one of the first columns. */
 export const GRID_COLUMNS = 3;
 
@@ -720,6 +739,7 @@ export function positionGraph<T extends GraphTicket>(
   const rowGap = options.rowGap ?? DEFAULT_ROW_GAP;
   const origin = options.origin ?? { x: 0, y: 0 };
   const gridGap = options.gridGap ?? DEFAULT_GRID_GAP;
+  const bandGap = options.bandGap ?? DEFAULT_BAND_GAP;
   const sizeOf = (id: string) => options.sizes?.get(id) ?? defaultSize;
   const gapAfter = (column: number) => options.columnGaps?.[column] ?? columnGap;
 
@@ -791,17 +811,17 @@ export function positionGraph<T extends GraphTicket>(
     }
   }
 
-  // Shift the placed columns so the highest entry starts at the origin. A
-  // column with no edges at all keeps its packed stack, from the origin.
-  let top = Infinity;
-  stacks.forEach((stack, c) => {
-    if (linked[c]) for (const e of stack) top = Math.min(top, y[e]);
-  });
-  const shift = origin.y - (top === Infinity ? 0 : top);
+  // Stack the groups of linked tickets as bands from the origin down, and
+  // the cards no edge touches below them. A column with no edges at all
+  // keeps its packed stack, from the origin.
+  const touched = new Uint8Array(heights.length);
+  for (const list of waypoints) for (const e of list) touched[e] = 1;
+  for (const edge of topology.edges) touched[cardEntry.get(edge.from)!] = touched[cardEntry.get(edge.to)!] = 1;
+  stackBands(stacks, heights, down, linked, touched, y, { top: origin.y, bandGap, rowGap });
   let bottom = -Infinity;
   stacks.forEach((stack, c) =>
     stack.forEach((e) => {
-      y[e] += linked[c] ? shift : origin.y;
+      if (!linked[c]) y[e] += origin.y;
       bottom = Math.max(bottom, y[e] + heights[e]);
     }),
   );
@@ -857,6 +877,194 @@ export function positionGraph<T extends GraphTicket>(
     width: Math.max(columnsRight, grid ? grid.x + grid.width : origin.x),
     height: Math.max(origin.y, bottom),
   };
+}
+
+// Stacks the groups of linked tickets as bands, one under another, and
+// returns the bottom of the lowest band: the height of the linked graph. It
+// places every entry of the columns that have an edge (`linked`) and leaves
+// the other columns alone.
+//
+// A group is a connected component of cards and waypoints, joined along the
+// forward edges (`down`); a back edge always closes a cycle inside one, and a
+// card whose only edge is a self-dependency is a group of its own. A band is
+// a group, or several merged as below, and keeps the placement rounds'
+// positions within it: its extent, from the top of its highest entry to the
+// bottom of its lowest across every column, moves as one, the first band to
+// `top` and each next one bandGap below the one before.
+//
+// Cards no edge touches belong to no group of their own. In Ready they are
+// held tickets, kept on top by the first stage, and join the group of the
+// nearest card above them in the column, or below at the top, which is where
+// the rounds left them. In later columns they sit below the last band,
+// bandGap under it and rowGap apart, in their column's order.
+//
+// Bands are stacked in the order the columns list them, which never reorders
+// a column: a group goes before every group listed below it in some column.
+// Groups listed in both orders, which only held tickets from several groups
+// at the top of Ready cause, can't be stacked apart and share one band.
+// Where the columns leave a choice, the group listed first, column by column,
+// goes first.
+function stackBands(
+  stacks: readonly number[][],
+  heights: readonly number[],
+  down: readonly number[][],
+  linked: readonly boolean[],
+  touched: Uint8Array,
+  y: number[],
+  gaps: { top: number; bandGap: number; rowGap: number },
+): number {
+  const parent = Int32Array.from(heights, (_, x) => x);
+  const find = (x: number) => {
+    while (parent[x] !== x) {
+      parent[x] = parent[parent[x]];
+      x = parent[x];
+    }
+    return x;
+  };
+  const union = (a: number, b: number) => {
+    parent[find(a)] = find(b);
+  };
+  down.forEach((ends, x) => ends.forEach((z) => union(x, z)));
+
+  // The cards no edge touches: in Ready, joined to a group; later, set aside.
+  const trailing: number[][] = stacks.map(() => []);
+  stacks.forEach((stack, c) => {
+    if (!linked[c]) return;
+    if (c > 0) {
+      for (const e of stack) if (!touched[e]) trailing[c].push(e);
+      return;
+    }
+    // A linked column has a touched entry.
+    let above = stack.find((e) => touched[e])!;
+    for (const e of stack) {
+      if (touched[e]) above = e;
+      else union(e, above);
+    }
+  });
+
+  // Groups numbered by their first listing, column by column, their entries,
+  // and the groups each column lists directly below each one.
+  const groupOf = new Map<number, number>();
+  const members: number[][] = [];
+  const below: Set<number>[] = [];
+  stacks.forEach((stack, c) => {
+    if (!linked[c]) return;
+    let previous = -1;
+    for (const e of stack) {
+      if (c > 0 && !touched[e]) continue;
+      const root = find(e);
+      let g = groupOf.get(root);
+      if (g === undefined) {
+        g = members.length;
+        groupOf.set(root, g);
+        members.push([]);
+        below.push(new Set());
+      }
+      members[g].push(e);
+      if (previous !== -1 && previous !== g) below[previous].add(g);
+      previous = g;
+    }
+  });
+
+  // Groups listed in both orders are strongly connected; each such set is
+  // one band. A band is named by its first group, and taken once every band
+  // listed above it is placed, the lowest named first.
+  const bandOf = stronglyConnectedComponents(below.map((gs) => [...gs]));
+  const bands = new Map<number, number[]>();
+  members.forEach((_, g) => {
+    const list = bands.get(bandOf[g]);
+    if (list) list.push(g);
+    else bands.set(bandOf[g], [g]);
+  });
+  const waiting = new Map<number, number>();
+  const next = new Map<number, Set<number>>();
+  for (const b of bands.keys()) {
+    waiting.set(b, 0);
+    next.set(b, new Set());
+  }
+  below.forEach((gs, g) =>
+    gs.forEach((h) => {
+      const from = bandOf[g];
+      const to = bandOf[h];
+      if (from === to || next.get(from)!.has(to)) return;
+      next.get(from)!.add(to);
+      waiting.set(to, waiting.get(to)! + 1);
+    }),
+  );
+  // Groups ascend in each band's list, so its first is its name.
+  const ready = new MinHeap();
+  for (const [b, n] of waiting) if (n === 0) ready.push(bands.get(b)![0]);
+
+  let cursor = gaps.top;
+  let bottom = gaps.top;
+  while (ready.size > 0) {
+    const b = bandOf[ready.pop()];
+    const entries = bands.get(b)!.flatMap((g) => members[g]);
+    let top = Infinity;
+    let low = -Infinity;
+    for (const e of entries) {
+      top = Math.min(top, y[e]);
+      low = Math.max(low, y[e] + heights[e]);
+    }
+    const shift = cursor - top;
+    for (const e of entries) y[e] += shift;
+    bottom = low + shift;
+    cursor = bottom + gaps.bandGap;
+    for (const d of next.get(b)!) {
+      const n = waiting.get(d)! - 1;
+      waiting.set(d, n);
+      if (n === 0) ready.push(bands.get(d)![0]);
+    }
+  }
+
+  for (const column of trailing) {
+    let at = cursor;
+    for (const e of column) {
+      y[e] = at;
+      at += heights[e] + gaps.rowGap;
+    }
+  }
+  return bottom;
+}
+
+// The smallest-first queue stackBands takes bands from.
+class MinHeap {
+  private items: number[] = [];
+
+  get size(): number {
+    return this.items.length;
+  }
+
+  push(value: number) {
+    const items = this.items;
+    let i = items.push(value) - 1;
+    while (i > 0) {
+      const up = (i - 1) >> 1;
+      if (items[up] <= value) break;
+      items[i] = items[up];
+      i = up;
+    }
+    items[i] = value;
+  }
+
+  pop(): number {
+    const items = this.items;
+    const top = items[0];
+    const last = items.pop()!;
+    if (items.length > 0) {
+      let i = 0;
+      for (;;) {
+        let child = 2 * i + 1;
+        if (child >= items.length) break;
+        if (child + 1 < items.length && items[child + 1] < items[child]) child++;
+        if (items[child] >= last) break;
+        items[i] = items[child];
+        i = child;
+      }
+      items[i] = last;
+    }
+    return top;
+  }
 }
 
 function median(values: number[]): number {

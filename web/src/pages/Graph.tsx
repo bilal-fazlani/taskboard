@@ -76,6 +76,9 @@ import {
 // of the empty Ready column and of a card in the moment before it's measured.
 const CARD_SIZE: Size = { width: 256, height: 96 };
 const ROW_GAP = 16;
+// Space between two groups of linked tickets stacked one under the other,
+// twice the row gap so it reads as a break between groups.
+const BAND_GAP = 2 * ROW_GAP;
 // Where the highest card, or long edge's run, starts when there are no back
 // edges: room for the column headers above. Each back edge adds a lane
 // between the headers and the cards.
@@ -348,6 +351,7 @@ export default function Graph() {
         columnGap: MIN_COLUMN_GAP,
         columnGaps: gutters.columnGaps,
         rowGap: ROW_GAP,
+        bandGap: BAND_GAP,
         origin: gutters.origin,
         gridGap: GRID_GAP,
       }),
