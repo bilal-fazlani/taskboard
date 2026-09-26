@@ -126,7 +126,9 @@ func (s *MCPServer) callDocumentTool(name string, args json.RawMessage) (result 
 	switch name {
 	case "list_documents":
 		var a documentOwnerArgs
-		json.Unmarshal(args, &a)
+		if err := decodeArgs(args, &a); err != nil {
+			return nil, true, err
+		}
 		owner, err := s.requireDocumentOwner(a)
 		if err != nil {
 			return nil, true, err
@@ -145,7 +147,9 @@ func (s *MCPServer) callDocumentTool(name string, args json.RawMessage) (result 
 			ID string `json:"id"`
 			documentOwnerArgs
 		}
-		json.Unmarshal(args, &a)
+		if err := decodeArgs(args, &a); err != nil {
+			return nil, true, err
+		}
 		id, err := s.resolveDocumentRefOrError(a.ID, a.documentOwnerArgs)
 		if err != nil {
 			return nil, true, err
@@ -171,7 +175,9 @@ func (s *MCPServer) callDocumentTool(name string, args json.RawMessage) (result 
 			Content string  `json:"content"`
 			Data    *string `json:"data"`
 		}
-		json.Unmarshal(args, &a)
+		if err := decodeArgs(args, &a); err != nil {
+			return nil, true, err
+		}
 		if a.Data != nil && a.Content != "" {
 			return nil, true, fmt.Errorf("pass content for a text document or data for an image, not both")
 		}
@@ -212,7 +218,9 @@ func (s *MCPServer) callDocumentTool(name string, args json.RawMessage) (result 
 			Content *string `json:"content"`
 			Data    *string `json:"data"`
 		}
-		json.Unmarshal(args, &a)
+		if err := decodeArgs(args, &a); err != nil {
+			return nil, true, err
+		}
 		if a.Name == nil && a.Content == nil && a.Data == nil {
 			return nil, true, fmt.Errorf("nothing to update: provide a name and/or content")
 		}
@@ -253,7 +261,9 @@ func (s *MCPServer) callDocumentTool(name string, args json.RawMessage) (result 
 			ID string `json:"id"`
 			documentOwnerArgs
 		}
-		json.Unmarshal(args, &a)
+		if err := decodeArgs(args, &a); err != nil {
+			return nil, true, err
+		}
 		id, err := s.resolveDocumentRefOrError(a.ID, a.documentOwnerArgs)
 		if err != nil {
 			return nil, true, err

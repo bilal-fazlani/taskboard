@@ -191,14 +191,18 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 		var a struct {
 			Status string `json:"status"`
 		}
-		json.Unmarshal(args, &a)
+		if err := decodeArgs(args, &a); err != nil {
+			return nil, err
+		}
 		return s.store.ListProjects(a.Status)
 
 	case "get_project":
 		var a struct {
 			ID string `json:"id"`
 		}
-		json.Unmarshal(args, &a)
+		if err := decodeArgs(args, &a); err != nil {
+			return nil, err
+		}
 		projectID, err := s.resolveProjectRefOrError(a.ID)
 		if err != nil {
 			return nil, err
@@ -211,7 +215,9 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 
 	case "create_project":
 		var a models.CreateProjectRequest
-		json.Unmarshal(args, &a)
+		if err := decodeArgs(args, &a); err != nil {
+			return nil, err
+		}
 		return s.store.CreateProject(a)
 
 	case "update_project":
@@ -219,7 +225,9 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 			ID string `json:"id"`
 			models.UpdateProjectRequest
 		}
-		json.Unmarshal(args, &a)
+		if err := decodeArgs(args, &a); err != nil {
+			return nil, err
+		}
 		projectID, err := s.resolveProjectRefOrError(a.ID)
 		if err != nil {
 			return nil, err
@@ -230,7 +238,9 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 		var a struct {
 			ID string `json:"id"`
 		}
-		json.Unmarshal(args, &a)
+		if err := decodeArgs(args, &a); err != nil {
+			return nil, err
+		}
 		projectID, err := s.resolveProjectRefOrError(a.ID)
 		if err != nil {
 			return nil, err
@@ -239,7 +249,9 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 
 	case "list_tickets":
 		var a models.TicketFilter
-		json.Unmarshal(args, &a)
+		if err := decodeArgs(args, &a); err != nil {
+			return nil, err
+		}
 		tickets, err := s.store.ListTickets(a)
 		if err != nil {
 			return nil, err
@@ -250,7 +262,9 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 		var a struct {
 			ProjectID string `json:"projectId"`
 		}
-		json.Unmarshal(args, &a)
+		if err := decodeArgs(args, &a); err != nil {
+			return nil, err
+		}
 		if strings.TrimSpace(a.ProjectID) == "" {
 			return nil, fmt.Errorf("projectId is required")
 		}
@@ -270,7 +284,9 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 
 	case "create_epic":
 		var a models.CreateEpicRequest
-		json.Unmarshal(args, &a)
+		if err := decodeArgs(args, &a); err != nil {
+			return nil, err
+		}
 		return s.store.CreateEpic(a)
 
 	case "update_epic":
@@ -279,7 +295,9 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 			Project string `json:"project"`
 			models.UpdateEpicRequest
 		}
-		json.Unmarshal(args, &a)
+		if err := decodeArgs(args, &a); err != nil {
+			return nil, err
+		}
 		if a.Name == nil && a.Description == nil {
 			return nil, fmt.Errorf("nothing to update: provide name and/or description")
 		}
@@ -301,7 +319,9 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 			ID      string `json:"id"`
 			Project string `json:"project"`
 		}
-		json.Unmarshal(args, &a)
+		if err := decodeArgs(args, &a); err != nil {
+			return nil, err
+		}
 		epicID, err := s.resolveEpicRefOrError(a.ID, a.Project)
 		if err != nil {
 			return nil, err
@@ -317,7 +337,9 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 
 	case "create_label":
 		var a models.CreateLabelRequest
-		json.Unmarshal(args, &a)
+		if err := decodeArgs(args, &a); err != nil {
+			return nil, err
+		}
 		if strings.TrimSpace(a.Name) == "" {
 			return nil, fmt.Errorf("name is required")
 		}
@@ -331,7 +353,9 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 			ID string `json:"id"`
 			models.UpdateLabelRequest
 		}
-		json.Unmarshal(args, &a)
+		if err := decodeArgs(args, &a); err != nil {
+			return nil, err
+		}
 		if a.Name == nil && a.Color == nil {
 			return nil, fmt.Errorf("nothing to update: provide name and/or color")
 		}
@@ -352,7 +376,9 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 		var a struct {
 			ID string `json:"id"`
 		}
-		json.Unmarshal(args, &a)
+		if err := decodeArgs(args, &a); err != nil {
+			return nil, err
+		}
 		labelID, err := s.resolveLabelRefOrError(a.ID)
 		if err != nil {
 			return nil, err
@@ -367,7 +393,9 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 		var a struct {
 			ID string `json:"id"`
 		}
-		json.Unmarshal(args, &a)
+		if err := decodeArgs(args, &a); err != nil {
+			return nil, err
+		}
 		ticketID, err := s.resolveTicketRefOrError(a.ID)
 		if err != nil {
 			return nil, err
@@ -386,7 +414,9 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 
 	case "create_ticket":
 		var a models.CreateTicketRequest
-		json.Unmarshal(args, &a)
+		if err := decodeArgs(args, &a); err != nil {
+			return nil, err
+		}
 		t, err := s.store.CreateTicket(a)
 		if err != nil {
 			return nil, err
@@ -398,7 +428,9 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 			ID string `json:"id"`
 			models.UpdateTicketRequest
 		}
-		json.Unmarshal(args, &a)
+		if err := decodeArgs(args, &a); err != nil {
+			return nil, err
+		}
 		ticketID, err := s.resolveTicketRefOrError(a.ID)
 		if err != nil {
 			return nil, err
@@ -415,7 +447,9 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 			ID string `json:"id"`
 			models.MoveTicketRequest
 		}
-		json.Unmarshal(args, &a)
+		if err := decodeArgs(args, &a); err != nil {
+			return nil, err
+		}
 		ticketID, err := s.resolveTicketRefOrError(a.ID)
 		if err != nil {
 			return nil, err
@@ -434,7 +468,9 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 		var a struct {
 			ID string `json:"id"`
 		}
-		json.Unmarshal(args, &a)
+		if err := decodeArgs(args, &a); err != nil {
+			return nil, err
+		}
 		ticketID, err := s.resolveTicketRefOrError(a.ID)
 		if err != nil {
 			return nil, err
@@ -445,7 +481,9 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 		var a struct {
 			ProjectID string `json:"projectId"`
 		}
-		json.Unmarshal(args, &a)
+		if err := decodeArgs(args, &a); err != nil {
+			return nil, err
+		}
 		return s.store.GetBoard(a.ProjectID)
 
 	case "create_subtask":
@@ -453,7 +491,9 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 			TicketID string `json:"ticketId"`
 			Title    string `json:"title"`
 		}
-		json.Unmarshal(args, &a)
+		if err := decodeArgs(args, &a); err != nil {
+			return nil, err
+		}
 		if a.TicketID == "" || a.Title == "" {
 			return nil, fmt.Errorf("ticketId and title are required")
 		}
@@ -470,7 +510,9 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 				Title string `json:"title"`
 			} `json:"subtasks"`
 		}
-		json.Unmarshal(args, &a)
+		if err := decodeArgs(args, &a); err != nil {
+			return nil, err
+		}
 		if a.TicketID == "" || len(a.Subtasks) == 0 {
 			return nil, fmt.Errorf("ticketId and at least one subtask are required")
 		}
@@ -492,7 +534,9 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 		var a struct {
 			ID string `json:"id"`
 		}
-		json.Unmarshal(args, &a)
+		if err := decodeArgs(args, &a); err != nil {
+			return nil, err
+		}
 		return map[string]bool{"deleted": true}, s.store.DeleteSubtask(a.ID)
 
 	case "toggle_subtask":
@@ -500,8 +544,8 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 			ID        string `json:"id"`
 			Completed *bool  `json:"completed"`
 		}
-		if err := json.Unmarshal(args, &a); err != nil {
-			return nil, fmt.Errorf("invalid arguments: %w", err)
+		if err := decodeArgs(args, &a); err != nil {
+			return nil, err
 		}
 		if a.Completed != nil {
 			return s.store.SetSubtaskState(a.ID, *a.Completed)
@@ -514,6 +558,28 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 		}
 		return nil, fmt.Errorf("unknown tool: %s", name)
 	}
+}
+
+// decodeArgs decodes a tool call's arguments into v, the way every handler
+// in callTool and callDocumentTool does. json.Unmarshal on its own leaves a
+// wrongly typed field (a number sent as a string, a string where a list
+// belongs) at its zero value and lets the call proceed as if it had
+// succeeded, silently ignoring what the caller actually asked for. Wrapping
+// the error instead turns that into a clear tool error, with no store call
+// and so no change to any data.
+//
+// `arguments` is optional in MCP's tools/call, so args comes in empty (nil,
+// or "") for a tool that takes none, or is called with none given; that is
+// left as v's zero value rather than fed to json.Unmarshal, which would
+// otherwise fail every such call with "unexpected end of JSON input".
+func decodeArgs(args json.RawMessage, v any) error {
+	if len(args) == 0 {
+		return nil
+	}
+	if err := json.Unmarshal(args, v); err != nil {
+		return fmt.Errorf("invalid arguments: %w", err)
+	}
+	return nil
 }
 
 // resolveTicketRefOrError resolves a ticket id-or-display-key argument the
