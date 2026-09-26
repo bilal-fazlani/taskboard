@@ -509,12 +509,12 @@ func (s *Server) moveTicket(w http.ResponseWriter, r *http.Request) {
 // ticketHistory answers with a ticket's status changes, newest first.
 func (s *Server) ticketHistory(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	t, err := s.store.GetTicket(id)
+	exists, err := s.store.TicketExists(id)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if t == nil {
+	if !exists {
 		writeError(w, http.StatusNotFound, "ticket not found")
 		return
 	}

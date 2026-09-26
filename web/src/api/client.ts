@@ -89,7 +89,8 @@ export interface Ticket {
   blocks?: TicketRef[];
   /** Left out when the ticket has no epic. */
   epic?: EpicRef;
-  /** How many times the ticket has entered agent_review. The server always sends it. */
+  /** How many times the ticket has entered agent_review. Optional because
+   * fixtures and mocks leave it out; a missing value means 0, not unknown. */
   reviewRounds?: number;
   /** How many documents the ticket has. Lists and the full ticket carry it. */
   documentCount?: number;
