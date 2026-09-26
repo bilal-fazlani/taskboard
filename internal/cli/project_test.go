@@ -45,12 +45,11 @@ func TestProjectDeleteAcceptsPrefixAndRejectsUnknownOne(t *testing.T) {
 	}
 }
 
-// projects.prefix is UNIQUE only under SQLite's default binary collation, so
-// two projects can differ only by the case of their prefix. "project delete"
-// must refuse to guess which one a case-insensitive-only match means,
-// rather than deleting whichever one the database returns first (this
-// previously deleted the wrong project, and every ticket under it).
-func TestProjectDeleteRejectsAmbiguousPrefix(t *testing.T) {
+// Two projects whose prefixes differ only by case made "project delete glow"
+// delete the other one, with all its tickets. "project create" now refuses
+// the second prefix with a clear error and a non-zero exit, so a
+// case-insensitive prefix always names exactly one project.
+func TestProjectCreateRejectsPrefixTakenIgnoringCase(t *testing.T) {
 	setLiveBuild(t, false)
 	sandboxHome(t)
 	path := filepath.Join(t.TempDir(), "dev.db")
@@ -58,20 +57,20 @@ func TestProjectDeleteRejectsAmbiguousPrefix(t *testing.T) {
 	if _, err := runCLI(t, "--db", path, "project", "create", "Glow Upper", "--prefix", "GLOW"); err != nil {
 		t.Fatalf("project create GLOW: %v", err)
 	}
-	if _, err := runCLI(t, "--db", path, "project", "create", "Glow Lower", "--prefix", "glow"); err != nil {
-		t.Fatalf("project create glow: %v", err)
+	_, err := runCLI(t, "--db", path, "project", "create", "Glow Lower", "--prefix", "glow")
+	if err == nil {
+		t.Fatal("project create glow beside GLOW succeeded")
 	}
-
-	if _, err := runCLI(t, "--db", path, "project", "delete", "Glow"); err == nil {
-		t.Fatal("expected an error for a prefix matching two projects with no exact case match")
+	if !strings.Contains(err.Error(), `already used by project "Glow Upper"`) || !strings.Contains(err.Error(), "letter case") {
+		t.Fatalf("error %q should name the project and the case rule", err)
 	}
 
 	listed, err := runCLI(t, "--db", path, "project", "list")
 	if err != nil {
 		t.Fatalf("project list: %v", err)
 	}
-	if !strings.Contains(listed, "[GLOW]") || !strings.Contains(listed, "[glow]") {
-		t.Fatalf("project list after a rejected ambiguous delete = %q, want both GLOW and glow still present", listed)
+	if !strings.Contains(listed, "[GLOW]") || strings.Contains(listed, "[glow]") {
+		t.Fatalf("project list after the refusal = %q, want GLOW only", listed)
 	}
 }
 

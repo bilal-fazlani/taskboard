@@ -124,11 +124,21 @@ func (s *Store) CreateProject(req models.CreateProjectRequest) (*models.Project,
 		p.Color = "#3B82F6"
 	}
 
-	_, err := s.db.Exec(
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, fmt.Errorf("beginning transaction: %w", err)
+	}
+	defer tx.Rollback()
+	if err := checkPrefixFree(tx, p.Prefix, ""); err != nil {
+		return nil, err
+	}
+	if _, err := tx.Exec(
 		"INSERT INTO projects (id, name, prefix, description, agent_instructions, icon, color, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
 		p.ID, p.Name, p.Prefix, p.Description, *p.AgentInstructions, p.Icon, p.Color, p.Status, stamp(p.CreatedAt), stamp(p.UpdatedAt),
-	)
-	return &p, err
+	); err != nil {
+		return nil, err
+	}
+	return &p, tx.Commit()
 }
 
 func (s *Store) UpdateProject(id string, req models.UpdateProjectRequest) (*models.Project, error) {
@@ -160,11 +170,23 @@ func (s *Store) UpdateProject(id string, req models.UpdateProjectRequest) (*mode
 	}
 	p.UpdatedAt = time.Now().UTC()
 
-	_, err = s.db.Exec(
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, fmt.Errorf("beginning transaction: %w", err)
+	}
+	defer tx.Rollback()
+	if req.Prefix != nil {
+		if err := checkPrefixFree(tx, p.Prefix, p.ID); err != nil {
+			return nil, err
+		}
+	}
+	if _, err := tx.Exec(
 		"UPDATE projects SET name=?, prefix=?, description=?, agent_instructions=?, icon=?, color=?, status=?, updated_at=? WHERE id=?",
 		p.Name, p.Prefix, p.Description, *p.AgentInstructions, p.Icon, p.Color, p.Status, stamp(p.UpdatedAt), p.ID,
-	)
-	return p, err
+	); err != nil {
+		return nil, err
+	}
+	return p, tx.Commit()
 }
 
 func (s *Store) DeleteProject(id string) error {
@@ -1120,9 +1142,9 @@ func (s *Store) ResolveTicketID(ref string) (string, error) {
 }
 
 // resolveProjectByPrefix resolves a project prefix case-insensitively.
-// projects.prefix is UNIQUE under SQLite's default binary collation, so
-// "GLOW" and "glow" can both exist as separate projects; matching
-// case-insensitively can then find more than one row, and picking one
+// Migration 013 and checkPrefixFree keep "GLOW" and "glow" from both
+// existing, but this guard stays as a second line of defence: if matching
+// case-insensitively ever finds more than one row, picking one
 // arbitrarily has previously deleted the wrong project (and its tickets).
 // An exact, case-sensitive match on prefix breaks the tie when there is
 // exactly one; anything left ambiguous is reported by name rather than

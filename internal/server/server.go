@@ -398,7 +398,7 @@ func (s *Server) createProject(w http.ResponseWriter, r *http.Request) {
 	}
 	p, err := s.store.CreateProject(req)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeStoreError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, p)
@@ -412,7 +412,7 @@ func (s *Server) updateProject(w http.ResponseWriter, r *http.Request) {
 	}
 	p, err := s.store.UpdateProject(chi.URLParam(r, "id"), req)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeStoreError(w, err)
 		return
 	}
 	if p == nil {

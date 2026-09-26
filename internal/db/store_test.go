@@ -948,15 +948,16 @@ func TestResolveProjectRefUnknownIsAnError(t *testing.T) {
 	}
 }
 
-// projects.prefix is UNIQUE only under SQLite's default binary collation, so
-// "GLOW" and "glow" can coexist as two different projects. Matching
-// case-insensitively must prefer an exact case match when there is exactly
+// Before migration 013, projects.prefix was UNIQUE only under SQLite's binary
+// collation, so "GLOW" and "glow" could coexist as two different projects.
+// The store and index now refuse that, but the resolvers keep their guard:
+// matching case-insensitively must prefer an exact case match when there is exactly
 // one, and refuse to guess when there isn't — never silently resolve to
 // whichever row the database happens to return first.
 func TestResolveProjectRefPrefixCaseAmbiguity(t *testing.T) {
 	s := newTestStore(t)
 	upper := seedProject(t, s, "Glow Upper", "GLOW")
-	lower := seedProject(t, s, "Glow Lower", "glow")
+	lower := seedCaseCollision(t, s, "Glow Lower", "glow")
 
 	if id, err := s.ResolveProjectRef("glow"); err != nil {
 		t.Fatalf("ResolveProjectRef(glow): %v", err)
@@ -984,7 +985,7 @@ func TestResolveProjectRefPrefixCaseAmbiguity(t *testing.T) {
 func TestResolveTicketIDPrefixCaseAmbiguity(t *testing.T) {
 	s := newTestStore(t)
 	upper := seedProject(t, s, "Glow Upper", "GLOW")
-	lower := seedProject(t, s, "Glow Lower", "glow")
+	lower := seedCaseCollision(t, s, "Glow Lower", "glow")
 	upperTicket := seedTicket(t, s, upper.ID, "Upper first") // GLOW-1
 	lowerTicket := seedTicket(t, s, lower.ID, "Lower first") // glow-1
 
