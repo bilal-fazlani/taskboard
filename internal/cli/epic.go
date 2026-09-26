@@ -114,10 +114,9 @@ func epicCommands() *cobra.Command {
 			}
 			// resolveEpicArg already confirms the epic exists (GetEpic for a
 			// bare id, ResolveEpicRef for a name), so by the time we reach
-			// DeleteEpic here epicID is known good. That matters because
-			// DeleteEpic itself reports (0, nil) for an unknown id, which
-			// would otherwise look like a silent no-op instead of a clear
-			// "not found" error.
+			// DeleteEpic here epicID is known good. DeleteEpic itself also
+			// reports a clear "not found" error for an unknown id now, rather
+			// than a silent no-op, so this is defence in depth.
 			epicID, err := resolveEpicArg(store, args[0], deleteProject)
 			if err != nil {
 				return err

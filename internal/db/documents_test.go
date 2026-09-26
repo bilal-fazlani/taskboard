@@ -233,14 +233,10 @@ func TestDeleteDocumentAndCascade(t *testing.T) {
 	d := seedDocument(t, s, tk.ID, "Plan", "")
 	kept := seedDocument(t, s, tk.ID, "Kept", "")
 
-	deleted, err := s.DeleteDocument(d.ID)
-	if err != nil || !deleted {
-		t.Fatalf("DeleteDocument = %v, %v", deleted, err)
+	if err := s.DeleteDocument(d.ID); err != nil {
+		t.Fatalf("DeleteDocument: %v", err)
 	}
-	again, err := s.DeleteDocument(d.ID)
-	if err != nil || again {
-		t.Fatalf("second delete = %v, %v; want false, nil", again, err)
-	}
+	assertInvalidInput(t, s.DeleteDocument(d.ID), `document not found: "`+d.ID+`"`)
 
 	if err := s.DeleteTicket(tk.ID); err != nil {
 		t.Fatal(err)
@@ -325,7 +321,7 @@ func TestUpdateDocumentRefusesAStaleRevision(t *testing.T) {
 	}
 
 	// A stale save to a document deleted meanwhile is still not found.
-	if _, err := s.DeleteDocument(d.ID); err != nil {
+	if err := s.DeleteDocument(d.ID); err != nil {
 		t.Fatal(err)
 	}
 	missing, err := s.UpdateDocument(d.ID, models.UpdateDocumentRequest{Content: &mine, ExpectedRevision: &stale})

@@ -268,12 +268,9 @@ func (s *MCPServer) callDocumentTool(name string, args json.RawMessage) (result 
 		if err != nil {
 			return nil, true, err
 		}
-		deleted, usedIn, err := s.store.DeleteDocumentReportingUse(id)
+		usedIn, err := s.store.DeleteDocumentReportingUse(id)
 		if err != nil {
 			return nil, true, err
-		}
-		if !deleted {
-			return nil, true, fmt.Errorf("document not found")
 		}
 		result := map[string]any{"deleted": true}
 		if len(usedIn) > 0 {

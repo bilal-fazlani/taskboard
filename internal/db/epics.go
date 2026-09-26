@@ -362,7 +362,8 @@ func (s *Store) UpdateEpic(id string, req models.UpdateEpicRequest) (*models.Epi
 // DeleteEpic removes an epic. Its tickets stay and lose their epic (the
 // foreign key sets it to NULL); its own documents are deleted with it (the
 // foreign key cascades), its tickets' documents are not. It reports how many tickets that cleared,
-// read in the same transaction as the delete, like DeleteLabel.
+// read in the same transaction as the delete, like DeleteLabel. An unknown id
+// reports ErrInvalidInput rather than silently succeeding with a count of 0.
 func (s *Store) DeleteEpic(id string) (int, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -374,7 +375,7 @@ func (s *Store) DeleteEpic(id string) (int, error) {
 	if err := tx.QueryRow("SELECT COUNT(*) FROM tickets WHERE epic_id = ?", id).Scan(&count); err != nil {
 		return 0, fmt.Errorf("counting tickets for epic: %w", err)
 	}
-	if _, err := tx.Exec("DELETE FROM epics WHERE id = ?", id); err != nil {
+	if err := deleteRowOrNotFound(tx, "epics", "epic", id); err != nil {
 		return 0, err
 	}
 	if err := tx.Commit(); err != nil {

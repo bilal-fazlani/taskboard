@@ -1575,15 +1575,30 @@ func TestDeleteLabelReportsDetachedTicketCount(t *testing.T) {
 	if count != 1 {
 		t.Fatalf("detached count = %d, want 1", count)
 	}
+}
 
-	// A label with no tickets at all (and an unknown id) reports zero, not an error.
-	count, err = s.DeleteLabel("MISSING")
-	if err != nil {
-		t.Fatalf("DeleteLabel(missing id): %v", err)
-	}
-	if count != 0 {
-		t.Fatalf("detached count = %d, want 0 for an unknown label id", count)
-	}
+// DeleteLabel of an unknown id reports ErrInvalidInput rather than silently
+// succeeding with a detached count of 0.
+func TestDeleteLabelUnknownIDIsInvalidInput(t *testing.T) {
+	s := newTestStore(t)
+	_, err := s.DeleteLabel("MISSING")
+	assertInvalidInput(t, err, `label not found: "MISSING"`)
+}
+
+// DeleteTicket of an unknown (but well-formed) id reports ErrInvalidInput
+// rather than silently succeeding, the bug this ticket fixes.
+func TestDeleteTicketUnknownIDIsInvalidInput(t *testing.T) {
+	s := newTestStore(t)
+	err := s.DeleteTicket("01ARZ3NDEKTSV4RRFFQ69G5FAV")
+	assertInvalidInput(t, err, `ticket not found: "01ARZ3NDEKTSV4RRFFQ69G5FAV"`)
+}
+
+// DeleteProject of an unknown id reports ErrInvalidInput rather than
+// silently succeeding.
+func TestDeleteProjectUnknownIDIsInvalidInput(t *testing.T) {
+	s := newTestStore(t)
+	err := s.DeleteProject("01ARZ3NDEKTSV4RRFFQ69G5FAV")
+	assertInvalidInput(t, err, `project not found: "01ARZ3NDEKTSV4RRFFQ69G5FAV"`)
 }
 
 func TestResolveLabelRefByIDOrExactName(t *testing.T) {

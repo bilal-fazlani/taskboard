@@ -87,6 +87,11 @@ func TestDocumentTools(t *testing.T) {
 	if _, err := s.callTool("get_document", mustJSON(t, map[string]any{"id": u.ID})); err == nil {
 		t.Fatal("get_document after delete should fail")
 	}
+	// Deleting the same id again reports a clear error rather than a silent
+	// second success.
+	if _, err := s.callTool("delete_document", mustJSON(t, map[string]any{"id": u.ID})); err == nil {
+		t.Fatal("delete_document of an already-deleted id should fail")
+	}
 }
 
 func TestCreateHTMLDocumentTool(t *testing.T) {

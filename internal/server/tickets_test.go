@@ -276,3 +276,20 @@ func TestCreateTicketWithUnknownStatusIs400(t *testing.T) {
 		t.Fatal("want an error message naming the valid statuses")
 	}
 }
+
+// DELETE /api/tickets/{id} takes a raw ULID with no key resolution, so unlike
+// the CLI and MCP (which resolve a display key or reject an unknown one
+// first), this route reaches store.DeleteTicket directly with whatever id was
+// given. Before this ticket, a well-formed but unknown ULID here answered 204
+// as if a ticket had actually been deleted.
+func TestDeleteTicketNotFound(t *testing.T) {
+	r := serve(t)
+
+	body, status := errorBody(t, http.MethodDelete, r.url+"/api/tickets/01ARZ3NDEKTSV4RRFFQ69G5FAV", "")
+	if status != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", status)
+	}
+	if body.Error == "" {
+		t.Fatal("want an error message")
+	}
+}

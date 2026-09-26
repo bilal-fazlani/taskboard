@@ -46,3 +46,15 @@ func TestLabelUpdateResolvesByIDOrName(t *testing.T) {
 		t.Fatal("expected an error for an unresolvable label reference")
 	}
 }
+
+// label delete of an unresolvable id-or-name is a clear error, not the
+// "Label deleted." success message a zero-row delete used to print.
+func TestLabelDeleteUnknownIsError(t *testing.T) {
+	setLiveBuild(t, false)
+	sandboxHome(t)
+	path := filepath.Join(t.TempDir(), "dev.db")
+
+	if _, err := runCLI(t, "--db", path, "label", "delete", "does-not-exist"); err == nil {
+		t.Fatal("expected an error for an unresolvable label reference")
+	}
+}

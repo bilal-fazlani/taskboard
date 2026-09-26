@@ -189,9 +189,11 @@ func (s *Store) UpdateProject(id string, req models.UpdateProjectRequest) (*mode
 	return p, tx.Commit()
 }
 
+// DeleteProject removes a project and, via cascading foreign keys, its
+// tickets and epics. It reports ErrInvalidInput for an unknown id rather than
+// silently succeeding.
 func (s *Store) DeleteProject(id string) error {
-	_, err := s.db.Exec("DELETE FROM projects WHERE id = ?", id)
-	return err
+	return deleteRowOrNotFound(s.db, "projects", "project", id)
 }
 
 // nextTicketNumber takes the project's next ticket number from its
@@ -814,9 +816,11 @@ func (s *Store) MoveTicket(id string, req models.MoveTicketRequest, opts ...Writ
 	return s.GetTicket(id)
 }
 
+// DeleteTicket removes a ticket and, via cascading foreign keys, its
+// documents, subtasks and status history. It reports ErrInvalidInput for an
+// unknown id rather than silently succeeding.
 func (s *Store) DeleteTicket(id string) error {
-	_, err := s.db.Exec("DELETE FROM tickets WHERE id = ?", id)
-	return err
+	return deleteRowOrNotFound(s.db, "tickets", "ticket", id)
 }
 
 func (s *Store) GetBoard(projectID string) (*models.Board, error) {
@@ -978,6 +982,30 @@ func (e *ErrInvalidInput) Error() string { return e.Msg }
 
 func invalidInput(format string, a ...any) error {
 	return &ErrInvalidInput{Msg: fmt.Sprintf(format, a...)}
+}
+
+// deleteRowOrNotFound runs "DELETE FROM <table> WHERE id = ?" and reports an
+// ErrInvalidInput, naming noun and id, when it matched no row, instead of
+// letting a delete of an unknown id silently succeed. It is shared by every
+// Delete* store method that deletes a single row by id (DeleteSubtask is the
+// one exception, left for ACP-121). q may be *sql.DB or a transaction, so
+// callers that need the delete inside a larger transaction (DeleteLabel,
+// DeleteEpic) can still get the same not-found check. The HTTP layer
+// recognizes ErrInvalidInput here as a 404, via writeLookupError, the same
+// mapping already used for an unresolvable reference.
+func deleteRowOrNotFound(q dbtx, table, noun, id string) error {
+	res, err := q.Exec("DELETE FROM "+table+" WHERE id = ?", id)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return invalidInput("%s not found: %q", noun, id)
+	}
+	return nil
 }
 
 // parseDueDate resolves a caller-supplied due date string, called only once
@@ -1386,7 +1414,8 @@ func (s *Store) ResolveLabelRef(ref string) (string, error) {
 // DeleteLabel removes a label and detaches it from every ticket that carried
 // it (the ticket_labels rows cascade on delete), reporting how many tickets
 // it was detached from. The count is read in the same transaction as the
-// delete, so it always reflects exactly what was removed.
+// delete, so it always reflects exactly what was removed. An unknown id
+// reports ErrInvalidInput rather than silently succeeding with a count of 0.
 func (s *Store) DeleteLabel(id string) (int, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -1399,7 +1428,7 @@ func (s *Store) DeleteLabel(id string) (int, error) {
 		return 0, fmt.Errorf("counting tickets for label: %w", err)
 	}
 
-	if _, err := tx.Exec("DELETE FROM labels WHERE id = ?", id); err != nil {
+	if err := deleteRowOrNotFound(tx, "labels", "label", id); err != nil {
 		return 0, err
 	}
 

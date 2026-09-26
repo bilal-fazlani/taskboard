@@ -247,7 +247,7 @@ func documentCommands() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			_, usedIn, err := store.DeleteDocumentReportingUse(d.ID)
+			usedIn, err := store.DeleteDocumentReportingUse(d.ID)
 			if err != nil {
 				return err
 			}

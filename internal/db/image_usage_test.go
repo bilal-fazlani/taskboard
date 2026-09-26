@@ -288,9 +288,9 @@ func TestDeleteDocumentReportingUse(t *testing.T) {
 	s := newTestStore(t)
 	f := seedImageText(t, s)
 
-	deleted, usedIn, err := s.DeleteDocumentReportingUse(f.image.ID)
-	if err != nil || !deleted {
-		t.Fatal(deleted, err)
+	usedIn, err := s.DeleteDocumentReportingUse(f.image.ID)
+	if err != nil {
+		t.Fatal(err)
 	}
 	wantPlaces(t, "usedIn", usedIn, description(), docPlace(f.plan), docPlace(f.page))
 	if got, _ := s.GetDocument(f.image.ID); got != nil {
@@ -301,11 +301,12 @@ func TestDeleteDocumentReportingUse(t *testing.T) {
 		t.Errorf("Plan.md changed on delete: %q", got.Content)
 	}
 
-	deleted, usedIn, err = s.DeleteDocumentReportingUse(f.plan.ID)
-	if err != nil || !deleted || usedIn != nil {
-		t.Errorf("deleting a text document = %v, %+v, %v", deleted, usedIn, err)
+	usedIn, err = s.DeleteDocumentReportingUse(f.plan.ID)
+	if err != nil || usedIn != nil {
+		t.Errorf("deleting a text document = %+v, %v", usedIn, err)
 	}
-	if deleted, _, err := s.DeleteDocumentReportingUse("nope"); deleted || err != nil {
-		t.Errorf("unknown id = %v, %v", deleted, err)
-	}
+
+	// An unknown id reports ErrInvalidInput rather than silently succeeding.
+	_, err = s.DeleteDocumentReportingUse("nope")
+	assertInvalidInput(t, err, `document not found: "nope"`)
 }

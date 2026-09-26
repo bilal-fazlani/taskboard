@@ -424,7 +424,7 @@ func (s *Server) updateProject(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) deleteProject(w http.ResponseWriter, r *http.Request) {
 	if err := s.store.DeleteProject(chi.URLParam(r, "id")); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeLookupError(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -545,7 +545,7 @@ func (s *Server) ticketHistory(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) deleteTicket(w http.ResponseWriter, r *http.Request) {
 	if err := s.store.DeleteTicket(chi.URLParam(r, "id")); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeLookupError(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -637,7 +637,7 @@ func (s *Server) updateLabel(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) deleteLabel(w http.ResponseWriter, r *http.Request) {
 	if _, err := s.store.DeleteLabel(chi.URLParam(r, "id")); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeLookupError(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -705,20 +705,8 @@ func (s *Server) updateEpic(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) deleteEpic(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-	// DeleteEpic reports (0, nil) for an unknown id rather than an error (like
-	// DeleteLabel/DeleteProject), so a 404 needs its own lookup first.
-	e, err := s.store.GetEpic(id)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	if e == nil {
-		writeError(w, http.StatusNotFound, "epic not found")
-		return
-	}
-	if _, err := s.store.DeleteEpic(id); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+	if _, err := s.store.DeleteEpic(chi.URLParam(r, "id")); err != nil {
+		writeLookupError(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

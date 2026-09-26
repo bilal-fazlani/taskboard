@@ -304,6 +304,14 @@ func TestDeleteEpicKeepsTicketsWithoutAnEpic(t *testing.T) {
 	}
 }
 
+// DeleteEpic of an unknown id reports ErrInvalidInput rather than silently
+// succeeding with a cleared count of 0.
+func TestDeleteEpicUnknownIDIsInvalidInput(t *testing.T) {
+	s := newTestStore(t)
+	_, err := s.DeleteEpic("01ARZ3NDEKTSV4RRFFQ69G5FAV")
+	assertInvalidInput(t, err, `epic not found: "01ARZ3NDEKTSV4RRFFQ69G5FAV"`)
+}
+
 func TestResolveEpicRefByIDOrName(t *testing.T) {
 	s := newTestStore(t)
 	p := seedProject(t, s, "Billing", "BILL")

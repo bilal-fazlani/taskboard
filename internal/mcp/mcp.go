@@ -631,8 +631,9 @@ func (s *MCPServer) resolveLabelRefOrError(ref string) (string, error) {
 // unique within its project. When project is given, resolution goes through
 // ResolveEpicRef, which also gives a clear error for an id that belongs to a
 // different project. When project is omitted, ref must be a literal epic id;
-// GetEpic checks it exists up front, since DeleteEpic/UpdateEpic otherwise
-// report an unknown id as a silent no-op rather than an error.
+// GetEpic checks it exists up front, since UpdateEpic otherwise reports an
+// unknown id as a silent no-op rather than an error (DeleteEpic itself now
+// also reports one, but this check runs before either is called).
 func (s *MCPServer) resolveEpicRefOrError(ref, projectRef string) (string, error) {
 	if strings.TrimSpace(ref) == "" {
 		return "", fmt.Errorf("id is required")

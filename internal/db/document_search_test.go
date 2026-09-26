@@ -86,8 +86,8 @@ func TestDocumentTextFollowsContentSaves(t *testing.T) {
 	wantStoredText(t, s, ed.ID, "Epic brief", 1)
 
 	// The text goes with its document.
-	if ok, err := s.DeleteDocument(page.ID); err != nil || !ok {
-		t.Fatalf("delete: %v %v", ok, err)
+	if err := s.DeleteDocument(page.ID); err != nil {
+		t.Fatalf("delete: %v", err)
 	}
 	if _, _, ok := storedText(t, s, page.ID); ok {
 		t.Fatal("the deleted document's text was kept")

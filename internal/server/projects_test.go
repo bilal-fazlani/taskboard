@@ -78,3 +78,19 @@ func TestProjectListSaysWhichHaveAgentInstructionsWithoutText(t *testing.T) {
 		t.Fatal("empty list decoded as null")
 	}
 }
+
+// DELETE /api/projects/{id} takes a raw id with no key resolution, unlike the
+// CLI (which resolves a prefix or id first, and errors on an unknown one) and
+// MCP (same, via resolveProjectRefOrError). Before this ticket, a well-formed
+// but unknown id here answered 204 as if a project had actually been deleted.
+func TestDeleteProjectNotFound(t *testing.T) {
+	r := serve(t)
+
+	body, status := errorBody(t, http.MethodDelete, r.url+"/api/projects/01ARZ3NDEKTSV4RRFFQ69G5FAV", "")
+	if status != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", status)
+	}
+	if body.Error == "" {
+		t.Fatal("want an error message")
+	}
+}

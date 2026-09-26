@@ -378,7 +378,7 @@ func TestImagesGoWithTheirOwner(t *testing.T) {
 	if n := imageRows(); n != 3 {
 		t.Fatalf("%d image rows, want 3", n)
 	}
-	if ok, err := s.DeleteDocument(c.ID); !ok || err != nil {
+	if err := s.DeleteDocument(c.ID); err != nil {
 		t.Fatal(err)
 	}
 	if n := imageRows(); n != 2 {

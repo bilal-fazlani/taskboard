@@ -468,15 +468,10 @@ func (s *Store) UpdateDocument(id string, req models.UpdateDocumentRequest) (*mo
 	return withRewrite(d, rewrite), err
 }
 
-// DeleteDocument removes a document for good. It reports false, with no
-// error, for an unknown id.
-func (s *Store) DeleteDocument(id string) (bool, error) {
-	res, err := s.db.Exec("DELETE FROM documents WHERE id = ?", id)
-	if err != nil {
-		return false, err
-	}
-	n, err := res.RowsAffected()
-	return n > 0, err
+// DeleteDocument removes a document for good. It reports ErrInvalidInput for
+// an unknown id rather than silently succeeding.
+func (s *Store) DeleteDocument(id string) error {
+	return deleteRowOrNotFound(s.db, "documents", "document", id)
 }
 
 // attachDocumentCounts fills DocumentCount for a page of tickets in one

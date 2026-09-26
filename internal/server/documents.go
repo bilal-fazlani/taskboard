@@ -19,8 +19,12 @@ import (
 // decoded content.
 const maxDocumentRequestBytes = 64 << 20
 
-// writeLookupError answers a reference that names nothing with 404 and the
-// store's message, and anything else with 500.
+// writeLookupError answers a reference that names nothing, or a delete of an
+// unknown id (an ErrInvalidInput either way), with 404 and the store's
+// message, and anything else with 500. Every delete endpoint uses this
+// instead of writeStoreError, since for a delete an ErrInvalidInput always
+// means "no such row", which is a 404, not the 400 writeStoreError gives
+// create and update.
 func writeLookupError(w http.ResponseWriter, err error) {
 	var invalid *db.ErrInvalidInput
 	if errors.As(err, &invalid) {
@@ -204,13 +208,8 @@ func (s *Server) deleteDocument(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	deleted, err := s.store.DeleteDocument(id)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	if !deleted {
-		writeError(w, http.StatusNotFound, "document not found")
+	if err := s.store.DeleteDocument(id); err != nil {
+		writeLookupError(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

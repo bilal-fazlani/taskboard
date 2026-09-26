@@ -98,35 +98,35 @@ func (s *Store) ImageUsage(id string) (places []models.ImagePlace, found bool, e
 // DeleteDocumentReportingUse deletes a document for good, like
 // DeleteDocument, and for an image also returns the places in its owner's
 // text that used it and now show a missing image, worked out in the same
-// transaction as the delete. It never refuses to delete an image in use.
-// deleted is false, with no error, for an unknown id.
-func (s *Store) DeleteDocumentReportingUse(id string) (deleted bool, usedIn []models.ImagePlace, err error) {
+// transaction as the delete. It never refuses to delete an image in use. An
+// unknown id reports ErrInvalidInput rather than silently succeeding.
+func (s *Store) DeleteDocumentReportingUse(id string) (usedIn []models.ImagePlace, err error) {
 	tx, err := s.db.Begin()
 	if err != nil {
-		return false, nil, fmt.Errorf("beginning transaction: %w", err)
+		return nil, fmt.Errorf("beginning transaction: %w", err)
 	}
 	defer tx.Rollback()
 	meta, err := scanDocumentMeta(tx.QueryRow("SELECT "+documentMetaColumns+" FROM documents WHERE id = ?", id))
 	if err == sql.ErrNoRows {
-		return false, nil, nil
+		return nil, invalidInput("document not found: %q", id)
 	}
 	if err != nil {
-		return false, nil, err
+		return nil, err
 	}
 	if models.IsImageFormat(meta.Format) {
 		usedIn, err = imageUsage(tx, DocumentOwner{TicketID: meta.TicketID, EpicID: meta.EpicID},
 			imageref.Image{Name: meta.Name, Format: meta.Format})
 		if err != nil {
-			return false, nil, err
+			return nil, err
 		}
 	}
 	if _, err := tx.Exec("DELETE FROM documents WHERE id = ?", id); err != nil {
-		return false, nil, err
+		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
-		return false, nil, fmt.Errorf("committing delete: %w", err)
+		return nil, fmt.Errorf("committing delete: %w", err)
 	}
-	return true, usedIn, nil
+	return usedIn, nil
 }
 
 // imageRewrite is what renaming an image did to its owner's text.
