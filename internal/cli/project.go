@@ -40,7 +40,7 @@ func projectCommands() *cobra.Command {
 		},
 	}
 
-	var prefix, icon, color, agentInstructions string
+	var prefix, icon, color, description, agentInstructions string
 	createCmd := &cobra.Command{
 		Use:   "create [name]",
 		Short: "Create a new project",
@@ -53,6 +53,7 @@ func projectCommands() *cobra.Command {
 			p, err := store.CreateProject(models.CreateProjectRequest{
 				Name:              args[0],
 				Prefix:            prefix,
+				Description:       description,
 				AgentInstructions: agentInstructions,
 				Icon:              icon,
 				Color:             color,
@@ -68,6 +69,8 @@ func projectCommands() *cobra.Command {
 	createCmd.MarkFlagRequired("prefix")
 	createCmd.Flags().StringVar(&icon, "icon", "", "emoji icon")
 	createCmd.Flags().StringVar(&color, "color", "#3B82F6", "hex color")
+	createCmd.Flags().StringVar(&description, "description", "",
+		"what the project is: its goals, scope and context")
 	createCmd.Flags().StringVar(&agentInstructions, "agent-instructions", "",
 		"how agents should work on the project's tickets (agents read it through get_project; the board never acts on it)")
 

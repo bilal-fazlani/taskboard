@@ -109,3 +109,38 @@ func TestProjectCreateTakesAgentInstructions(t *testing.T) {
 		}
 	}
 }
+
+// project create stores --description, and leaves it empty without the flag.
+func TestProjectCreateTakesDescription(t *testing.T) {
+	setLiveBuild(t, false)
+	sandboxHome(t)
+	path := filepath.Join(t.TempDir(), "dev.db")
+
+	if _, err := runCLI(t, "--db", path, "project", "create", "Billing", "--prefix", "BILL",
+		"--description", "What billing is."); err != nil {
+		t.Fatalf("project create with description: %v", err)
+	}
+	if _, err := runCLI(t, "--db", path, "project", "create", "Support", "--prefix", "SUP"); err != nil {
+		t.Fatalf("project create without description: %v", err)
+	}
+
+	database, err := db.OpenAt(path)
+	if err != nil {
+		t.Fatalf("opening database: %v", err)
+	}
+	defer database.Close()
+	store := db.NewStore(database)
+	for prefix, want := range map[string]string{"BILL": "What billing is.", "SUP": ""} {
+		id, err := store.ResolveProjectRef(prefix)
+		if err != nil {
+			t.Fatalf("resolving %s: %v", prefix, err)
+		}
+		p, err := store.GetProject(id)
+		if err != nil || p == nil {
+			t.Fatalf("GetProject %s: %+v, %v", prefix, p, err)
+		}
+		if p.Description != want {
+			t.Fatalf("%s description = %q, want %q", prefix, p.Description, want)
+		}
+	}
+}

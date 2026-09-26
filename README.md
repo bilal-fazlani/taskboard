@@ -114,7 +114,7 @@ A `: keep-alive` comment arrives roughly every 20 seconds while nothing changes,
 
 ```bash
 taskboard project create "Auth System" --prefix AUTH --icon "🔐"
-taskboard project create "Billing" --prefix BILL --agent-instructions "Run the tests before landing."
+taskboard project create "Billing" --prefix BILL --description "Invoicing and payments." --agent-instructions "Run the tests before landing."
 taskboard project list
 
 taskboard ticket create --project <ID> --title "Implement login" --priority high
