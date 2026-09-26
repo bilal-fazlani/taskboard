@@ -438,7 +438,7 @@ func (s *MCPServer) imageResult(d *models.Document) (contentResult, error) {
 			Width: p.Width, Height: p.Height, Size: len(p.Data), MimeType: p.ContentType,
 		}
 	}
-	text, err := json.MarshalIndent(details, "", "  ")
+	text, err := json.Marshal(details)
 	if err != nil {
 		return nil, err
 	}

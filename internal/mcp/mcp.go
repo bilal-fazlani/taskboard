@@ -175,7 +175,7 @@ func (s *MCPServer) handleToolCall(req jsonrpcRequest) *jsonrpcResponse {
 	if content, ok := result.(contentResult); ok {
 		return &jsonrpcResponse{JSONRPC: "2.0", ID: req.ID, Result: map[string]any{"content": content}}
 	}
-	data, _ := json.MarshalIndent(result, "", "  ")
+	data, _ := json.Marshal(result)
 	return &jsonrpcResponse{
 		JSONRPC: "2.0",
 		ID:      req.ID,
