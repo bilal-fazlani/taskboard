@@ -154,3 +154,24 @@ describe("api.documents", () => {
     );
   });
 });
+
+describe("the project journal calls", () => {
+  it("read a page, with before and limit only when given", async () => {
+    let fetch = stubFetch(200, { entries: [], total: 0, hasMore: false });
+    await api.projects.journal("p1");
+    expect(fetch.mock.calls[0][0]).toBe("/api/projects/p1/journal");
+    fetch = stubFetch(200, { entries: [], total: 0, hasMore: false });
+    await api.projects.journal("p1", { before: "e9", limit: 5 });
+    expect(fetch.mock.calls[0][0]).toBe("/api/projects/p1/journal?before=e9&limit=5");
+  });
+
+  it("append an entry with a POST of its author and text", async () => {
+    const fetch = stubFetch(201, { id: "e1", projectId: "p1", author: "Bilal", text: "Hi", createdAt: "" });
+    const entry = await api.projects.appendJournal("p1", { author: "Bilal", text: "Hi" });
+    expect(entry.id).toBe("e1");
+    const [url, init] = fetch.mock.calls[0];
+    expect(url).toBe("/api/projects/p1/journal");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body)).toEqual({ author: "Bilal", text: "Hi" });
+  });
+});

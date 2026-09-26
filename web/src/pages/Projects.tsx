@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { Plus, Trash2, X, FolderKanban, ChevronDown, ChevronUp, Bot } from "lucide-react";
 import Markdown from "react-markdown";
 import { api, type Project } from "../api/client";
 import { useLiveRefresh } from "../hooks/useLiveRefresh";
 import ProjectTextFields from "../components/ProjectTextFields";
+import ProjectJournal from "../components/ProjectJournal";
 
 const DEFAULT_COLORS = [
   "#3b82f6",
@@ -26,6 +27,7 @@ function ProjectModal({
   onSave: (data: Partial<Project>) => void;
 }) {
   const isEdit = !!project;
+  const titleId = useId();
   const [name, setName] = useState(project?.name || "");
   const [prefix, setPrefix] = useState(project?.prefix || "");
   const [description, setDescription] = useState(project?.description || "");
@@ -82,128 +84,155 @@ function ProjectModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <form
-        onSubmit={handleSubmit}
-        className="w-full max-w-2xl bg-slate-900 border border-slate-700 rounded-xl p-6 space-y-5 max-h-[90vh] overflow-y-auto"
+      {/* Editing a project adds its journal: a column beside the form on a
+          wide screen, where each scrolls on its own, and under the form on a
+          narrow one, where the whole dialog scrolls. */}
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        className={`w-full ${isEdit ? "max-w-6xl" : "max-w-2xl"} max-h-[90vh] flex flex-col overflow-hidden bg-slate-900 border border-slate-700 rounded-xl`}
       >
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-white">
+        <div className="flex shrink-0 items-center justify-between px-6 pt-6 pb-5">
+          <h2 id={titleId} className="text-lg font-semibold text-white">
             {isEdit ? "Edit Project" : "New Project"}
           </h2>
           <button
             type="button"
             onClick={onClose}
+            aria-label="Close"
             className="text-slate-500 hover:text-slate-300 transition-colors"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        <div className="space-y-4">
-          <div>
-            <label className="block text-xs font-medium text-slate-400 mb-1.5">
-              Name
-            </label>
-            <input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="My Project"
-              required
-              className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
-            />
-          </div>
+        <div
+          data-testid="project-dialog-body"
+          className={`min-h-0 flex-1 overflow-y-auto ${
+            isEdit ? "lg:grid lg:grid-cols-[minmax(0,1fr)_26rem] lg:overflow-hidden" : ""
+          }`}
+        >
+          <form
+            onSubmit={handleSubmit}
+            aria-labelledby={titleId}
+            className="px-6 pb-6 space-y-5 lg:min-h-0 lg:overflow-y-auto"
+          >
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-slate-400 mb-1.5">
+                  Name
+                </label>
+                <input
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="My Project"
+                  required
+                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-medium text-slate-400 mb-1.5">
-                Prefix
-              </label>
-              <input
-                value={prefix}
-                onChange={(e) => setPrefix(e.target.value.toUpperCase())}
-                placeholder="PRJ"
-                maxLength={5}
-                required
-                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-600 focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono"
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-medium text-slate-400 mb-1.5">
+                    Prefix
+                  </label>
+                  <input
+                    value={prefix}
+                    onChange={(e) => setPrefix(e.target.value.toUpperCase())}
+                    placeholder="PRJ"
+                    maxLength={5}
+                    required
+                    className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-600 focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-400 mb-1.5">
+                    Icon
+                  </label>
+                  <input
+                    value={icon}
+                    onChange={(e) => setIcon(e.target.value)}
+                    className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500 text-center text-lg"
+                  />
+                </div>
+              </div>
+
+              <ProjectTextFields
+                description={description}
+                onDescriptionChange={setDescription}
+                instructions={agentInstructions}
+                onInstructionsChange={setAgentInstructions}
+                instructionsHaveText={
+                  instructionsState === "ready" ? agentInstructions.trim() !== "" : !!project?.hasAgentInstructions
+                }
+                instructionsState={instructionsState}
               />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-slate-400 mb-1.5">
-                Icon
-              </label>
-              <input
-                value={icon}
-                onChange={(e) => setIcon(e.target.value)}
-                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500 text-center text-lg"
-              />
-            </div>
-          </div>
 
-          <ProjectTextFields
-            description={description}
-            onDescriptionChange={setDescription}
-            instructions={agentInstructions}
-            onInstructionsChange={setAgentInstructions}
-            instructionsHaveText={
-              instructionsState === "ready" ? agentInstructions.trim() !== "" : !!project?.hasAgentInstructions
-            }
-            instructionsState={instructionsState}
-          />
+              {isEdit && (
+                <div>
+                  <label className="block text-xs font-medium text-slate-400 mb-1.5">
+                    Status
+                  </label>
+                  <select
+                    value={status}
+                    onChange={(e) => setStatus(e.target.value)}
+                    className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500 capitalize"
+                  >
+                    <option value="active">Active</option>
+                    <option value="archived">Archived</option>
+                  </select>
+                </div>
+              )}
 
-          {isEdit && (
-            <div>
-              <label className="block text-xs font-medium text-slate-400 mb-1.5">
-                Status
-              </label>
-              <select
-                value={status}
-                onChange={(e) => setStatus(e.target.value)}
-                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500 capitalize"
+              <div>
+                <label className="block text-xs font-medium text-slate-400 mb-1.5">
+                  Color
+                </label>
+                <div className="flex gap-2">
+                  {DEFAULT_COLORS.map((c) => (
+                    <button
+                      key={c}
+                      type="button"
+                      onClick={() => setColor(c)}
+                      className={`w-8 h-8 rounded-lg transition-all ${
+                        color === c
+                          ? "ring-2 ring-white ring-offset-2 ring-offset-slate-900 scale-110"
+                          : "hover:scale-105"
+                      }`}
+                      style={{ backgroundColor: c }}
+                    />
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={onClose}
+                className="px-4 py-2 text-sm text-slate-400 hover:text-white transition-colors"
               >
-                <option value="active">Active</option>
-                <option value="archived">Archived</option>
-              </select>
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="px-4 py-2 text-sm font-medium bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors"
+              >
+                {isEdit ? "Save Changes" : "Create Project"}
+              </button>
+            </div>
+          </form>
+          {project && (
+            <div
+              data-testid="project-journal-column"
+              className="flex flex-col border-t border-slate-800 px-6 pt-5 pb-6 lg:min-h-0 lg:border-t-0 lg:border-l lg:pt-0"
+            >
+              <ProjectJournal projectId={project.id} />
             </div>
           )}
-
-          <div>
-            <label className="block text-xs font-medium text-slate-400 mb-1.5">
-              Color
-            </label>
-            <div className="flex gap-2">
-              {DEFAULT_COLORS.map((c) => (
-                <button
-                  key={c}
-                  type="button"
-                  onClick={() => setColor(c)}
-                  className={`w-8 h-8 rounded-lg transition-all ${
-                    color === c
-                      ? "ring-2 ring-white ring-offset-2 ring-offset-slate-900 scale-110"
-                      : "hover:scale-105"
-                  }`}
-                  style={{ backgroundColor: c }}
-                />
-              ))}
-            </div>
-          </div>
         </div>
-
-        <div className="flex justify-end gap-3 pt-2">
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-4 py-2 text-sm text-slate-400 hover:text-white transition-colors"
-          >
-            Cancel
-          </button>
-          <button
-            type="submit"
-            className="px-4 py-2 text-sm font-medium bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors"
-          >
-            {isEdit ? "Save Changes" : "Create Project"}
-          </button>
-        </div>
-      </form>
+      </div>
     </div>
   );
 }

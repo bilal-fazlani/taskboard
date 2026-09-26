@@ -7,7 +7,15 @@ import type { Project } from "../api/client";
 // instructions, and the form's Description / Agent instructions tabs.
 
 const mockApi = vi.hoisted(() => ({
-  projects: { list: vi.fn(), get: vi.fn(), create: vi.fn(), update: vi.fn(), delete: vi.fn() },
+  projects: {
+    list: vi.fn(),
+    get: vi.fn(),
+    create: vi.fn(),
+    update: vi.fn(),
+    delete: vi.fn(),
+    journal: vi.fn(),
+    appendJournal: vi.fn(),
+  },
 }));
 vi.mock("../api/client", () => ({ api: mockApi }));
 vi.mock("../hooks/useLiveRefresh", () => ({ useLiveRefresh: () => {} }));
@@ -114,7 +122,7 @@ async function openEdit(name: string) {
   await act(async () => {
     fireEvent.click(screen.getByText(name));
   });
-  return screen.getByRole("heading", { name: "Edit Project" }).closest("form")!;
+  return screen.getByRole("form", { name: "Edit Project" });
 }
 
 function tab(form: HTMLElement, name: RegExp) {
@@ -140,6 +148,7 @@ beforeEach(() => {
   );
   mockApi.projects.create.mockResolvedValue(project("NEW"));
   mockApi.projects.update.mockResolvedValue(WITH);
+  mockApi.projects.journal.mockResolvedValue({ entries: [], total: 0, hasMore: false });
 });
 
 afterEach(() => {
@@ -255,7 +264,7 @@ describe("the project form", () => {
   it("creates a project with agent instructions separate from the description", async () => {
     await renderPage();
     fireEvent.click(screen.getByRole("button", { name: /New Project/ }));
-    const form = screen.getByRole("heading", { name: "New Project" }).closest("form")!;
+    const form = screen.getByRole("form", { name: "New Project" });
     expect(mockApi.projects.get).not.toHaveBeenCalled();
 
     fireEvent.change(within(form).getByPlaceholderText("My Project"), { target: { value: "Billing" } });
@@ -362,7 +371,7 @@ describe("the project form", () => {
     mockApi.projects.get.mockReturnValue(new Promise<Project>((r) => (resolve = r)));
     await renderPage();
     fireEvent.click(screen.getByText("ACP project"));
-    const form = screen.getByRole("heading", { name: "Edit Project" }).closest("form")!;
+    const form = screen.getByRole("form", { name: "Edit Project" });
     fireEvent.click(tab(form, /Agent instructions/));
     expect(textarea(form).readOnly).toBe(true);
     expect(textarea(form).placeholder).toBe("Loading agent instructions…");
@@ -471,5 +480,45 @@ describe("the Description / Agent instructions tabs", () => {
     await renderPage();
     const form = await openEdit("HOME project");
     expect(within(form).queryByTestId("instructions-has-text")).toBeNull();
+  });
+});
+
+describe("the project's journal on the form", () => {
+  it("sits beside the form on a wide screen and under it on a narrow one", async () => {
+    mockApi.projects.journal.mockResolvedValue({
+      entries: [{ id: "e1", projectId: WITH.id, author: "orchestrator", text: "Run started.", createdAt: "2026-09-26T10:00:00Z" }],
+      total: 1,
+      hasMore: false,
+    });
+    await renderPage();
+    const form = await openEdit("ACP project");
+    expect(mockApi.projects.journal).toHaveBeenCalledWith(WITH.id);
+    const column = await screen.findByTestId("project-journal-column");
+    expect(within(column).getByText("Run started.")).toBeTruthy();
+
+    // jsdom applies no media queries, so this checks the layout's contract:
+    // the journal follows the form in the dialog's body, which stacks them
+    // (and scrolls as a whole) until the lg breakpoint, where it becomes two
+    // columns that each scroll on their own.
+    const body = screen.getByTestId("project-dialog-body");
+    expect([...body.children]).toEqual([form, column]);
+    expect(body.className).toContain("overflow-y-auto");
+    expect(body.className).toContain("lg:grid");
+    expect(body.className).toContain("lg:grid-cols-[minmax(0,1fr)_26rem]");
+    expect(body.className).toContain("lg:overflow-hidden");
+    expect(form.className).toContain("lg:overflow-y-auto");
+    expect(column.className).toContain("border-t");
+    expect(column.className).toContain("lg:border-l");
+    // The journal's own controls are not part of the form: Append never saves it.
+    expect(within(form).queryByRole("button", { name: "Append" })).toBeNull();
+  });
+
+  it("is not on the form for a new project", async () => {
+    await renderPage();
+    fireEvent.click(screen.getByRole("button", { name: /New Project/ }));
+    expect(screen.getByRole("form", { name: "New Project" })).toBeTruthy();
+    expect(screen.queryByTestId("project-journal-column")).toBeNull();
+    expect(screen.getByTestId("project-dialog-body").className).not.toContain("lg:grid");
+    expect(mockApi.projects.journal).not.toHaveBeenCalled();
   });
 });

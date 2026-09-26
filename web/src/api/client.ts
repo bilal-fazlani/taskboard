@@ -21,6 +21,31 @@ export interface Project {
   agentInstructions?: string;
   // Whether the project has agent instructions; only the list carries it.
   hasAgentInstructions?: boolean;
+  // The newest page of the project's journal; only a read of one project
+  // (get) carries it.
+  journal?: JournalPage;
+}
+
+/** One entry in a project's journal. Entries are appended and never changed. */
+export interface JournalEntry {
+  id: string;
+  projectId: string;
+  /** The name the writer gave: free text, not a reference to anything. */
+  author: string;
+  /** Markdown. */
+  text: string;
+  createdAt: string;
+}
+
+/**
+ * A run of a project's journal entries, newest first. When hasMore is true,
+ * the next (older) page is the one read with before set to nextBefore.
+ */
+export interface JournalPage {
+  entries: JournalEntry[];
+  total: number;
+  hasMore: boolean;
+  nextBefore?: string;
 }
 
 export interface Label {
@@ -328,6 +353,19 @@ export const api = {
       }).then(normalizeProject),
     delete: (id: string) =>
       request<void>(`/api/projects/${id}`, { method: "DELETE" }),
+    /** One page of the project's journal, newest first; before is the previous page's nextBefore. */
+    journal: (id: string, params: { before?: string; limit?: number } = {}) => {
+      const qs = new URLSearchParams();
+      if (params.before) qs.set("before", params.before);
+      if (params.limit !== undefined) qs.set("limit", String(params.limit));
+      const query = qs.toString();
+      return request<JournalPage>(`/api/projects/${id}/journal${query ? `?${query}` : ""}`);
+    },
+    appendJournal: (id: string, entry: { author: string; text: string }) =>
+      request<JournalEntry>(`/api/projects/${id}/journal`, {
+        method: "POST",
+        body: JSON.stringify(entry),
+      }),
   },
 
   tickets: {
