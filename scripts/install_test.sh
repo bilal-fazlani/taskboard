@@ -80,6 +80,11 @@ fi
   || fail "no database at $DATA_DIR/taskboard.db"
 case "$("$BIN_DIR/taskboard" start --help)" in *"(default 3010)"*) pass "start defaults to port 3010" ;;
   *) fail "start does not default to port 3010" ;; esac
+# make install records the commit it built from, and its build is not a dev build.
+want_commit=$(git -C "$(dirname "$script")" rev-parse HEAD)
+version=$("$BIN_DIR/taskboard" --version)
+case "$version" in "taskboard "*" (commit $want_commit)") pass "--version names the build: $version" ;;
+  *) fail "--version says \"$version\", want the commit $want_commit and no dev build" ;; esac
 cleanup_sandbox
 
 echo "== upgrade over a running instance =="
@@ -115,6 +120,9 @@ if [ -n "$new_server" ] && [ "$new_server" != "$old_server" ]; then
   [ "$(listening_pid "$PORT")" = "$new_server" ] && pass "new server owns port $PORT" || fail "port $PORT not served by new server"
   curl -fsS "http://localhost:$PORT/api/projects" | grep -q '"prefix":"SBX"' \
     && pass "data served after restart" || fail "project missing after restart"
+  api_version=$(curl -fsS "http://localhost:$PORT/api/version" || true)
+  case "$api_version" in *"\"commit\":\"$want_commit\""*'"dev":false'*) pass "new server reports its build: $api_version" ;;
+    *) fail "GET /api/version says $api_version, want the commit $want_commit and dev false" ;; esac
 else
   fail "port and data checks skipped: no new server"
 fi

@@ -62,7 +62,9 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
         # Marked like the `make install` build, so release binaries use the default
         # database and port 3010 without --db (internal/livebuild). ci.yml stays unmarked.
-        run: go build -ldflags="-s -w -X github.com/tcarac/taskboard/internal/livebuild.Mark=true" -o taskboard-${{ matrix.suffix }} ./cmd/taskboard
+        # The tag and commit are what `taskboard --version`, GET /api/version and the
+        # app's sidebar report (internal/buildinfo).
+        run: go build -ldflags="-s -w -X github.com/tcarac/taskboard/internal/livebuild.Mark=true -X github.com/tcarac/taskboard/internal/buildinfo.Version=${{ github.ref_name }} -X github.com/tcarac/taskboard/internal/buildinfo.Commit=${{ github.sha }}" -o taskboard-${{ matrix.suffix }} ./cmd/taskboard
 
       - uses: actions/upload-artifact@v4
         with:

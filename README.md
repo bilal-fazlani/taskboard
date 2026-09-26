@@ -93,6 +93,8 @@ close was asked for.
 
 ### API
 
+`GET /api/version` says which build is serving, e.g. `{"version":"v0.2.0","commit":"1f3c9ab…","dev":false}`; `taskboard --version` prints the same, and the sidebar shows it at the bottom. Release binaries carry their tag, and Makefile builds (`make build`, `make dev`, `make install`) carry `git describe --tags --always --dirty`, both with the full commit. `dev` is true for every build but a release binary and the one `make install` builds.
+
 `GET /api/events` streams database changes as [Server-Sent Events](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events), so a client can refetch instead of polling:
 
 ```bash

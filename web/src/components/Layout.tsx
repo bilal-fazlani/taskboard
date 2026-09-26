@@ -4,6 +4,7 @@ import { Zap } from "lucide-react";
 import { VIEWS_GROUP_LABEL, isCurrentPath, otherItems, viewItems, type NavItem } from "../lib/navigation";
 import { filterSearch } from "../lib/filters";
 import { rememberView } from "../lib/lastView";
+import BuildVersion from "./BuildVersion";
 
 // `search` is the query string the link carries; the views pass on the filters.
 function NavEntry({ item, search = "" }: { item: NavItem; search?: string }) {
@@ -63,9 +64,7 @@ export default function Layout() {
         </nav>
 
         <div className="px-5 py-3 border-t border-slate-800">
-          <p className="text-[10px] text-slate-600 tracking-wider uppercase">
-            v0.1.0
-          </p>
+          <BuildVersion />
         </div>
       </aside>
 

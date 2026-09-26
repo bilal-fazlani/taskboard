@@ -11,13 +11,20 @@ PORT ?= 3010
 DEV_DB ?= ./.tmp/dev.db
 DEV_PORT ?= 3011
 
+# Every Makefile build records its version and commit (internal/buildinfo), so
+# `taskboard --version`, GET /api/version and the app's sidebar say which build
+# is running. release.yml sets the same two from the tag instead.
+VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo unknown)
+COMMIT := $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
+BUILDINFO_LDFLAGS := -X github.com/tcarac/taskboard/internal/buildinfo.Version=$(VERSION) -X github.com/tcarac/taskboard/internal/buildinfo.Commit=$(COMMIT)
+
 # The binary shipped by `make install` and release binaries (see release.yml) are
 # the marked builds: only they may open the default database, and they default
 # to port 3010. Every other build (make build, make dev, go build, go run,
 # go test) needs --db and defaults to 3011. The `make install` binary is built
 # under .tmp/live, not as ./taskboard, and is deleted once used, so no marked
 # build is left lying around to be run by accident.
-LIVE_LDFLAGS := -X github.com/tcarac/taskboard/internal/livebuild.Mark=true
+LIVE_LDFLAGS := -X github.com/tcarac/taskboard/internal/livebuild.Mark=true $(BUILDINFO_LDFLAGS)
 LIVE_DIR := .tmp/live
 LIVE_BINARY := $(LIVE_DIR)/taskboard
 
@@ -27,13 +34,13 @@ define build-live
 endef
 
 build: frontend
-	go build -o $(BINARY) ./$(BUILD_DIR)
+	go build -ldflags '$(BUILDINFO_LDFLAGS)' -o $(BINARY) ./$(BUILD_DIR)
 
 dev:
 	@test -n "$(DEV_DB)" || { echo "DEV_DB must not be empty (make dev must never use the live database)"; exit 1; }
 	@test "$(DEV_PORT)" != "$(PORT)" || { echo "DEV_PORT must differ from the live server port $(PORT)"; exit 1; }
 	mkdir -p $(dir $(DEV_DB))
-	go run ./$(BUILD_DIR) --db $(DEV_DB) start --foreground --port $(DEV_PORT)
+	go run -ldflags '$(BUILDINFO_LDFLAGS)' ./$(BUILD_DIR) --db $(DEV_DB) start --foreground --port $(DEV_PORT)
 
 frontend:
 	cd web && npm install && npm run build

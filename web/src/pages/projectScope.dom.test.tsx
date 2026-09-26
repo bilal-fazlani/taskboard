@@ -18,6 +18,8 @@ const mockApi = vi.hoisted(() => ({
   epics: { list: vi.fn() },
   board: { get: vi.fn() },
   documents: { search: vi.fn() },
+  // The sidebar's build footer (Layout); it never answers here.
+  version: { get: () => new Promise(() => {}) },
 }));
 
 vi.mock("../api/client", () => ({ api: mockApi }));

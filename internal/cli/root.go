@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/tcarac/taskboard/internal/buildinfo"
 	"github.com/tcarac/taskboard/internal/db"
 	"github.com/tcarac/taskboard/internal/mcp"
 	"github.com/tcarac/taskboard/internal/server"
@@ -38,7 +39,11 @@ func NewRootCmd(webFS fs.FS) *cobra.Command {
 	root := &cobra.Command{
 		Use:   "taskboard",
 		Short: "Local project management with Kanban UI and MCP server",
+		// --version prints the build: its version, commit and whether it is a
+		// dev build (internal/buildinfo).
+		Version: buildinfo.Get().String(),
 	}
+	root.SetVersionTemplate("taskboard {{.Version}}\n")
 	root.PersistentFlags().StringVar(&dbPath, "db", "", "path to SQLite database file (default: OS config dir, live build only)")
 
 	startCmd := &cobra.Command{

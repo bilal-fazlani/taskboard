@@ -188,6 +188,16 @@ export interface TicketWrite {
   note?: string;
 }
 
+/** The build serving the app, as GET /api/version answers it. */
+export interface BuildInfo {
+  /** The release tag, or `git describe` output for a Makefile build; "unknown" when nothing recorded it. */
+  version: string;
+  /** The full hash of the commit it was built from, or "unknown". */
+  commit: string;
+  /** True for every build but a release binary and the one `make install` builds. */
+  dev: boolean;
+}
+
 export interface BoardColumn {
   status: string;
   tickets: Ticket[];
@@ -438,5 +448,9 @@ export const api = {
   board: {
     get: (projectId?: string) =>
       request<RawBoard>(`/api/board${projectId ? `?projectId=${projectId}` : ""}`).then(normalizeBoard),
+  },
+
+  version: {
+    get: () => request<BuildInfo>("/api/version"),
   },
 };

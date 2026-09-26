@@ -24,6 +24,8 @@ const mockApi = vi.hoisted(() => ({
     downloadUrl: (id: string) => `/api/documents/${id}/download`,
     rawUrl: (id: string, rev: number) => `/api/documents/${id}/raw?rev=${rev}`,
   },
+  // The sidebar's build footer (Layout); it never answers here.
+  version: { get: () => new Promise(() => {}) },
 }));
 vi.mock("../api/client", () => ({ api: mockApi }));
 

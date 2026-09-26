@@ -15,6 +15,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/tcarac/taskboard/internal/buildinfo"
 	"github.com/tcarac/taskboard/internal/db"
 	"github.com/tcarac/taskboard/internal/models"
 )
@@ -245,6 +246,7 @@ func (s *Server) setupRoutes(webFS fs.FS) {
 
 		r.Get("/board", s.getBoard)
 		r.Get("/events", s.handleEvents)
+		r.Get("/version", getVersion)
 	})
 
 	if webFS != nil {
@@ -325,6 +327,12 @@ func rejectCrossOriginWrites(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// getVersion answers which build is serving: its version, the commit it was
+// built from and whether it is a dev build (internal/buildinfo).
+func getVersion(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, buildinfo.Get())
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
