@@ -100,6 +100,10 @@ jobs:
 
   update-homebrew:
     needs: release
+    # Pre-release tags such as v0.2.0-rc.1 still get a GitHub release but never
+    # reach the tap. sort -V ranks 0.2.0-rc.1 above 0.2.0, so once an rc was in
+    # the tap, the push step would refuse the final release as older.
+    if: ${{ !contains(github.ref_name, '-') }}
     runs-on: ubuntu-latest
     # The tap is written with HOMEBREW_TAP_TOKEN, so github.token only needs read.
     permissions:
