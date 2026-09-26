@@ -1,6 +1,12 @@
 # Taskboard
 
-Go CLI, HTTP and MCP server (cmd/, internal/) with a React web UI (web/) embedded into one binary. Run it with `make dev`; test with `go test ./...`.
+Go CLI, HTTP and MCP server (cmd/, internal/) with a React web UI (web/) embedded into one binary.
+Run it with `make dev`; test with `go test ./...`.
+
+# Skills to use
+
+- taskboard - always
+- superpowers - try not to. if you must, use ask first
 
 ## Live board safety
 
