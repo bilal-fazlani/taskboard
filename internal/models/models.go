@@ -44,12 +44,17 @@ type Ticket struct {
 	Epic *EpicRef `json:"epic,omitempty"`
 
 	// Populated fields (not stored directly)
-	ProjectPrefix string      `json:"projectPrefix,omitempty"`
-	Repos         []string    `json:"repos,omitempty"`
-	Labels        []Label     `json:"labels,omitempty"`
-	Subtasks      []Subtask   `json:"subtasks,omitempty"`
-	DependsOn     []TicketRef `json:"dependsOn,omitempty"`
-	Blocks        []TicketRef `json:"blocks,omitempty"`
+	ProjectPrefix string   `json:"projectPrefix,omitempty"`
+	Repos         []string `json:"repos,omitempty"`
+	// Labels are the ticket's labels, without a ticketCount: computing each
+	// label's ticket count here would mean an extra query per label on every
+	// ticket in a list (an N+1 cost), and nothing reads it on an embedded
+	// label. Use list_labels, or another call that returns a Label on its
+	// own, for the real count.
+	Labels    []EmbeddedLabel `json:"labels,omitempty"`
+	Subtasks  []Subtask       `json:"subtasks,omitempty"`
+	DependsOn []TicketRef     `json:"dependsOn,omitempty"`
+	Blocks    []TicketRef     `json:"blocks,omitempty"`
 
 	// ReviewRounds is how many times the ticket has entered agent_review,
 	// counted from its status history. A ticket created in agent_review
@@ -130,6 +135,16 @@ type Label struct {
 	Name        string `json:"name"`
 	Color       string `json:"color"`
 	TicketCount int    `json:"ticketCount"`
+}
+
+// EmbeddedLabel is a label as it appears inside a ticket: no ticketCount, so
+// there is no way for it to misreport a count as 0 that was never computed.
+// A caller that needs a label's real ticket count fetches Label on its own
+// (list_labels, create_label, update_label, or the matching HTTP/CLI calls).
+type EmbeddedLabel struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Color string `json:"color"`
 }
 
 type Subtask struct {

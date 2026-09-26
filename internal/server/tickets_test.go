@@ -75,7 +75,47 @@ func rawUpdate(t *testing.T, url, body string) models.Ticket {
 	return updated
 }
 
-func labelNames(labels []models.Label) []string {
+// A label embedded in a ticket must never carry a ticketCount key: computing
+// the real count there is an N+1 cost nobody needs, and a 0 would be
+// indistinguishable from a label genuinely on no other ticket (ACP-48).
+func TestTicketLabelsOmitTicketCount(t *testing.T) {
+	r := serve(t)
+
+	project := doJSON[models.Project](t, http.MethodPost, r.url+"/api/projects", map[string]string{
+		"name":   "Billing",
+		"prefix": "BILL",
+	})
+	ticket := doJSON[models.Ticket](t, http.MethodPost, r.url+"/api/tickets", map[string]any{
+		"projectId": project.ID,
+		"title":     "Invoice export",
+		"labels":    []string{"api"},
+	})
+
+	resp, err := http.Get(r.url + "/api/tickets/" + ticket.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var decoded struct {
+		Labels []map[string]any `json:"labels"`
+	}
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("decoding ticket: %v (body: %s)", err, raw)
+	}
+	if len(decoded.Labels) != 1 {
+		t.Fatalf("labels = %+v, want 1", decoded.Labels)
+	}
+	if _, has := decoded.Labels[0]["ticketCount"]; has {
+		t.Fatalf("embedded label = %+v, want no ticketCount key", decoded.Labels[0])
+	}
+}
+
+func labelNames(labels []models.EmbeddedLabel) []string {
 	names := make([]string, 0, len(labels))
 	for _, l := range labels {
 		names = append(names, l.Name)

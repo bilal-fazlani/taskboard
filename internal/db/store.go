@@ -374,7 +374,7 @@ func (s *Store) attachListDetails(tickets []models.Ticket) error {
 	}
 	for labelRows.Next() {
 		var ticketID string
-		var l models.Label
+		var l models.EmbeddedLabel
 		if err := labelRows.Scan(&ticketID, &l.ID, &l.Name, &l.Color); err != nil {
 			labelRows.Close()
 			return err
@@ -1351,8 +1351,13 @@ func (s *Store) UpdateLabel(id string, req models.UpdateLabelRequest) (*models.L
 			l.Color = trimmedColor
 		}
 	}
-	_, err = s.db.Exec("UPDATE labels SET name=?, color=? WHERE id=?", l.Name, l.Color, l.ID)
-	return &l, err
+	if _, err := s.db.Exec("UPDATE labels SET name=?, color=? WHERE id=?", l.Name, l.Color, l.ID); err != nil {
+		return nil, err
+	}
+	if err := s.db.QueryRow("SELECT COUNT(*) FROM ticket_labels WHERE label_id = ?", l.ID).Scan(&l.TicketCount); err != nil {
+		return nil, err
+	}
+	return &l, nil
 }
 
 // ResolveLabelRef resolves a caller-supplied label reference that may be
@@ -1524,7 +1529,7 @@ func (s *Store) getTicketRepos(ticketID string) ([]string, error) {
 	return repos, rows.Err()
 }
 
-func (s *Store) getTicketLabels(ticketID string) ([]models.Label, error) {
+func (s *Store) getTicketLabels(ticketID string) ([]models.EmbeddedLabel, error) {
 	rows, err := s.db.Query(
 		"SELECT l.id, l.name, l.color FROM labels l JOIN ticket_labels tl ON l.id = tl.label_id WHERE tl.ticket_id = ?",
 		ticketID)
@@ -1533,9 +1538,9 @@ func (s *Store) getTicketLabels(ticketID string) ([]models.Label, error) {
 	}
 	defer rows.Close()
 
-	var labels []models.Label
+	var labels []models.EmbeddedLabel
 	for rows.Next() {
-		var l models.Label
+		var l models.EmbeddedLabel
 		if err := rows.Scan(&l.ID, &l.Name, &l.Color); err != nil {
 			return nil, err
 		}

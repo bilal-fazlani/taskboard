@@ -17,7 +17,7 @@ function makeTicket(overrides: Partial<Ticket> = {}): Ticket {
     updatedAt: "",
     projectPrefix: "AUTH",
     repos: ["acme/auth-web"],
-    labels: [{ id: "l1", name: "frontend", color: "#3b82f6", ticketCount: 0 }],
+    labels: [{ id: "l1", name: "frontend", color: "#3b82f6" }],
     subtasks: [],
     dependsOn: [{ id: "t2", key: "AUTH-2", title: "Build login UI", status: "todo" }],
     epic: { id: "e1", name: "Login" },

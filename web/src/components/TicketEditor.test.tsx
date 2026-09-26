@@ -97,7 +97,7 @@ function makeTicket(overrides: Partial<Ticket> = {}): Ticket {
     updatedAt: "",
     projectPrefix: "AUTH",
     repos: ["acme/auth-web"],
-    labels: [{ id: "l1", name: "frontend", color: "#3b82f6", ticketCount: 0 }],
+    labels: [{ id: "l1", name: "frontend", color: "#3b82f6" }],
     subtasks: [sub("s1", "Write tests")],
     dependsOn: [{ id: "t2", key: "AUTH-2", title: "Build login UI", status: "in_progress" }],
     ...overrides,
@@ -663,7 +663,7 @@ describe("the dirty flag and saving", () => {
     await act(async () => {
       resolve(
         makeTicket({
-          labels: [{ id: "l9", name: "server", color: "#fff", ticketCount: 0 }],
+          labels: [{ id: "l9", name: "server", color: "#fff" }],
           blocks: [{ id: "t5", key: "AUTH-5", title: "Release", status: "todo" }],
         }),
       );
@@ -680,7 +680,7 @@ describe("the dirty flag and saving", () => {
   it("fills in the full ticket when nothing was edited", async () => {
     mockApi.tickets.get.mockResolvedValue(
       makeTicket({
-        labels: [{ id: "l9", name: "server", color: "#fff", ticketCount: 0 }],
+        labels: [{ id: "l9", name: "server", color: "#fff" }],
         subtasks: [sub("s1", "Write tests"), sub("s2", "Deploy")],
       }),
     );
@@ -724,7 +724,7 @@ describe("a ticket that changed elsewhere", () => {
       status: "in_progress",
       priority: "low",
       dueDate: "2026-12-24",
-      labels: [{ id: "l9", name: "server", color: "#fff", ticketCount: 0 }],
+      labels: [{ id: "l9", name: "server", color: "#fff" }],
     });
 
     expect((screen.getByLabelText("Title") as HTMLInputElement).value).toBe("Renamed elsewhere");
@@ -784,7 +784,7 @@ describe("a ticket that changed elsewhere", () => {
   });
 
   it("says nothing when the server lists the same repos, labels and dependencies in another order", async () => {
-    const label = (id: string, name: string) => ({ id, name, color: "#3b82f6", ticketCount: 0 });
+    const label = (id: string, name: string) => ({ id, name, color: "#3b82f6" });
     const dep = (id: string, key: string) => ({ id, key, title: key, status: "todo" });
     const ticket = makeTicket({
       repos: ["acme/auth-web", "acme/api"],

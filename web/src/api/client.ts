@@ -22,6 +22,18 @@ export interface Label {
   ticketCount: number;
 }
 
+/**
+ * A label as it appears embedded in a ticket: no ticketCount. Computing each
+ * label's real ticket count there would be an extra query per label on every
+ * ticket in a list, and nothing reads it there. Fetch Label on its own
+ * (list_labels, or a create/update label response) for the real count.
+ */
+export interface EmbeddedLabel {
+  id: string;
+  name: string;
+  color: string;
+}
+
 export interface EpicRef {
   id: string;
   name: string;
@@ -83,7 +95,7 @@ export interface Ticket {
   updatedAt: string;
   projectPrefix: string;
   repos?: string[];
-  labels: Label[];
+  labels: EmbeddedLabel[];
   subtasks: Subtask[];
   dependsOn?: TicketRef[];
   blocks?: TicketRef[];

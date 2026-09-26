@@ -1479,6 +1479,49 @@ func TestUpdateLabelBlankColorLeavesExistingColorUnchanged(t *testing.T) {
 	}
 }
 
+// A rename must not reset the reported count to 0: UpdateLabel used to return
+// the label row without computing it, so a label already on several tickets
+// looked untouched (ACP-48).
+func TestUpdateLabelReportsRealTicketCount(t *testing.T) {
+	s := newTestStore(t)
+	p := seedProject(t, s, "Billing", "BILL")
+
+	old, err := s.CreateLabel(models.CreateLabelRequest{Name: "M3:Agents", Color: "#FF0000"})
+	if err != nil {
+		t.Fatalf("CreateLabel: %v", err)
+	}
+	for _, title := range []string{"One", "Two", "Three"} {
+		if _, err := s.CreateTicket(models.CreateTicketRequest{
+			ProjectID: p.ID, Title: title, Labels: []string{old.Name},
+		}); err != nil {
+			t.Fatalf("CreateTicket(%s): %v", title, err)
+		}
+	}
+
+	newName := "M4:Agents"
+	renamed, err := s.UpdateLabel(old.ID, models.UpdateLabelRequest{Name: &newName})
+	if err != nil {
+		t.Fatalf("UpdateLabel: %v", err)
+	}
+	if renamed.TicketCount != 3 {
+		t.Fatalf("ticketCount = %d, want 3", renamed.TicketCount)
+	}
+
+	// A label with no tickets reports 0, not a stale nonzero value.
+	empty, err := s.CreateLabel(models.CreateLabelRequest{Name: "unused", Color: "#00FF00"})
+	if err != nil {
+		t.Fatalf("CreateLabel(unused): %v", err)
+	}
+	sameName := "unused-renamed"
+	updatedEmpty, err := s.UpdateLabel(empty.ID, models.UpdateLabelRequest{Name: &sameName})
+	if err != nil {
+		t.Fatalf("UpdateLabel(unused): %v", err)
+	}
+	if updatedEmpty.TicketCount != 0 {
+		t.Fatalf("ticketCount = %d, want 0", updatedEmpty.TicketCount)
+	}
+}
+
 func TestDeleteLabelReportsDetachedTicketCount(t *testing.T) {
 	s := newTestStore(t)
 	p := seedProject(t, s, "Billing", "BILL")
