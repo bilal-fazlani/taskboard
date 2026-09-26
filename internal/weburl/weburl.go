@@ -118,3 +118,17 @@ func FillAll(tickets []models.Ticket) []models.Ticket {
 	}
 	return tickets
 }
+
+// FillCommitTickets sets the URL on every ticket a commit lookup found, in
+// place, naming each the way Ref does.
+func FillCommitTickets(found []models.CommitTicket) []models.CommitTicket {
+	base := Base()
+	for i := range found {
+		ref := found[i].ID
+		if found[i].ProjectPrefix != "" {
+			ref = found[i].Key
+		}
+		found[i].URL = Ticket(base, ref)
+	}
+	return found
+}

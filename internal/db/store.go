@@ -37,6 +37,8 @@ func (s *Store) ClearData() error {
 		"document_images",
 		"documents",
 		"ticket_status_changes",
+		"ticket_landed_commits",
+		"ticket_delivery",
 		"ticket_dependencies",
 		"ticket_labels",
 		"subtasks",
@@ -608,6 +610,9 @@ func (s *Store) GetTicket(id string) (*models.Ticket, error) {
 		return nil, err
 	}
 	t.DocumentCount = len(t.Documents)
+	if t.Delivery, err = getTicketDelivery(s.db, t.ID); err != nil {
+		return nil, err
+	}
 
 	return &t, nil
 }
@@ -828,6 +833,20 @@ func (s *Store) UpdateTicket(id string, req models.UpdateTicketRequest, opts ...
 			return nil, err
 		}
 	}
+	var delivery *normalizedDelivery
+	if req.Delivery != nil {
+		// A commit without a repo defaults to the ticket's only repo, as
+		// the ticket will have it once this update is applied.
+		repos := normalizeRepos(req.Repos)
+		if req.Repos == nil {
+			if repos, err = ticketReposIn(tx, id); err != nil {
+				return nil, err
+			}
+		}
+		if delivery, err = normalizeDeliveryUpdate(req.Delivery, repos); err != nil {
+			return nil, err
+		}
+	}
 	t.UpdatedAt = time.Now().UTC()
 
 	if _, err = tx.Exec(
@@ -874,6 +893,12 @@ func (s *Store) UpdateTicket(id string, req models.UpdateTicketRequest, opts ...
 			); err != nil {
 				return nil, fmt.Errorf("attaching label: %w", err)
 			}
+		}
+	}
+
+	if delivery != nil {
+		if err := writeDelivery(tx, id, delivery); err != nil {
+			return nil, err
 		}
 	}
 

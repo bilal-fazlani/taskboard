@@ -238,6 +238,8 @@ func ticketCommands() *cobra.Command {
 		updTitle, updDescription, updStatus, updPriority, updDue, updEpic, updNote string
 		updRepos, updLabels, updLabelAlias, updDependsOn                           []string
 		updAppendDescription                                                       string
+		updBranch, updWorktree, updPRURL                                           string
+		updLandedCommits                                                           []string
 	)
 	updateCmd := &cobra.Command{
 		Use:   "update [id-or-key]",
@@ -255,7 +257,8 @@ func ticketCommands() *cobra.Command {
 			"replacing it, leaving the existing text untouched: on a non-empty " +
 			"description the text starts a new paragraph (a blank line before it), on " +
 			"an empty one it becomes the description. It cannot be combined with " +
-			"--description and must not be empty.",
+			"--description and must not be empty.\n\n" +
+			deliveryFlagsHelp,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			store, err := openStore()
@@ -312,6 +315,9 @@ func ticketCommands() *cobra.Command {
 					req.DependsOn = []string{}
 				}
 			}
+			if req.Delivery, err = deliveryUpdateFromFlags(cmd, updBranch, updWorktree, updPRURL, updLandedCommits); err != nil {
+				return err
+			}
 
 			t, err := store.UpdateTicket(ticketID, req)
 			if err != nil {
@@ -340,8 +346,12 @@ func ticketCommands() *cobra.Command {
 	updateCmd.Flags().StringSliceVar(&updLabels, "labels", nil, "replace labels; comma-separated or repeated, empty value clears")
 	updateCmd.Flags().StringSliceVar(&updLabelAlias, "label", nil, "alias for --labels")
 	updateCmd.Flags().StringSliceVar(&updDependsOn, "depends-on", nil, "replace dependencies; comma-separated or repeated, empty value clears")
+	updateCmd.Flags().StringVar(&updBranch, "branch", "", "the branch the work is on; empty value clears")
+	updateCmd.Flags().StringVar(&updWorktree, "worktree", "", "the worktree path the work is in; empty value clears")
+	updateCmd.Flags().StringVar(&updPRURL, "pr-url", "", "the pull request's http or https url; empty value clears")
+	updateCmd.Flags().StringSliceVar(&updLandedCommits, "landed-commit", nil, "replace the landed commits, in order, each [repo@]sha; comma-separated or repeated, empty value clears")
 
-	cmd.AddCommand(listCmd, getCmd, createCmd, moveCmd, deleteCmd, updateCmd, historyCmd, subtaskCommands())
+	cmd.AddCommand(listCmd, getCmd, createCmd, moveCmd, deleteCmd, updateCmd, historyCmd, findByCommitCommand(), subtaskCommands())
 	return cmd
 }
 
@@ -468,6 +478,7 @@ func formatTicketDetail(t models.Ticket) string {
 		}
 		fmt.Fprintf(&b, "Blocks: %s\n", strings.Join(keys, ", "))
 	}
+	b.WriteString(formatDelivery(t.Delivery))
 	if len(t.Subtasks) > 0 {
 		fmt.Fprintln(&b, "Subtasks:")
 		for _, s := range t.Subtasks {

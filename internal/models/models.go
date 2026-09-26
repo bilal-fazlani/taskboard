@@ -75,6 +75,10 @@ type Ticket struct {
 	// HTTP API serves it from its own endpoint.
 	History []StatusChange `json:"history,omitempty"`
 
+	// Delivery is where the ticket's work lives and where it landed. Only
+	// the full ticket carries it, and only when a field is set.
+	Delivery *Delivery `json:"delivery,omitempty"`
+
 	// URL is where the ticket opens in the web UI. The CLI and the MCP server
 	// fill it in so an agent can print a link; the HTTP API leaves it empty,
 	// since a browser already knows where the board is. See internal/weburl.
@@ -243,6 +247,9 @@ type UpdateTicketRequest struct {
 	// Note goes into the status history with the change, when the request
 	// changes the status. It is otherwise ignored.
 	Note string `json:"note,omitempty"`
+	// Delivery sets the ticket's delivery fields; nil leaves them all
+	// unchanged. See DeliveryUpdate.
+	Delivery *DeliveryUpdate `json:"delivery,omitempty"`
 }
 
 type MoveTicketRequest struct {

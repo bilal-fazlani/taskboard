@@ -62,6 +62,9 @@ type schemaProp struct {
 	Description string      `json:"description"`
 	Enum        []string    `json:"enum,omitempty"`
 	Items       *jsonSchema `json:"items,omitempty"`
+	// Properties are an object property's own fields, e.g. update_ticket's
+	// delivery.
+	Properties map[string]schemaProp `json:"properties,omitempty"`
 }
 
 type textContent struct {
@@ -541,6 +544,20 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 		}
 		return map[string]bool{"deleted": true}, s.store.DeleteTicket(ticketID)
 
+	case "find_tickets_by_commit":
+		var a struct {
+			SHA  string `json:"sha"`
+			Repo string `json:"repo"`
+		}
+		if err := decodeArgs(args, &a); err != nil {
+			return nil, err
+		}
+		found, err := s.store.FindTicketsByCommit(a.SHA, a.Repo)
+		if err != nil {
+			return nil, err
+		}
+		return weburl.FillCommitTickets(found), nil
+
 	case "get_board":
 		var a struct {
 			ProjectID string `json:"projectId"`
@@ -752,6 +769,33 @@ func (s *MCPServer) resolveEpicRefOrError(ref, projectRef string) (string, error
 const appendDescriptionHelp = "Text to add to the end of the description, leaving the existing text untouched. " +
 	"On a non-empty description it starts a new paragraph (a blank line before it); on an empty one it becomes the description. " +
 	"Two appends at the same moment both land. Cannot be combined with description; must not be empty."
+
+// deliveryProp is update_ticket's delivery argument; the rules it states
+// are models.DeliveryUpdate's, shared with HTTP and the CLI.
+var deliveryProp = schemaProp{
+	Type: "object",
+	Description: "Where the ticket's work lives and where it landed. Only the fields you pass change: " +
+		"omit one to leave it as it is, pass \"\" to clear a text field.",
+	Properties: map[string]schemaProp{
+		"branch":   {Type: "string", Description: "The branch the work is on"},
+		"worktree": {Type: "string", Description: "The worktree path the work is in"},
+		"prUrl":    {Type: "string", Description: "The pull request's http or https url"},
+		"landedCommits": {
+			Type: "array",
+			Description: "The commits the ticket landed as, in order. Replaces the whole list; [] clears it. " +
+				"Each has a sha (7 to 64 hex characters, full or short) and the repo it landed in; " +
+				"a commit without a repo takes the ticket's repo when the ticket has exactly one.",
+			Items: &jsonSchema{
+				Type: "object",
+				Properties: map[string]schemaProp{
+					"sha":  {Type: "string", Description: "Commit sha, full or short"},
+					"repo": {Type: "string", Description: "Repo the commit landed in, e.g. acme/billing-api"},
+				},
+				Required: []string{"sha"},
+			},
+		},
+	},
+}
 
 // noteParamDescription documents the note move_ticket and update_ticket take.
 const noteParamDescription = "Why the status is changing, saved with the change in the ticket's status history. " +
@@ -1043,6 +1087,7 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 			Name: "get_ticket",
 			Description: "Get detailed ticket information including subtasks, labels, the epic it belongs to (if any), the tickets it depends on, the tickets it blocks, " +
 				"its documents (name, format, size, updated time and a link; read one with get_document), " +
+				"its delivery (branch, worktree, prUrl and landedCommits, each commit a sha with its repo; left out when none is set), " +
 				"and its status history (newest first, each change with its note; the first entry, with an empty fromStatus, is its creation). " +
 				"reviewRounds counts how many times it has entered agent_review.",
 			InputSchema: jsonSchema{
@@ -1092,7 +1137,8 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 		{
 			Name: "update_ticket",
 			Description: "Update ticket properties. Changing the status out of agent_review requires a note. " +
-				"To add a line or paragraph to the description, pass appendDescription rather than resending the whole description." +
+				"To add a line or paragraph to the description, pass appendDescription rather than resending the whole description. " +
+				"To record the branch, worktree, pull request or landed commits, pass delivery." +
 				shortAnswerHelp(ticketHolds, changedHelp, ticketWhole),
 			InputSchema: jsonSchema{
 				Type: "object",
@@ -1124,7 +1170,8 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 						Type:        "string",
 						Description: appendDescriptionHelp,
 					},
-					"full": fullProp(ticketWhole),
+					"delivery": deliveryProp,
+					"full":     fullProp(ticketWhole),
 				},
 				Required: []string{"id"},
 			},
@@ -1142,6 +1189,21 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 					"full":   fullProp(ticketWhole),
 				},
 				Required: []string{"id", "status"},
+			},
+		},
+		{
+			Name: "find_tickets_by_commit",
+			Description: "Find the tickets that landed a commit, by its full or short sha, from the landedCommits in their delivery. " +
+				"A commit matches when either sha starts with the other, so a short sha finds a full one and the other way round. " +
+				"Answers with a list (empty when no ticket landed it) of tickets, each with its id, key, title, status, url " +
+				"and the commits of it that matched (sha and repo).",
+			InputSchema: jsonSchema{
+				Type: "object",
+				Properties: map[string]schemaProp{
+					"sha":  {Type: "string", Description: "The commit's sha, full or short: 7 to 64 hex characters, any case"},
+					"repo": {Type: "string", Description: "Only commits landed in this repo, matched exactly (optional)"},
+				},
+				Required: []string{"sha"},
 			},
 		},
 		{

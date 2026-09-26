@@ -114,6 +114,8 @@ A `: keep-alive` comment arrives roughly every 20 seconds while nothing changes,
 
 To add to a ticket's description without resending it, `PUT /api/tickets/{id}` takes `appendDescription` (MCP `update_ticket` takes the same argument, the CLI `ticket update --append-description`). The existing text is kept byte for byte; on a non-empty description the new text starts a new paragraph, with only the newlines needed for a blank line before it, and on an empty one it becomes the description. The append is read and written in one transaction, so appends at the same moment all land. It cannot be combined with `description`, and text that is empty or only whitespace is refused (a 400 over HTTP).
 
+A ticket's `delivery` says where its work lives and where it landed: `branch`, `worktree`, `prUrl` and `landedCommits`, each commit a `sha` (7 to 64 hex characters, full or short, kept lowercase) with the `repo` it landed in, so one ticket can land in several repos. `PUT /api/tickets/{id}` takes `{"delivery": {...}}` (MCP `update_ticket` takes the same argument, the CLI `ticket update --branch`, `--worktree`, `--pr-url` and `--landed-commit repo@sha`). Only the fields given change: `""` clears a text field, and `landedCommits` replaces the whole list (`[]` clears it). A commit without a repo takes the ticket's repo when it has exactly one. The full ticket carries `delivery` when any field is set; lists leave it out. MCP `find_tickets_by_commit` and the CLI `ticket find-by-commit` find the tickets that landed a commit, by its full or short sha.
+
 `GET /api/tickets` filters by `projectId`, `status`, `priority`, `repo`, `label` and `epic`, plus `ready=true` (todo tickets whose dependencies are all done) and `excludeLabel` (leave out tickets with that label, e.g. `hold`). Repeat `status` for several, e.g. `?status=todo&status=in_progress`, or comma-separate them in one value, e.g. `?status=todo,in_progress`, the same as the CLI's `--status`. A status outside `todo`, `in_progress`, `agent_review` or `done` is a 400 naming the allowed values. Every filter given must match, so `ready=true` with statuses that leave out `todo` returns nothing. The CLI's `ticket list` and the MCP `list_tickets` tool take the same filters.
 
 ### CLI
@@ -142,6 +144,9 @@ taskboard ticket create --project <ID> --title "Implement login" --priority high
 taskboard ticket update <ID> --labels backend,urgent --depends-on AUTH-1
 taskboard ticket update <ID> --repo acme/auth-api,acme/auth-web  # replaces the set
 taskboard ticket update AUTH-1 --append-description "Worktree: ~/w/auth-1"  # adds a paragraph
+taskboard ticket update AUTH-1 --branch auth-1-login --worktree ~/w/auth-1 \
+  --landed-commit acme/auth-api@6bafa19,acme/auth-web@a198cc5          # where it lives and landed
+taskboard ticket find-by-commit 6bafa19                          # which ticket landed this commit
 taskboard ticket list --repo acme/auth-api                       # tickets touching that repo
 taskboard ticket list --project AUTH --status todo,in_progress   # any of several statuses (or repeat --status)
 taskboard ticket list --project AUTH --ready --exclude-label hold # todo tickets whose dependencies are all done, minus held ones
@@ -249,6 +254,7 @@ The reverse direction is derived, not stored. When `BILL-5` depends on `BILL-2`,
 | `update_ticket`         | Update ticket properties, with an optional note  |
 | `move_ticket`           | Move ticket to a status column, with a note      |
 | `delete_ticket`         | Delete a ticket                                  |
+| `find_tickets_by_commit` | Find the tickets that landed a commit, by sha   |
 | **Board**               |                                                  |
 | `get_board`             | Get full Kanban board grouped by status          |
 | **Subtasks**            |                                                  |

@@ -172,6 +172,7 @@ func TestToolHandlersRejectWronglyTypedArguments(t *testing.T) {
 		{"update_ticket", map[string]any{"id": f.ticketID, "priority": 1}},
 		{"move_ticket", map[string]any{"id": f.ticketID, "status": 1}},
 		{"delete_ticket", map[string]any{"id": 1}},
+		{"find_tickets_by_commit", map[string]any{"sha": 1}},
 		{"get_board", map[string]any{"projectId": 1}},
 		{"create_subtask", map[string]any{"ticketId": f.ticketID, "title": 1}},
 		{"batch_create_subtasks", map[string]any{"ticketId": f.ticketID, "subtasks": "not-a-list"}},
