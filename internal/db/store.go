@@ -82,7 +82,7 @@ func (s *Store) ListProjects(status string) ([]models.Project, error) {
 	}
 	defer rows.Close()
 
-	var projects []models.Project
+	projects := []models.Project{}
 	for rows.Next() {
 		var p models.Project
 		if err := rows.Scan(&p.ID, &p.Name, &p.Prefix, &p.Description, &p.HasAgentInstructions, &p.Icon, &p.Color, &p.Status, &p.CreatedAt, &p.UpdatedAt); err != nil {
@@ -218,20 +218,34 @@ func nextTicketNumber(q dbtx, projectID string) (int, error) {
 	return num, err
 }
 
+// ListTickets never returns a nil slice: a filter matching nothing, or an
+// unresolvable project, label or epic, comes back as [] rather than null, so
+// a caller that marshals the result straight to JSON never sends nil.
 func (s *Store) ListTickets(filter models.TicketFilter) ([]models.Ticket, error) {
-	return s.listTickets(filter, nil)
+	tickets, err := s.listTickets(filter, nil)
+	if err != nil {
+		return nil, err
+	}
+	if tickets == nil {
+		tickets = []models.Ticket{}
+	}
+	return tickets, nil
 }
 
 // ListTicketsPage returns one page of the tickets ListTickets would return
 // for filter: up to limit of them (limit must be positive), after skipping
 // offset, plus how many tickets match in all. A page past the end is empty.
 // Only the page's tickets get their labels, subtasks and dependencies
-// loaded, still with one query per relation.
+// loaded, still with one query per relation. Like ListTickets, the page is
+// never a nil slice.
 func (s *Store) ListTicketsPage(filter models.TicketFilter, limit, offset int) ([]models.Ticket, int, error) {
 	page := &ticketPage{limit: limit, offset: offset}
 	tickets, err := s.listTickets(filter, page)
 	if err != nil {
 		return nil, 0, err
+	}
+	if tickets == nil {
+		tickets = []models.Ticket{}
 	}
 	return tickets, page.total, nil
 }
@@ -1388,7 +1402,7 @@ func (s *Store) ListLabels() ([]models.Label, error) {
 	}
 	defer rows.Close()
 
-	var labels []models.Label
+	labels := []models.Label{}
 	for rows.Next() {
 		var l models.Label
 		if err := rows.Scan(&l.ID, &l.Name, &l.Color, &l.TicketCount); err != nil {
