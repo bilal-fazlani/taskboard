@@ -8,8 +8,7 @@ import { activeProjects, projectLabel } from "../lib/defaultProject";
 import { DEFAULT_STATUS } from "../lib/status";
 import type { Filters } from "../lib/filters";
 import { newTicketDefaults, type ProjectEpics } from "../lib/newTicketDefaults";
-
-const PRIORITIES = ["urgent", "high", "medium", "low"];
+import { PRIORITIES } from "../lib/priority";
 
 export default function CreateTicketModal({
   projects,

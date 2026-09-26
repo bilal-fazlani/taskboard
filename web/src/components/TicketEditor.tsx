@@ -32,8 +32,7 @@ import {
   toDateInputValue,
   type TicketFields,
 } from "../lib/ticketFields";
-
-const PRIORITIES = ["urgent", "high", "medium", "low"];
+import { PRIORITIES } from "../lib/priority";
 
 const FIELD_LABEL = "block text-xs font-medium text-slate-500 mb-1.5";
 const SECTION_HEADING = "text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-2.5";
