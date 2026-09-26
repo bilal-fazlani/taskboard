@@ -42,10 +42,11 @@ brew trust bilal-fazlani/tap
 brew install taskboard
 ```
 
-`brew trust` is needed on Homebrew 5.1.15 and later, which refuse to load a
-formula from a tap you haven't trusted. Older Homebrew doesn't have the
-command, so leave that line out there. The one-line install above needs no
-extra step: installing by the full name trusts the formula.
+Homebrew 6.0.0 and later refuse to load a formula from a tap you haven't
+trusted, so `brew trust` is needed there. The command first appeared in
+Homebrew 5.1.15, where trust is only checked if you opt in; older Homebrew
+doesn't have it, so leave that line out there. The one-line install above
+needs no extra step: installing by the full name trusts that formula.
 
 Upgrade to the latest release with:
 
