@@ -12,7 +12,7 @@ vi.mock("./useLiveRefresh", () => ({
   },
 }));
 
-import { DOCUMENT_SEARCH_DEBOUNCE_MS, useDocumentMatches } from "./useDocumentMatches";
+import { DOCUMENT_SEARCH_DEBOUNCE_MS, useDocumentMatches, useDocumentSearch } from "./useDocumentMatches";
 
 let hook: { result: { current: ReadonlySet<string> | null }; rerender: (props: Props) => void };
 interface Props {
@@ -126,5 +126,62 @@ describe("useDocumentMatches", () => {
     mount({ q: "storage" });
     await flush(DOCUMENT_SEARCH_DEBOUNCE_MS);
     expect(ids()).toBeNull();
+  });
+});
+
+// Dependencies fits again when the first answer to the user's search arrives,
+// and not when a live change answers it again.
+describe("useDocumentSearch", () => {
+  it("is settled by the first answer to each search, and stays settled through a live change", async () => {
+    mockApi.documents.search.mockResolvedValue({ ticketIds: ["t1"] });
+    const view = renderHook(({ q, project }: { q: string; project: string }) => useDocumentSearch(q, project), {
+      initialProps: { q: "", project: "ACP" },
+    });
+    expect(view.result.current).toEqual({ ids: null, settled: true });
+
+    view.rerender({ q: "plan", project: "ACP" });
+    expect(view.result.current.settled).toBe(false);
+    await flush(DOCUMENT_SEARCH_DEBOUNCE_MS);
+    expect(view.result.current.settled).toBe(true);
+    const answered = view.result.current.ids;
+
+    mockApi.documents.search.mockResolvedValue({ ticketIds: ["t1", "t2"] });
+    await act(async () => live.listener?.());
+    expect([...(view.result.current.ids ?? [])]).toEqual(["t1", "t2"]);
+    expect(view.result.current.ids).not.toBe(answered);
+    expect(view.result.current.settled).toBe(true);
+
+    // The last answer stands for a new search, or another project, but is
+    // not the answer to it.
+    view.rerender({ q: "plans", project: "ACP" });
+    expect(view.result.current.ids).not.toBeNull();
+    expect(view.result.current.settled).toBe(false);
+    await flush(DOCUMENT_SEARCH_DEBOUNCE_MS);
+    expect(view.result.current.settled).toBe(true);
+    view.rerender({ q: "plans", project: "LDR" });
+    expect(view.result.current.settled).toBe(false);
+    await flush(DOCUMENT_SEARCH_DEBOUNCE_MS);
+    expect(view.result.current.settled).toBe(true);
+  });
+
+  // Otherwise the first success, on a live change maybe minutes later, would
+  // look like the answer to the user's typing and fit the view over them.
+  it("is settled by a failed answer too, keeping the last ids, and a later success leaves it settled", async () => {
+    mockApi.documents.search.mockRejectedValue(new Error("API error 500: x"));
+    const view = renderHook(({ q }: { q: string }) => useDocumentSearch(q, "ACP"), { initialProps: { q: "storage" } });
+    expect(view.result.current.settled).toBe(false);
+    await flush(DOCUMENT_SEARCH_DEBOUNCE_MS);
+    expect(view.result.current).toEqual({ ids: null, settled: true });
+
+    mockApi.documents.search.mockResolvedValue({ ticketIds: ["t1"] });
+    await act(async () => live.listener?.());
+    expect(view.result.current).toEqual({ ids: new Set(["t1"]), settled: true });
+
+    // A new search that fails keeps the last answer's ids.
+    mockApi.documents.search.mockRejectedValue(new Error("API error 500: x"));
+    view.rerender({ q: "storage layer" });
+    expect(view.result.current.settled).toBe(false);
+    await flush(DOCUMENT_SEARCH_DEBOUNCE_MS);
+    expect(view.result.current).toEqual({ ids: new Set(["t1"]), settled: true });
   });
 });

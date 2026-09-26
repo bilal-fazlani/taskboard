@@ -6,7 +6,7 @@ import TicketEditor from "../components/TicketEditor";
 import TicketCard from "../components/TicketCard";
 import FilterPanel from "../components/FilterPanel";
 import { useChangeGlow } from "../hooks/useChangeGlow";
-import { useDocumentMatches } from "../hooks/useDocumentMatches";
+import { useDocumentSearch } from "../hooks/useDocumentMatches";
 import { useDocumentVisible } from "../hooks/useDocumentVisible";
 import { useFilters } from "../hooks/useFilters";
 import { useUnmatched } from "../hooks/useUnmatched";
@@ -254,7 +254,7 @@ export default function Graph() {
   }, []);
   const filterState = useFilters();
   const { filters } = filterState;
-  const docMatches = useDocumentMatches(filters.q, filters.project);
+  const { ids: docMatches, settled: docSearchSettled } = useDocumentSearch(filters.q, filters.project);
   const { mode: unmatched, setMode: setUnmatched } = useUnmatched();
   // Hide mode only changes anything while a filter but the project is set.
   const hiding = unmatched === "hide" && filterState.active;
@@ -497,7 +497,13 @@ export default function Graph() {
   // it (moveView). The fit is state adjusted while rendering: React renders
   // again before committing, so the unfitted graph is never painted, and the
   // canvas stays invisible while a fit is pending.
-  const hiddenBy = hiding ? JSON.stringify(NARROWING_KEYS.map((key) => filters[key])) : "";
+  //
+  // Which tickets' documents hold the search is the server's answer, and it
+  // lands a moment after the search text changes. That first answer to the
+  // search is part of the user's change, so while hiding it fits once more,
+  // bringing in the cards only a document matched. A later answer to the
+  // same search, asked again on a live refresh, leaves the key as it is.
+  const hiddenBy = hiding ? JSON.stringify([...NARROWING_KEYS.map((key) => filters[key]), docSearchSettled]) : "";
   const graphKey = `${filters.project.toLowerCase()}\n${unmatched}\n${hiddenBy}`;
   const [laidOut, setLaidOut] = useState(graphKey);
   if (graphKey !== laidOut) {

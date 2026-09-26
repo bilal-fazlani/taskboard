@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { BrowserRouter, MemoryRouter } from "react-router-dom";
 import type { Board as BoardData, Project, Ticket } from "../api/client";
+import { DOCUMENT_SEARCH_DEBOUNCE_MS } from "../hooks/useDocumentMatches";
 import { DEBOUNCE_MS } from "../lib/liveRefresh";
 
 // A live refresh replaces what a view shows, never where the user is looking
@@ -15,6 +16,7 @@ const mockApi = vi.hoisted(() => ({
   labels: { list: vi.fn() },
   epics: { list: vi.fn() },
   board: { get: vi.fn() },
+  documents: { search: vi.fn() },
 }));
 
 vi.mock("../api/client", () => ({ api: mockApi }));
@@ -352,6 +354,151 @@ describe("Dependencies in hide mode across a refetch", () => {
     watcher.disconnect();
     expect(blanked).toBe(false);
     expect(canvas().style.transform).toBe(moved);
+  });
+});
+
+// In hide mode, which tickets a search matches through their documents is the
+// server's answer, which lands a moment after the text. The first answer to
+// the search the user typed is part of that change and fits the view again,
+// so the cards only a document matched are on screen; the same search
+// answered again on a live refresh (a document saved elsewhere) leaves the
+// view where it is.
+describe("Dependencies in hide mode when document matches arrive", () => {
+  const canvas = () => document.querySelector<HTMLElement>("[data-graph-canvas]")!;
+  const card = (key: string) => screen.queryByRole("button", { name: new RegExp(`^${key} `) });
+  const blockedBy = (number: number) => [{ id: `t${number}`, key: `ACP-${number}`, title: `Ticket ${number}`, status: "todo" as const }];
+  // ACP-1 matches "storage" by its title; ACP-2, which it blocks, and ACP-3,
+  // which ACP-2 blocks, only ever through their documents.
+  const tickets = [
+    makeTicket(1, { title: "Storage layer" }),
+    makeTicket(2, { dependsOn: blockedBy(1) }),
+    makeTicket(3, { dependsOn: blockedBy(2) }),
+  ];
+
+  // jsdom lays nothing out, so the viewport and the cards are given sizes,
+  // and a fit then depends on the graph it frames.
+  const sized: [object, string, number][] = [
+    [Element.prototype, "clientWidth", 1200],
+    [Element.prototype, "clientHeight", 800],
+    [HTMLElement.prototype, "offsetWidth", 256],
+    [HTMLElement.prototype, "offsetHeight", 96],
+  ];
+  const saved: (PropertyDescriptor | undefined)[] = [];
+
+  beforeEach(() => {
+    for (const [proto, name, value] of sized) {
+      saved.push(Object.getOwnPropertyDescriptor(proto, name));
+      Object.defineProperty(proto, name, { configurable: true, get: () => value });
+    }
+  });
+
+  afterEach(() => {
+    sized.forEach(([proto, name], i) => {
+      const descriptor = saved[i];
+      if (descriptor) Object.defineProperty(proto, name, descriptor);
+      else delete (proto as Record<string, unknown>)[name];
+    });
+    saved.length = 0;
+    window.history.replaceState(null, "", "/");
+  });
+
+  // Typing writes the search to the URL from the browser's own location, so
+  // this runs under the real BrowserRouter.
+  async function mountAt(path: string) {
+    window.history.replaceState(null, "", path);
+    render(
+      <BrowserRouter>
+        <Graph />
+      </BrowserRouter>,
+    );
+    await act(async () => {});
+  }
+
+  async function documentAnswer() {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, DOCUMENT_SEARCH_DEBOUNCE_MS + 20));
+    });
+  }
+
+  /** Presses Fit and answers where it put the graph. */
+  async function pressFit() {
+    await act(async () => screen.getByLabelText("Fit to screen").click());
+    return canvas().style.transform;
+  }
+
+  /** Types "storage" in hide mode and lets ACP-2's document answer arrive. */
+  async function searchStorage() {
+    serves(tickets);
+    mockApi.documents.search.mockResolvedValue({ ticketIds: ["t2"] });
+    await mountAt("/?project=ACP&unmatched=hide");
+    await layout();
+    await act(async () => {
+      fireEvent.change(screen.getByLabelText("Search"), { target: { value: "storage" } });
+    });
+    // Fitted at once to what the text alone matches.
+    expect(card("ACP-1")).not.toBeNull();
+    expect(card("ACP-2")).toBeNull();
+    expect(canvas().className).not.toContain("invisible");
+    const textFit = canvas().style.transform;
+
+    await documentAnswer();
+    expect(mockApi.documents.search).toHaveBeenCalledWith("storage", "ACP");
+    expect(card("ACP-2")).not.toBeNull();
+    await layout();
+    expect(canvas().className).not.toContain("invisible");
+    return textFit;
+  }
+
+  it("fits again once the document answer to the search arrives", async () => {
+    const textFit = await searchStorage();
+    const answered = canvas().style.transform;
+    expect(answered).not.toBe(textFit);
+    // Framed as Fit frames it, with the card only a document matched.
+    expect(await pressFit()).toBe(answered);
+  });
+
+  it("stays put when a live refresh answers the same search again", async () => {
+    await searchStorage();
+    const answered = canvas().style.transform;
+
+    // A document saved elsewhere now matches ACP-3 too.
+    mockApi.documents.search.mockResolvedValue({ ticketIds: ["t2", "t3"] });
+    await liveChange(tickets);
+    expect(mockApi.documents.search).toHaveBeenCalledTimes(2);
+    expect(card("ACP-3")).not.toBeNull();
+    await layout();
+    expect(canvas().className).not.toContain("invisible");
+    expect(canvas().style.transform).toBe(answered);
+    // Fit would move it now, so a fit would have shown.
+    expect(await pressFit()).not.toBe(answered);
+  });
+
+  it("stays put when a live refresh brings the first answer after the search failed", async () => {
+    serves(tickets);
+    mockApi.documents.search.mockRejectedValue(new Error("API error 500: x"));
+    await mountAt("/?project=ACP&unmatched=hide");
+    await layout();
+    await act(async () => {
+      fireEvent.change(screen.getByLabelText("Search"), { target: { value: "storage" } });
+    });
+    await documentAnswer();
+    expect(mockApi.documents.search).toHaveBeenCalledTimes(1);
+    // The text alone still matches, and is fitted.
+    expect(card("ACP-1")).not.toBeNull();
+    expect(canvas().className).not.toContain("invisible");
+    const fitted = canvas().style.transform;
+    await act(async () => screen.getByLabelText("Zoom out").click());
+    const zoomed = canvas().style.transform;
+    expect(zoomed).not.toBe(fitted);
+
+    // Minutes later a change elsewhere, or the stream reconnecting, asks
+    // again, and this time the server answers.
+    mockApi.documents.search.mockResolvedValue({ ticketIds: ["t2"] });
+    await liveChange(tickets);
+    expect(card("ACP-2")).not.toBeNull();
+    await layout();
+    expect(canvas().className).not.toContain("invisible");
+    expect(canvas().style.transform).toBe(zoomed);
   });
 });
 
