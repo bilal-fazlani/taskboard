@@ -71,14 +71,14 @@ func TestCreateAndUpdateProjectAcceptAgentInstructions(t *testing.T) {
 	s := newTestServer(t)
 	var created map[string]any
 	projectJSON(t, s, "create_project", map[string]any{
-		"name": "Billing", "prefix": "BILL", "agentInstructions": "First rules.",
+		"name": "Billing", "prefix": "BILL", "agentInstructions": "First rules.", "full": true,
 	}, &created)
 	if created["agentInstructions"] != "First rules." {
 		t.Fatalf("create_project agentInstructions = %#v", created["agentInstructions"])
 	}
 
 	var updated map[string]any
-	projectJSON(t, s, "update_project", map[string]any{"id": "BILL", "agentInstructions": "Second rules."}, &updated)
+	projectJSON(t, s, "update_project", map[string]any{"id": "BILL", "agentInstructions": "Second rules.", "full": true}, &updated)
 	if updated["agentInstructions"] != "Second rules." {
 		t.Fatalf("update_project agentInstructions = %#v", updated["agentInstructions"])
 	}

@@ -256,6 +256,16 @@ field to each ticket — the link that opens it in the web UI — so an assistan
 can cite a ticket rather than just name it. It follows `TASKBOARD_URL` the same
 way the CLI does.
 
+#### Change confirmations
+
+Every MCP tool that creates or changes something (`create_*`, `update_*`,
+`move_ticket` and the subtask tools) answers with a short confirmation by
+default: the record's id and name (a ticket's key, title and status), what the
+call did (`created: true`, or `changed`: the fields it changed, `[]` when it
+changed nothing), `updatedAt` and the `url`, where the record has them. Pass
+`full: true` for the whole record instead; the subtask tools then return their
+whole ticket. The HTTP API, CLI and web UI are unchanged.
+
 #### Example Prompts
 
 Once the MCP is connected, you can talk to your AI assistant in high-level terms and let it figure out the breakdown:

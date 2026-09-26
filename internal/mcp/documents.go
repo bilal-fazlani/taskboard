@@ -67,7 +67,9 @@ func (s *MCPServer) documentToolDefinitions() []toolDef {
 				"Or attach an image (a screenshot, a mock) by passing data, its file in base64, instead of content, " +
 				"with format png, jpeg, gif or webp, or a name ending in that extension (\"Login screen.png\"). " +
 				"Names hold letters, digits, spaces, _ and - only, with no extension, and are unique per ticket or " +
-				"epic ignoring case. Content is at most 8 MB. Returns the document with a url that opens it in the web UI.",
+				"epic ignoring case. Content is at most 8 MB." +
+				shortAnswerHelp(documentHolds, "created: true", documentWhole) +
+				" The url opens the document in the web UI.",
 			InputSchema: jsonSchema{
 				Type: "object",
 				Properties: documentOwnerProps("Ticket ID or display key (e.g. BILL-2), case-insensitive", map[string]schemaProp{
@@ -79,6 +81,7 @@ func (s *MCPServer) documentToolDefinitions() []toolDef {
 						"HTML is shown in a sandboxed frame that may run scripts and load from the internet; people cannot edit it in the web UI.",
 						Enum: []string{models.DocumentFormatMarkdown, models.DocumentFormatHTML,
 							models.DocumentFormatPNG, models.DocumentFormatJPEG, models.DocumentFormatGIF, models.DocumentFormatWebP}},
+					"full": fullProp(documentWhole),
 				}),
 				Required: []string{"name"},
 			},
@@ -91,7 +94,9 @@ func (s *MCPServer) documentToolDefinitions() []toolDef {
 				"text (the ticket's description and the ticket's or epic's markdown and HTML documents), in the same " +
 				"form, together with the rename: each rewritten document gets a new revision. The result's " +
 				"referencesUpdated lists the places rewritten, and referencesLeft any place where a reference could not " +
-				"be rewritten and now shows a missing image.",
+				"be rewritten and now shows a missing image; both are in the short confirmation too." +
+				shortAnswerHelp(documentHolds, "changed: the names of the fields the call changed ([] when it changed nothing; "+
+					"data whenever an image's picture is replaced)", documentWhole),
 			InputSchema: jsonSchema{
 				Type: "object",
 				Properties: documentOwnerProps(documentTicketDescription, map[string]schemaProp{
@@ -99,6 +104,7 @@ func (s *MCPServer) documentToolDefinitions() []toolDef {
 					"name":    {Type: "string", Description: "New name: letters, digits, spaces, _ and - only; no extension"},
 					"content": {Type: "string", Description: "The whole new content"},
 					"data":    {Type: "string", Description: documentDataDescription + " Replaces an image's picture; it must be the image's format."},
+					"full":    fullProp(documentWhole),
 				}),
 				Required: []string{"id"},
 			},
@@ -174,6 +180,7 @@ func (s *MCPServer) callDocumentTool(name string, args json.RawMessage) (result 
 			Format  string  `json:"format"`
 			Content string  `json:"content"`
 			Data    *string `json:"data"`
+			fullArg
 		}
 		if err := decodeArgs(args, &a); err != nil {
 			return nil, true, err
@@ -200,7 +207,7 @@ func (s *MCPServer) callDocumentTool(name string, args json.RawMessage) (result 
 			if err != nil {
 				return nil, true, err
 			}
-			return s.withDocumentURL(d), true, nil
+			return s.documentResult(d, createdChange, a.Full), true, nil
 		}
 		d, err := s.store.CreateDocument(models.CreateDocumentRequest{
 			TicketID: owner.TicketID, EpicID: owner.EpicID, Name: a.Name, Format: a.Format, Content: a.Content,
@@ -208,7 +215,7 @@ func (s *MCPServer) callDocumentTool(name string, args json.RawMessage) (result 
 		if err != nil {
 			return nil, true, err
 		}
-		return s.withDocumentURL(d), true, nil
+		return s.documentResult(d, createdChange, a.Full), true, nil
 
 	case "update_document":
 		var a struct {
@@ -217,6 +224,7 @@ func (s *MCPServer) callDocumentTool(name string, args json.RawMessage) (result 
 			Name    *string `json:"name"`
 			Content *string `json:"content"`
 			Data    *string `json:"data"`
+			fullArg
 		}
 		if err := decodeArgs(args, &a); err != nil {
 			return nil, true, err
@@ -230,6 +238,13 @@ func (s *MCPServer) callDocumentTool(name string, args json.RawMessage) (result 
 		id, err := s.resolveDocumentRefOrError(a.ID, a.documentOwnerArgs)
 		if err != nil {
 			return nil, true, err
+		}
+		before, err := s.store.GetDocument(id)
+		if err != nil {
+			return nil, true, err
+		}
+		if before == nil {
+			return nil, true, fmt.Errorf("document not found")
 		}
 		if a.Data != nil {
 			data, err := decodeImageData(*a.Data)
@@ -245,7 +260,10 @@ func (s *MCPServer) callDocumentTool(name string, args json.RawMessage) (result 
 			if d == nil {
 				return nil, true, fmt.Errorf("document not found")
 			}
-			return s.withDocumentURL(d), true, nil
+			// A new picture is a change even when it is the same file.
+			c := changedFields(before, d, documentFields...)
+			*c.Changed = append(*c.Changed, "data")
+			return s.documentResult(d, c, a.Full), true, nil
 		}
 		d, err := s.store.UpdateDocument(id, models.UpdateDocumentRequest{Name: a.Name, Content: a.Content})
 		if err != nil {
@@ -254,7 +272,7 @@ func (s *MCPServer) callDocumentTool(name string, args json.RawMessage) (result 
 		if d == nil {
 			return nil, true, fmt.Errorf("document not found")
 		}
-		return s.withDocumentURL(d), true, nil
+		return s.documentResult(d, changedFields(before, d, documentFields...), a.Full), true, nil
 
 	case "delete_document":
 		var a struct {

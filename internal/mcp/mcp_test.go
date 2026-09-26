@@ -37,6 +37,7 @@ func TestCreateLabelTool(t *testing.T) {
 	s := newTestServer(t)
 
 	result, err := s.callTool("create_label", mustJSON(t, map[string]any{
+		"full":  true,
 		"name":  "bug",
 		"color": "#FF0000",
 	}))
@@ -53,7 +54,7 @@ func TestCreateLabelTool(t *testing.T) {
 
 	// Omitted color falls back to the standard default rather than being
 	// written as an empty string.
-	result, err = s.callTool("create_label", mustJSON(t, map[string]any{"name": "chore"}))
+	result, err = s.callTool("create_label", mustJSON(t, map[string]any{"full": true, "name": "chore"}))
 	if err != nil {
 		t.Fatalf("create_label without color: %v", err)
 	}
@@ -71,7 +72,7 @@ func TestCreateLabelTool(t *testing.T) {
 func TestUpdateLabelToolResolvesIDOrExactName(t *testing.T) {
 	s := newTestServer(t)
 
-	created, err := s.callTool("create_label", mustJSON(t, map[string]any{"name": "bug", "color": "#FF0000"}))
+	created, err := s.callTool("create_label", mustJSON(t, map[string]any{"full": true, "name": "bug", "color": "#FF0000"}))
 	if err != nil {
 		t.Fatalf("create_label: %v", err)
 	}
@@ -80,6 +81,7 @@ func TestUpdateLabelToolResolvesIDOrExactName(t *testing.T) {
 	// Update by id.
 	newColor := "#00FF00"
 	result, err := s.callTool("update_label", mustJSON(t, map[string]any{
+		"full":  true,
 		"id":    label.ID,
 		"color": newColor,
 	}))
@@ -107,6 +109,7 @@ func TestUpdateLabelToolResolvesIDOrExactName(t *testing.T) {
 
 	newName := "defect"
 	result, err = s.callTool("update_label", mustJSON(t, map[string]any{
+		"full": true,
 		"id":   "BUG", // exact name, different case
 		"name": newName,
 	}))
@@ -140,7 +143,7 @@ func TestUpdateLabelToolResolvesIDOrExactName(t *testing.T) {
 func TestUpdateLabelToolRejectsNothingToUpdate(t *testing.T) {
 	s := newTestServer(t)
 
-	created, err := s.callTool("create_label", mustJSON(t, map[string]any{"name": "bug", "color": "#FF0000"}))
+	created, err := s.callTool("create_label", mustJSON(t, map[string]any{"full": true, "name": "bug", "color": "#FF0000"}))
 	if err != nil {
 		t.Fatalf("create_label: %v", err)
 	}
@@ -156,7 +159,7 @@ func TestUpdateLabelToolRejectsNothingToUpdate(t *testing.T) {
 func TestUpdateLabelToolValidatesNameAndColor(t *testing.T) {
 	s := newTestServer(t)
 
-	created, err := s.callTool("create_label", mustJSON(t, map[string]any{"name": "bug", "color": "#FF0000"}))
+	created, err := s.callTool("create_label", mustJSON(t, map[string]any{"full": true, "name": "bug", "color": "#FF0000"}))
 	if err != nil {
 		t.Fatalf("create_label: %v", err)
 	}
@@ -183,6 +186,7 @@ func TestUpdateLabelToolValidatesNameAndColor(t *testing.T) {
 	// A blank color alone (valid name given) is treated as "not given": the
 	// existing color survives instead of being blanked.
 	result, err := s.callTool("update_label", mustJSON(t, map[string]any{
+		"full":  true,
 		"id":    label.ID,
 		"name":  "defect",
 		"color": "  ",
@@ -256,6 +260,7 @@ func TestTicketToolsIncludeTheTicketURL(t *testing.T) {
 	}
 
 	created, err := s.callTool("create_ticket", mustJSON(t, map[string]any{
+		"full":      true,
 		"projectId": project.ID,
 		"title":     "URL-addressable tickets",
 	}))
@@ -277,6 +282,7 @@ func TestTicketToolsIncludeTheTicketURL(t *testing.T) {
 	}
 
 	updated, err := s.callTool("update_ticket", mustJSON(t, map[string]any{
+		"full":     true,
 		"id":       ticket.ID,
 		"priority": "high",
 	}))
@@ -288,6 +294,7 @@ func TestTicketToolsIncludeTheTicketURL(t *testing.T) {
 	}
 
 	moved, err := s.callTool("move_ticket", mustJSON(t, map[string]any{
+		"full":   true,
 		"id":     ticket.ID,
 		"status": "in_progress",
 	}))
@@ -373,7 +380,7 @@ func TestToggleSubtaskToolOmittingCompletedStillFlips(t *testing.T) {
 	if err != nil {
 		t.Fatalf("toggle_subtask (no completed): %v", err)
 	}
-	if !result.(*models.Subtask).Completed {
+	if !result.(subtaskConfirmation).Completed {
 		t.Fatalf("first flip left completed = false, want true")
 	}
 
@@ -381,7 +388,7 @@ func TestToggleSubtaskToolOmittingCompletedStillFlips(t *testing.T) {
 	if err != nil {
 		t.Fatalf("toggle_subtask (no completed), second call: %v", err)
 	}
-	if result.(*models.Subtask).Completed {
+	if result.(subtaskConfirmation).Completed {
 		t.Fatalf("second flip left completed = true, want false")
 	}
 }
@@ -409,7 +416,7 @@ func TestToggleSubtaskToolWithCompletedSetsState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("toggle_subtask completed=true: %v", err)
 	}
-	if !result.(*models.Subtask).Completed {
+	if !result.(subtaskConfirmation).Completed {
 		t.Fatalf("completed = false after setting true")
 	}
 
@@ -418,7 +425,7 @@ func TestToggleSubtaskToolWithCompletedSetsState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("toggle_subtask completed=true (repeat): %v", err)
 	}
-	if !result.(*models.Subtask).Completed {
+	if !result.(subtaskConfirmation).Completed {
 		t.Fatalf("completed = false after repeating true")
 	}
 
@@ -427,7 +434,7 @@ func TestToggleSubtaskToolWithCompletedSetsState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("toggle_subtask completed=false: %v", err)
 	}
-	if result.(*models.Subtask).Completed {
+	if result.(subtaskConfirmation).Completed {
 		t.Fatalf("completed = true after setting false")
 	}
 
@@ -508,6 +515,7 @@ func TestTicketToolsAcceptDisplayKeysAndProjectPrefix(t *testing.T) {
 
 	// create_ticket accepts a project prefix, case-insensitively.
 	created, err := s.callTool("create_ticket", mustJSON(t, map[string]any{
+		"full":      true,
 		"projectId": "bill",
 		"title":     "Invoice",
 	}))
@@ -530,6 +538,7 @@ func TestTicketToolsAcceptDisplayKeysAndProjectPrefix(t *testing.T) {
 
 	// update_ticket by display key.
 	updated, err := s.callTool("update_ticket", mustJSON(t, map[string]any{
+		"full":     true,
 		"id":       "BILL-1",
 		"priority": "high",
 	}))
@@ -658,6 +667,7 @@ func TestProjectToolsAcceptPrefix(t *testing.T) {
 	}
 
 	updated, err := s.callTool("update_project", mustJSON(t, map[string]any{
+		"full": true,
 		"id":   "bill",
 		"name": "Billing Renamed",
 	}))
@@ -769,6 +779,7 @@ func TestEpicTools(t *testing.T) {
 	}
 
 	created, err := s.callTool("create_epic", mustJSON(t, map[string]any{
+		"full":        true,
 		"projectId":   "bill",
 		"name":        "Invoicing",
 		"description": "Bill customers",
@@ -826,6 +837,7 @@ func TestEpicTools(t *testing.T) {
 
 	// update_epic by id.
 	updated, err := s.callTool("update_epic", mustJSON(t, map[string]any{
+		"full":        true,
 		"id":          epic.ID,
 		"description": "Bill customers on time",
 	}))
@@ -844,6 +856,7 @@ func TestEpicTools(t *testing.T) {
 
 	// update_epic by name together with project, renaming it.
 	renamed, err := s.callTool("update_epic", mustJSON(t, map[string]any{
+		"full":    true,
 		"id":      "invoicing",
 		"project": "bill",
 		"name":    "Invoices",
@@ -960,6 +973,7 @@ func TestTicketToolsTakeAndReportEpic(t *testing.T) {
 	}
 
 	created, err := s.callTool("create_ticket", mustJSON(t, map[string]any{
+		"full":      true,
 		"projectId": "bill",
 		"title":     "Send invoice",
 		"epic":      "invoicing",
@@ -983,6 +997,7 @@ func TestTicketToolsTakeAndReportEpic(t *testing.T) {
 	// Omitting the epic field on an update leaves the ticket's epic
 	// unchanged, the same as it does for dueDate.
 	omitted, err := s.callTool("update_ticket", mustJSON(t, map[string]any{
+		"full":     true,
 		"id":       ticket.ID,
 		"priority": "high",
 	}))
@@ -996,6 +1011,7 @@ func TestTicketToolsTakeAndReportEpic(t *testing.T) {
 	// An explicit JSON null decodes to the same nil pointer as an omitted
 	// field, so it also leaves the epic unchanged.
 	withNull, err := s.callTool("update_ticket", mustJSON(t, map[string]any{
+		"full": true,
 		"id":   ticket.ID,
 		"epic": nil,
 	}))
@@ -1008,6 +1024,7 @@ func TestTicketToolsTakeAndReportEpic(t *testing.T) {
 
 	// An empty string clears it.
 	cleared, err := s.callTool("update_ticket", mustJSON(t, map[string]any{
+		"full": true,
 		"id":   ticket.ID,
 		"epic": "",
 	}))
@@ -1025,6 +1042,7 @@ func TestTicketToolsTakeAndReportEpic(t *testing.T) {
 		t.Fatalf("UpdateTicket restoring epic: %v", err)
 	}
 	updated, err := s.callTool("update_ticket", mustJSON(t, map[string]any{
+		"full": true,
 		"id":   ticket.ID,
 		"epic": "NONE",
 	}))

@@ -24,6 +24,7 @@ func TestCreateImageDocumentTool(t *testing.T) {
 
 	// A name with its extension sets the format.
 	got, err := s.callTool("create_document", mustJSON(t, map[string]any{
+		"full":   true,
 		"ticket": "doc-1", "name": "Login screen.png", "data": b64(imagedoctest.PNG(40, 30)),
 	}))
 	if err != nil {
@@ -39,6 +40,7 @@ func TestCreateImageDocumentTool(t *testing.T) {
 	// are fine. The metadata goes.
 	encoded := b64(imagedoctest.JPEGWithGPS(60, 40, 6))
 	got, err = s.callTool("create_document", mustJSON(t, map[string]any{
+		"full":   true,
 		"ticket": "DOC-1", "name": "Photo", "format": "jpg",
 		"data": "data:image/jpeg;base64," + encoded[:40] + "\n" + encoded[40:],
 	}))
@@ -168,6 +170,7 @@ func TestUpdateImageDocumentTool(t *testing.T) {
 	s := newTestServer(t)
 	seedMCPTicket(t, s)
 	got, err := s.callTool("create_document", mustJSON(t, map[string]any{
+		"full":   true,
 		"ticket": "DOC-1", "name": "Shot.png", "data": b64(imagedoctest.PNG(40, 30)),
 	}))
 	if err != nil {
@@ -176,7 +179,8 @@ func TestUpdateImageDocumentTool(t *testing.T) {
 	d := got.(*models.Document)
 
 	got, err = s.callTool("update_document", mustJSON(t, map[string]any{
-		"id": "shot.png", "ticket": "DOC-1", "data": b64(imagedoctest.PNG(20, 50)), "name": "Final shot",
+		"full": true,
+		"id":   "shot.png", "ticket": "DOC-1", "data": b64(imagedoctest.PNG(20, 50)), "name": "Final shot",
 	}))
 	if err != nil {
 		t.Fatalf("update_document: %v", err)
@@ -187,7 +191,7 @@ func TestUpdateImageDocumentTool(t *testing.T) {
 		t.Errorf("updated %+v", u.DocumentMeta)
 	}
 
-	text, _ := s.callTool("create_document", mustJSON(t, map[string]any{"ticket": "DOC-1", "name": "Plan", "content": "# Plan"}))
+	text, _ := s.callTool("create_document", mustJSON(t, map[string]any{"full": true, "ticket": "DOC-1", "name": "Plan", "content": "# Plan"}))
 	for _, tc := range []struct {
 		args map[string]any
 		want string
@@ -227,6 +231,7 @@ func TestImageToolsOnEpics(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err := s.callTool("create_document", mustJSON(t, map[string]any{
+		"full": true,
 		"epic": "launch", "project": "DOC", "name": "Flow", "format": "gif", "data": b64(imagedoctest.AnimatedGIF()),
 	}))
 	if err != nil {
@@ -274,7 +279,7 @@ func TestGetDocumentToolScalesLargeImages(t *testing.T) {
 	s := newTestServer(t)
 	seedMCPTicket(t, s)
 	stored := imagedoctest.PNG(3000, 1000)
-	got, err := s.callTool("create_document", mustJSON(t, map[string]any{"ticket": "DOC-1", "name": "Wide.png", "data": b64(stored)}))
+	got, err := s.callTool("create_document", mustJSON(t, map[string]any{"full": true, "ticket": "DOC-1", "name": "Wide.png", "data": b64(stored)}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -324,7 +329,7 @@ func TestImageRenameAndDeleteKeepTextInStep(t *testing.T) {
 
 	// Renaming, with or without a new picture, rewrites the references and
 	// says where.
-	got, err := s.callTool("update_document", mustJSON(t, map[string]any{"ticket": "DOC-1", "id": "Login screen.png", "name": "Home page"}))
+	got, err := s.callTool("update_document", mustJSON(t, map[string]any{"full": true, "ticket": "DOC-1", "id": "Login screen.png", "name": "Home page"}))
 	if err != nil {
 		t.Fatalf("update_document: %v", err)
 	}
@@ -334,6 +339,7 @@ func TestImageRenameAndDeleteKeepTextInStep(t *testing.T) {
 		t.Errorf("referencesUpdated = %+v", d.ReferencesUpdated)
 	}
 	got, err = s.callTool("update_document", mustJSON(t, map[string]any{
+		"full":   true,
 		"ticket": "DOC-1", "id": "Home page.png", "name": "Start", "data": b64(imagedoctest.PNG(9, 9)),
 	}))
 	if err != nil {

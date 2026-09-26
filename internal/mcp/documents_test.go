@@ -49,6 +49,7 @@ func TestDocumentTools(t *testing.T) {
 	seedMCPTicket(t, s)
 
 	created, err := s.callTool("create_document", mustJSON(t, map[string]any{
+		"full":   true,
 		"ticket": "doc-1", "name": "Design spec", "content": "# v1",
 	}))
 	if err != nil {
@@ -71,7 +72,8 @@ func TestDocumentTools(t *testing.T) {
 	}
 
 	updated, err := s.callTool("update_document", mustJSON(t, map[string]any{
-		"id": "Design spec", "ticket": "DOC-1", "content": "# v2", "name": "Plan",
+		"full": true,
+		"id":   "Design spec", "ticket": "DOC-1", "content": "# v2", "name": "Plan",
 	}))
 	if err != nil {
 		t.Fatalf("update_document: %v", err)
@@ -99,6 +101,7 @@ func TestCreateHTMLDocumentTool(t *testing.T) {
 	s := newTestServer(t)
 	seedMCPTicket(t, s)
 	got, err := s.callTool("create_document", mustJSON(t, map[string]any{
+		"full":   true,
 		"ticket": "DOC-1", "name": "Report", "format": "html", "content": "<h1>x</h1>",
 	}))
 	if err != nil {
@@ -182,6 +185,7 @@ func TestEpicDocumentTools(t *testing.T) {
 	}
 
 	got, err := s.callTool("create_document", mustJSON(t, map[string]any{
+		"full": true,
 		"epic": "launch", "project": "DOC", "name": "Rollout", "content": "# r",
 	}))
 	if err != nil {
@@ -231,7 +235,8 @@ func TestEpicDocumentTools(t *testing.T) {
 	}
 
 	updated, err := s.callTool("update_document", mustJSON(t, map[string]any{
-		"id": "Rollout", "epic": "Launch", "project": "DOC", "name": "Go live", "content": "# v2",
+		"full": true,
+		"id":   "Rollout", "epic": "Launch", "project": "DOC", "name": "Go live", "content": "# v2",
 	}))
 	if err != nil {
 		t.Fatalf("update_document on epic: %v", err)

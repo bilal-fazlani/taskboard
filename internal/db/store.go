@@ -1527,6 +1527,20 @@ func (s *Store) SetSubtaskState(id string, completed bool) (*models.Subtask, err
 	return &st, err
 }
 
+// GetSubtask returns one subtask, or (nil, nil) for an unknown id.
+func (s *Store) GetSubtask(id string) (*models.Subtask, error) {
+	var st models.Subtask
+	err := s.db.QueryRow("SELECT id, ticket_id, title, completed, position FROM subtasks WHERE id = ?", id).
+		Scan(&st.ID, &st.TicketID, &st.Title, &st.Completed, &st.Position)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &st, nil
+}
+
 // DeleteSubtask removes a subtask. It reports ErrInvalidInput for an unknown
 // id rather than silently succeeding.
 func (s *Store) DeleteSubtask(id string) error {

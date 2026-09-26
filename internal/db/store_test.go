@@ -1609,6 +1609,27 @@ func TestDeleteSubtaskUnknownIDIsInvalidInput(t *testing.T) {
 	assertInvalidInput(t, err, `subtask not found: "01ARZ3NDEKTSV4RRFFQ69G5FAV"`)
 }
 
+func TestGetSubtask(t *testing.T) {
+	s := newTestStore(t)
+	p := seedProject(t, s, "Billing", "BILL")
+	tk := seedTicket(t, s, p.ID, "Invoice")
+	st, err := s.AddSubtask(tk.ID, models.CreateSubtaskRequest{Title: "Step one"})
+	if err != nil {
+		t.Fatalf("AddSubtask: %v", err)
+	}
+	got, err := s.GetSubtask(st.ID)
+	if err != nil {
+		t.Fatalf("GetSubtask: %v", err)
+	}
+	if got == nil || *got != *st {
+		t.Fatalf("GetSubtask = %+v, want %+v", got, st)
+	}
+	got, err = s.GetSubtask("01ARZ3NDEKTSV4RRFFQ69G5FAV")
+	if err != nil || got != nil {
+		t.Fatalf("GetSubtask(unknown) = %+v, %v; want nil, nil", got, err)
+	}
+}
+
 func TestResolveLabelRefByIDOrExactName(t *testing.T) {
 	s := newTestStore(t)
 	bug, err := s.CreateLabel(models.CreateLabelRequest{Name: "bug", Color: "#FF0000"})

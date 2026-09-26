@@ -214,16 +214,24 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 		return p, err
 
 	case "create_project":
-		var a models.CreateProjectRequest
+		var a struct {
+			models.CreateProjectRequest
+			fullArg
+		}
 		if err := decodeArgs(args, &a); err != nil {
 			return nil, err
 		}
-		return s.store.CreateProject(a)
+		p, err := s.store.CreateProject(a.CreateProjectRequest)
+		if err != nil {
+			return nil, err
+		}
+		return projectAnswer(p, createdChange, a.Full), nil
 
 	case "update_project":
 		var a struct {
 			ID string `json:"id"`
 			models.UpdateProjectRequest
+			fullArg
 		}
 		if err := decodeArgs(args, &a); err != nil {
 			return nil, err
@@ -232,7 +240,18 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 		if err != nil {
 			return nil, err
 		}
-		return s.store.UpdateProject(projectID, a.UpdateProjectRequest)
+		before, err := s.store.GetProject(projectID)
+		if err != nil {
+			return nil, err
+		}
+		p, err := s.store.UpdateProject(projectID, a.UpdateProjectRequest)
+		if err != nil {
+			return nil, err
+		}
+		if p == nil || before == nil {
+			return nil, fmt.Errorf("project not found")
+		}
+		return projectAnswer(p, changedFields(before, p, projectFields...), a.Full), nil
 
 	case "delete_project":
 		var a struct {
@@ -283,17 +302,25 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 		return map[string]any{"epics": epics, "noEpic": noEpic}, nil
 
 	case "create_epic":
-		var a models.CreateEpicRequest
+		var a struct {
+			models.CreateEpicRequest
+			fullArg
+		}
 		if err := decodeArgs(args, &a); err != nil {
 			return nil, err
 		}
-		return s.store.CreateEpic(a)
+		e, err := s.store.CreateEpic(a.CreateEpicRequest)
+		if err != nil {
+			return nil, err
+		}
+		return s.epicAnswer(e, createdChange, a.Full)
 
 	case "update_epic":
 		var a struct {
 			ID      string `json:"id"`
 			Project string `json:"project"`
 			models.UpdateEpicRequest
+			fullArg
 		}
 		if err := decodeArgs(args, &a); err != nil {
 			return nil, err
@@ -305,14 +332,18 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 		if err != nil {
 			return nil, err
 		}
+		before, err := s.store.GetEpic(epicID)
+		if err != nil {
+			return nil, err
+		}
 		e, err := s.store.UpdateEpic(epicID, a.UpdateEpicRequest)
 		if err != nil {
 			return nil, err
 		}
-		if e == nil {
+		if e == nil || before == nil {
 			return nil, fmt.Errorf("epic not found")
 		}
-		return e, nil
+		return s.epicAnswer(e, changedFields(before, e, epicFields...), a.Full)
 
 	case "delete_epic":
 		var a struct {
@@ -336,7 +367,10 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 		return s.store.ListLabels()
 
 	case "create_label":
-		var a models.CreateLabelRequest
+		var a struct {
+			models.CreateLabelRequest
+			fullArg
+		}
 		if err := decodeArgs(args, &a); err != nil {
 			return nil, err
 		}
@@ -346,12 +380,17 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 		if strings.TrimSpace(a.Color) == "" {
 			a.Color = db.DefaultLabelColor
 		}
-		return s.store.CreateLabel(a)
+		l, err := s.store.CreateLabel(a.CreateLabelRequest)
+		if err != nil {
+			return nil, err
+		}
+		return labelAnswer(l, createdChange, a.Full), nil
 
 	case "update_label":
 		var a struct {
 			ID string `json:"id"`
 			models.UpdateLabelRequest
+			fullArg
 		}
 		if err := decodeArgs(args, &a); err != nil {
 			return nil, err
@@ -363,14 +402,18 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 		if err != nil {
 			return nil, err
 		}
+		before, err := s.labelByID(labelID)
+		if err != nil {
+			return nil, err
+		}
 		l, err := s.store.UpdateLabel(labelID, a.UpdateLabelRequest)
 		if err != nil {
 			return nil, err
 		}
-		if l == nil {
+		if l == nil || before == nil {
 			return nil, fmt.Errorf("label not found")
 		}
-		return l, nil
+		return labelAnswer(l, changedFields(before, l, labelFields...), a.Full), nil
 
 	case "delete_label":
 		var a struct {
@@ -413,25 +456,33 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 		return weburl.Fill(t), nil
 
 	case "create_ticket":
-		var a models.CreateTicketRequest
+		var a struct {
+			models.CreateTicketRequest
+			fullArg
+		}
 		if err := decodeArgs(args, &a); err != nil {
 			return nil, err
 		}
-		t, err := s.store.CreateTicket(a)
+		t, err := s.store.CreateTicket(a.CreateTicketRequest)
 		if err != nil {
 			return nil, err
 		}
-		return weburl.Fill(t), nil
+		return ticketAnswer(t, createdChange, a.Full), nil
 
 	case "update_ticket":
 		var a struct {
 			ID string `json:"id"`
 			models.UpdateTicketRequest
+			fullArg
 		}
 		if err := decodeArgs(args, &a); err != nil {
 			return nil, err
 		}
 		ticketID, err := s.resolveTicketRefOrError(a.ID)
+		if err != nil {
+			return nil, err
+		}
+		before, err := s.store.GetTicket(ticketID)
 		if err != nil {
 			return nil, err
 		}
@@ -440,12 +491,16 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 		if err != nil {
 			return nil, err
 		}
-		return weburl.Fill(t), nil
+		if t == nil || before == nil {
+			return nil, fmt.Errorf("ticket not found")
+		}
+		return ticketAnswer(t, changedFields(before, t, ticketFields...), a.Full), nil
 
 	case "move_ticket":
 		var a struct {
 			ID string `json:"id"`
 			models.MoveTicketRequest
+			fullArg
 		}
 		if err := decodeArgs(args, &a); err != nil {
 			return nil, err
@@ -454,15 +509,19 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 		if err != nil {
 			return nil, err
 		}
+		before, err := s.store.GetTicket(ticketID)
+		if err != nil {
+			return nil, err
+		}
 		// Until agents have identities (ACP-4), "agent" means "came through MCP"; the rule should then key off the actor.
 		t, err := s.store.MoveTicket(ticketID, a.MoveTicketRequest, db.RequireNoteLeavingReview())
 		if err != nil {
 			return nil, err
 		}
-		if t == nil {
+		if t == nil || before == nil {
 			return nil, fmt.Errorf("ticket not found")
 		}
-		return weburl.Fill(t), nil
+		return ticketAnswer(t, changedFields(before, t, ticketFields...), a.Full), nil
 
 	case "delete_ticket":
 		var a struct {
@@ -490,6 +549,7 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 		var a struct {
 			TicketID string `json:"ticketId"`
 			Title    string `json:"title"`
+			fullArg
 		}
 		if err := decodeArgs(args, &a); err != nil {
 			return nil, err
@@ -501,7 +561,11 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 		if err != nil {
 			return nil, err
 		}
-		return s.store.AddSubtask(ticketID, models.CreateSubtaskRequest{Title: a.Title})
+		st, err := s.store.AddSubtask(ticketID, models.CreateSubtaskRequest{Title: a.Title})
+		if err != nil {
+			return nil, err
+		}
+		return s.subtaskAnswer(st, createdChange, a.Full)
 
 	case "batch_create_subtasks":
 		var a struct {
@@ -509,6 +573,7 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 			Subtasks []struct {
 				Title string `json:"title"`
 			} `json:"subtasks"`
+			fullArg
 		}
 		if err := decodeArgs(args, &a); err != nil {
 			return nil, err
@@ -528,29 +593,55 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 			}
 			created = append(created, *st)
 		}
-		return created, nil
+		return s.subtasksAnswer(ticketID, created, a.Full)
 
 	case "delete_subtask":
 		var a struct {
 			ID string `json:"id"`
+			fullArg
 		}
 		if err := decodeArgs(args, &a); err != nil {
 			return nil, err
 		}
-		return map[string]bool{"deleted": true}, s.store.DeleteSubtask(a.ID)
+		st, err := s.store.GetSubtask(a.ID)
+		if err != nil {
+			return nil, err
+		}
+		if err := s.store.DeleteSubtask(a.ID); err != nil {
+			return nil, err
+		}
+		if st == nil { // gone between the read and the delete: nothing left to describe
+			return map[string]bool{"deleted": true}, nil
+		}
+		return s.subtaskAnswer(st, deletedChange, a.Full)
 
 	case "toggle_subtask":
 		var a struct {
 			ID        string `json:"id"`
 			Completed *bool  `json:"completed"`
+			fullArg
 		}
 		if err := decodeArgs(args, &a); err != nil {
 			return nil, err
 		}
-		if a.Completed != nil {
-			return s.store.SetSubtaskState(a.ID, *a.Completed)
+		before, err := s.store.GetSubtask(a.ID)
+		if err != nil {
+			return nil, err
 		}
-		return s.store.ToggleSubtask(a.ID)
+		var st *models.Subtask
+		if a.Completed != nil {
+			st, err = s.store.SetSubtaskState(a.ID, *a.Completed)
+		} else {
+			st, err = s.store.ToggleSubtask(a.ID)
+		}
+		if err != nil {
+			return nil, err
+		}
+		c := change{Changed: &[]string{"completed"}}
+		if before != nil {
+			c = changedFields(before, st, "completed")
+		}
+		return s.subtaskAnswer(st, c, a.Full)
 
 	default:
 		if result, ok, err := s.callDocumentTool(name, args); ok {
@@ -694,7 +785,8 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 				"Create a new project for each distinct body of work instead of creating umbrella tickets. " +
 				"Hierarchy: Project → Ticket → Subtask. Never create 'epic' or 'umbrella' tickets — use a project for that. " +
 				"Use the description field to capture what the project is: its goals, scope and context. " +
-				"Put how agents should work on the project's tickets in agentInstructions instead.",
+				"Put how agents should work on the project's tickets in agentInstructions instead." +
+				shortAnswerHelp(projectHolds, "created: true", projectWhole),
 			InputSchema: jsonSchema{
 				Type: "object",
 				Properties: map[string]schemaProp{
@@ -704,13 +796,14 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 					"agentInstructions": {Type: "string", Description: projectAgentInstructionsHelp},
 					"icon":              {Type: "string", Description: "Emoji icon"},
 					"color":             {Type: "string", Description: "Hex color code"},
+					"full":              fullProp(projectWhole),
 				},
 				Required: []string{"name", "prefix"},
 			},
 		},
 		{
 			Name:        "update_project",
-			Description: "Update project properties",
+			Description: "Update project properties." + shortAnswerHelp(projectHolds, changedHelp, projectWhole),
 			InputSchema: jsonSchema{
 				Type: "object",
 				Properties: map[string]schemaProp{
@@ -722,6 +815,7 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 					"icon":              {Type: "string", Description: "Emoji icon"},
 					"color":             {Type: "string", Description: "Hex color"},
 					"status":            {Type: "string", Description: "Status", Enum: []string{"active", "archived"}},
+					"full":              fullProp(projectWhole),
 				},
 				Required: []string{"id"},
 			},
@@ -752,20 +846,22 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 			Name: "create_epic",
 			Description: "Create an epic within a project. An epic is an optional, project-scoped grouping for tickets — " +
 				"a ticket belongs to at most one epic. Epic names must be unique within their project, case-insensitively; " +
-				"\"none\" is reserved, since it means \"without an epic\" everywhere an epic is filtered or cleared.",
+				"\"none\" is reserved, since it means \"without an epic\" everywhere an epic is filtered or cleared." +
+				shortAnswerHelp(epicHolds, "created: true", epicWhole),
 			InputSchema: jsonSchema{
 				Type: "object",
 				Properties: map[string]schemaProp{
 					"projectId":   {Type: "string", Description: "Project ID or prefix (case-insensitive)"},
 					"name":        {Type: "string", Description: "Epic name, unique within the project (case-insensitive); \"none\" is reserved"},
 					"description": {Type: "string", Description: "Epic description"},
+					"full":        fullProp(epicWhole),
 				},
 				Required: []string{"projectId", "name"},
 			},
 		},
 		{
 			Name:        "update_epic",
-			Description: "Update an epic's name and/or description.",
+			Description: "Update an epic's name and/or description." + shortAnswerHelp(epicHolds, changedHelp, epicWhole),
 			InputSchema: jsonSchema{
 				Type: "object",
 				Properties: map[string]schemaProp{
@@ -773,6 +869,7 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 					"project":     {Type: "string", Description: "Project ID or prefix (case-insensitive); required when id is a name rather than an epic id"},
 					"name":        {Type: "string", Description: "New name, unique within the project (case-insensitive); \"none\" is reserved"},
 					"description": {Type: "string", Description: "New description"},
+					"full":        fullProp(epicWhole),
 				},
 				Required: []string{"id"},
 			},
@@ -800,12 +897,14 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 		{
 			Name: "create_label",
 			Description: "Create a label with a name and color, for control over color that create_ticket's implicit " +
-				"label creation doesn't give. Fails if a label with the same name (case-insensitive) already exists.",
+				"label creation doesn't give. Fails if a label with the same name (case-insensitive) already exists." +
+				shortAnswerHelp(labelHolds, "created: true", labelWhole),
 			InputSchema: jsonSchema{
 				Type: "object",
 				Properties: map[string]schemaProp{
 					"name":  {Type: "string", Description: "Label name"},
 					"color": {Type: "string", Description: "Hex color code. Defaults to the standard gray when omitted."},
+					"full":  fullProp(labelWhole),
 				},
 				Required: []string{"name"},
 			},
@@ -815,13 +914,15 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 			Description: "Update a label's name and/or color; at least one of name or color must be given. Renaming " +
 				"keeps the label attached to every ticket that carries it. A name that is blank after trimming is " +
 				"rejected; a blank color is treated as not given and leaves the existing color unchanged. The id field " +
-				"accepts either the label's id or its exact name, matched case-insensitively.",
+				"accepts either the label's id or its exact name, matched case-insensitively." +
+				shortAnswerHelp(labelHolds, changedHelp, labelWhole),
 			InputSchema: jsonSchema{
 				Type: "object",
 				Properties: map[string]schemaProp{
 					"id":    {Type: "string", Description: "Label id, or its exact name (case-insensitive)"},
 					"name":  {Type: "string", Description: "New name; a blank name is rejected"},
 					"color": {Type: "string", Description: "New hex color code; a blank value leaves the color unchanged"},
+					"full":  fullProp(labelWhole),
 				},
 				Required: []string{"id"},
 			},
@@ -882,7 +983,8 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 				"Do NOT create 'umbrella' tickets — an epic (see create_epic) is the grouping inside a project; use " +
 				"create_project instead for a distinct, larger body of work. " +
 				"Use create_subtask or batch_create_subtasks to break tickets into steps. " +
-				"Hierarchy: Project → Epic (optional) → Ticket → Subtask.",
+				"Hierarchy: Project → Epic (optional) → Ticket → Subtask." +
+				shortAnswerHelp(ticketHolds, "created: true", ticketWhole),
 			InputSchema: jsonSchema{
 				Type: "object",
 				Properties: map[string]schemaProp{
@@ -908,13 +1010,15 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 						Description: "Ticket IDs or display keys like BILL-2 that this ticket depends on. Informational only: dependencies never block a status change.",
 						Items:       &jsonSchema{Type: "string"},
 					},
+					"full": fullProp(ticketWhole),
 				},
 				Required: []string{"projectId", "title"},
 			},
 		},
 		{
-			Name:        "update_ticket",
-			Description: "Update ticket properties. Changing the status out of agent_review requires a note.",
+			Name: "update_ticket",
+			Description: "Update ticket properties. Changing the status out of agent_review requires a note." +
+				shortAnswerHelp(ticketHolds, changedHelp, ticketWhole),
 			InputSchema: jsonSchema{
 				Type: "object",
 				Properties: map[string]schemaProp{
@@ -941,19 +1045,22 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 						Description: "Ticket IDs or display keys like BILL-2 that this ticket depends on. Informational only: dependencies never block a status change.",
 						Items:       &jsonSchema{Type: "string"},
 					},
+					"full": fullProp(ticketWhole),
 				},
 				Required: []string{"id"},
 			},
 		},
 		{
-			Name:        "move_ticket",
-			Description: "Move ticket to a different status column. Moving it out of agent_review requires a note.",
+			Name: "move_ticket",
+			Description: "Move ticket to a different status column. Moving it out of agent_review requires a note." +
+				shortAnswerHelp(ticketHolds, changedHelp, ticketWhole),
 			InputSchema: jsonSchema{
 				Type: "object",
 				Properties: map[string]schemaProp{
 					"id":     {Type: "string", Description: "Ticket ID or display key (e.g. BILL-2), case-insensitive"},
 					"status": {Type: "string", Description: "Target status", Enum: models.Statuses},
 					"note":   {Type: "string", Description: noteParamDescription},
+					"full":   fullProp(ticketWhole),
 				},
 				Required: []string{"id", "status"},
 			},
@@ -982,12 +1089,14 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 		{
 			Name: "create_subtask",
 			Description: "Create a subtask (checklist item) on a ticket. Subtasks break a ticket into verifiable steps. " +
-				"Hierarchy: Project → Ticket → Subtask. Use batch_create_subtasks when adding multiple subtasks at once.",
+				"Hierarchy: Project → Ticket → Subtask. Use batch_create_subtasks when adding multiple subtasks at once." +
+				shortAnswerHelp("the new subtask's id, title and completed state, its ticket's key (ticket), created: true, and the ticket's url", "", subtaskWhole),
 			InputSchema: jsonSchema{
 				Type: "object",
 				Properties: map[string]schemaProp{
 					"ticketId": {Type: "string", Description: "Parent ticket ID or display key (e.g. BILL-2), case-insensitive"},
 					"title":    {Type: "string", Description: "Subtask description"},
+					"full":     fullProp(subtaskWhole),
 				},
 				Required: []string{"ticketId", "title"},
 			},
@@ -995,7 +1104,8 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 		{
 			Name: "batch_create_subtasks",
 			Description: "Create multiple subtasks on a ticket at once. More efficient than calling create_subtask repeatedly. " +
-				"Use this when breaking a ticket into its implementation steps.",
+				"Use this when breaking a ticket into its implementation steps." +
+				shortAnswerHelp("the ticket's key (ticket), created: true, the new subtasks' ids and titles in order, and the ticket's url", "", subtaskWhole),
 			InputSchema: jsonSchema{
 				Type: "object",
 				Properties: map[string]schemaProp{
@@ -1007,6 +1117,7 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 						},
 						Required: []string{"title"},
 					}},
+					"full": fullProp(subtaskWhole),
 				},
 				Required: []string{"ticketId", "subtasks"},
 			},
@@ -1016,23 +1127,30 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 			Description: "Set a subtask's completion status. Prefer passing `completed` to set it to a known state: " +
 				"a call that finds the subtask already at that state changes nothing and still succeeds, so it is safe " +
 				"to repeat and safe against a stale read. Omitting `completed` instead flips the current state, which " +
-				"is unsafe to repeat since a second call undoes the first.",
+				"is unsafe to repeat since a second call undoes the first." +
+				shortAnswerHelp("the subtask's id, title and completed state, its ticket's key (ticket), "+
+					"changed: [\"completed\"] ([] when the subtask was already in that state), and the ticket's url", "", subtaskWhole),
 			InputSchema: jsonSchema{
 				Type: "object",
 				Properties: map[string]schemaProp{
 					"id":        {Type: "string", Description: "Subtask ID"},
 					"completed": {Type: "boolean", Description: "Target completion state. Omit to flip the current state instead."},
+					"full":      fullProp(subtaskWhole),
 				},
 				Required: []string{"id"},
 			},
 		},
 		{
-			Name:        "delete_subtask",
-			Description: "Delete a subtask from a ticket",
+			Name: "delete_subtask",
+			Description: "Delete a subtask from a ticket." +
+				shortAnswerHelp("the deleted subtask's id, title and completed state, its ticket's key (ticket), deleted: true, and the ticket's url", "", subtaskWhole),
 			InputSchema: jsonSchema{
-				Type:       "object",
-				Properties: map[string]schemaProp{"id": {Type: "string", Description: "Subtask ID"}},
-				Required:   []string{"id"},
+				Type: "object",
+				Properties: map[string]schemaProp{
+					"id":   {Type: "string", Description: "Subtask ID"},
+					"full": fullProp(subtaskWhole),
+				},
+				Required: []string{"id"},
 			},
 		},
 	}
