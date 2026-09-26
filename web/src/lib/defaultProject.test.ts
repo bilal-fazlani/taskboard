@@ -7,6 +7,7 @@ import {
   isArchived,
   latestActivity,
   namedProject,
+  projectLabel,
   readLastProject,
   rememberProject,
 } from "./defaultProject";
@@ -217,5 +218,20 @@ describe("awaitingProject", () => {
   it("does not wait once a project is set", () => {
     expect(awaitingProject("ACP", null)).toBe(false);
     expect(awaitingProject("ACP", [active])).toBe(false);
+  });
+});
+
+describe("projectLabel", () => {
+  it("joins icon and name with a space", () => {
+    expect(projectLabel({ icon: "🧭", name: "Taskboard", status: "active" })).toBe("🧭 Taskboard");
+  });
+
+  it("has no leading space when there is no icon", () => {
+    expect(projectLabel({ icon: "", name: "Taskboard", status: "active" })).toBe("Taskboard");
+  });
+
+  it("appends (archived) for an archived project, after the icon and name", () => {
+    expect(projectLabel({ icon: "🧭", name: "Taskboard", status: "archived" })).toBe("🧭 Taskboard (archived)");
+    expect(projectLabel({ icon: "", name: "Taskboard", status: "archived" })).toBe("Taskboard (archived)");
   });
 });

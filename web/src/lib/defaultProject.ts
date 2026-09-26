@@ -42,6 +42,17 @@ export function isArchived(project: Pick<PickableProject, "status">): boolean {
   return project.status === "archived";
 }
 
+/**
+ * A project's option label: its icon and name, space-separated (the API
+ * leaves out an empty icon, so it can be missing as well as blank, and the
+ * label has no leading space when there is none), with " (archived)"
+ * appended for an archived project.
+ */
+export function projectLabel(project: Pick<PickableProject, "name" | "status"> & { icon: string }): string {
+  const base = [project.icon, project.name].filter(Boolean).join(" ");
+  return isArchived(project) ? `${base} (archived)` : base;
+}
+
 /** Projects in alphabetical order by name, ignoring case; the prefix settles equal names. */
 function byName(a: PickableProject, b: PickableProject): number {
   return a.name.toLowerCase().localeCompare(b.name.toLowerCase()) || a.prefix.localeCompare(b.prefix);

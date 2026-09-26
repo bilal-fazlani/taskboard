@@ -4,16 +4,12 @@ import { api, type TicketWrite, type Project } from "../api/client";
 import ImageUploadStatus from "./ImageUploadStatus";
 import LabelPicker from "./LabelPicker";
 import { usePasteImages } from "../hooks/usePasteImages";
-import { activeProjects } from "../lib/defaultProject";
+import { activeProjects, projectLabel } from "../lib/defaultProject";
 import { DEFAULT_STATUS } from "../lib/status";
 import type { Filters } from "../lib/filters";
 import { newTicketDefaults, type ProjectEpics } from "../lib/newTicketDefaults";
 
 const PRIORITIES = ["urgent", "high", "medium", "low"];
-
-// A project's icon and name, as the filter bar shows them. The API leaves out
-// an empty icon, so it can be missing as well as blank.
-const projectLabel = (p: Project) => [p.icon, p.name].filter(Boolean).join(" ");
 
 export default function CreateTicketModal({
   projects,

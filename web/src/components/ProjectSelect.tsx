@@ -7,6 +7,7 @@ import {
   isArchived,
   latestActivity,
   namedProject,
+  projectLabel,
   readLastProject,
   rememberProject,
   type ActivityTicket,
@@ -59,11 +60,9 @@ export default function ProjectSelect({
   }, [shownProject]);
 
   const options = useMemo(() => {
-    // The API leaves out an empty icon, so it can be missing as well as blank.
-    const label = (p: Project) => [p.icon, p.name].filter(Boolean).join(" ");
-    const entries = (offered ?? []).map((p) => ({ value: p.prefix, label: label(p) }));
+    const entries = (offered ?? []).map((p) => ({ value: p.prefix, label: projectLabel(p) }));
     const archived = projects?.find((p) => p.prefix === shownProject && isArchived(p));
-    if (archived) entries.push({ value: archived.prefix, label: `${label(archived)} (archived)` });
+    if (archived) entries.push({ value: archived.prefix, label: projectLabel(archived) });
     return entries;
   }, [offered, projects, shownProject]);
 
