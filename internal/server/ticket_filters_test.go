@@ -3,6 +3,7 @@ package server
 import (
 	"net/http"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/tcarac/taskboard/internal/models"
@@ -78,8 +79,36 @@ func TestListTicketsHTTPFilters(t *testing.T) {
 	assertListed(t, r, "?ready=false&status=todo&excludeLabel=hold", "startable", "waits on doing", "elsewhere")
 	assertListed(t, r, "?excludeLabel=hold&epic=none&projectId=BILL",
 		"finished", "doing", "reviewing", "startable", "waits on doing")
+	// A single comma-separated value splits the same as repeated params,
+	// matching the CLI's --status.
+	assertListed(t, r, "?status=in_progress,agent_review", "doing", "reviewing")
 
 	if _, status := errorBody(t, http.MethodGet, r.url+"/api/tickets?ready=maybe", ""); status != http.StatusBadRequest {
 		t.Fatalf("?ready=maybe status = %d, want 400", status)
+	}
+
+	// A mistyped status is a 400 naming the allowed values, not a silent
+	// empty list.
+	body, status := errorBody(t, http.MethodGet, r.url+"/api/tickets?status=in-progress", "")
+	if status != http.StatusBadRequest {
+		t.Fatalf("?status=in-progress status = %d, want 400", status)
+	}
+	if !strings.Contains(body.Error, `"in-progress"`) {
+		t.Fatalf("?status=in-progress error = %q, want it to name %q", body.Error, "in-progress")
+	}
+	for _, st := range models.Statuses {
+		if !strings.Contains(body.Error, st) {
+			t.Fatalf("?status=in-progress error = %q, want it to name %q", body.Error, st)
+		}
+	}
+
+	// A mistyped status paired with an unknown project is still the error,
+	// not the unknown project's own "matches nothing".
+	body, status = errorBody(t, http.MethodGet, r.url+"/api/tickets?projectId=NOPE&status=in-progress", "")
+	if status != http.StatusBadRequest {
+		t.Fatalf("?projectId=NOPE&status=in-progress status = %d, want 400", status)
+	}
+	if !strings.Contains(body.Error, `"in-progress"`) {
+		t.Fatalf("?projectId=NOPE&status=in-progress error = %q, want it to name %q", body.Error, "in-progress")
 	}
 }

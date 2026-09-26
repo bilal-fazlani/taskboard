@@ -1,6 +1,7 @@
 package db
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/tcarac/taskboard/internal/models"
@@ -37,8 +38,34 @@ func TestListTicketsFilterBySeveralStatuses(t *testing.T) {
 	assertTitles(t, "blank and padded", ticketTitles(t, s, models.TicketFilter{Statuses: []string{"", " done "}}), "finished")
 	assertTitles(t, "only blank", ticketTitles(t, s, models.TicketFilter{Statuses: []string{""}}),
 		"todo", "doing", "reviewing", "finished")
-	// An unknown status matches nothing, as a single unknown status always has.
-	assertTitles(t, "unknown", ticketTitles(t, s, models.TicketFilter{Statuses: []string{"nope"}}))
+	// A mistyped status is a clear error, not a silent empty list, naming the
+	// allowed values.
+	if _, err := s.ListTickets(models.TicketFilter{Statuses: []string{"nope"}}); err == nil {
+		t.Fatal("ListTickets with an unknown status: want an error, got nil")
+	} else if msg := err.Error(); !strings.Contains(msg, `"nope"`) {
+		t.Fatalf("ListTickets with an unknown status: err = %q, want it to name %q", msg, "nope")
+	} else {
+		for _, st := range models.Statuses {
+			if !strings.Contains(msg, st) {
+				t.Fatalf("ListTickets with an unknown status: err = %q, want it to name %q", msg, st)
+			}
+		}
+	}
+	// A comma-separated value splits the same as several separate ones, so
+	// the store behaves the same whichever surface (HTTP's query string, or
+	// MCP's single-string form) hands it a joined value.
+	assertTitles(t, "comma-separated",
+		ticketTitles(t, s, models.TicketFilter{Statuses: []string{"todo,in_progress"}}),
+		"todo", "doing")
+	// A mistyped status is still the error even paired with an unknown
+	// project: the status filter is validated before the project's own
+	// "unknown project matches nothing" short-circuit runs, so bad input
+	// is never hidden behind it.
+	if _, err := s.ListTickets(models.TicketFilter{ProjectID: "NOPE", Statuses: []string{"in-progress"}}); err == nil {
+		t.Fatal("ListTickets with an unknown project and an unknown status: want an error, got nil")
+	} else if msg := err.Error(); !strings.Contains(msg, `"in-progress"`) {
+		t.Fatalf("ListTickets with an unknown project and an unknown status: err = %q, want it to name %q", msg, "in-progress")
+	}
 	// Combines with the other filters.
 	other := seedProject(t, s, "Search", "SRCH")
 	seedFilterTicket(t, s, other.ID, "other doing", models.StatusInProgress, nil)

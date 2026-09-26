@@ -5,6 +5,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/tcarac/taskboard/internal/models"
 )
 
 // listedTitles runs `ticket list` with the extra args and returns the
@@ -71,4 +73,20 @@ func TestTicketListFilters(t *testing.T) {
 	assertListedTitles(t, path, []string{"--ready", "--exclude-label", "hold", "--project", "bill", "--epic", "none"}, "Startable")
 	assertListedTitles(t, path, []string{"--ready", "--status", "in_progress"})
 	assertListedTitles(t, path, []string{"--status", "todo", "--exclude-label", "hold", "--project", "BILL"}, "Startable", "Waits on doing")
+
+	// A mistyped status is a clear error naming the allowed values, not a
+	// silent empty list.
+	_, err := runCLI(t, "--db", path, "ticket", "list", "--status", "in-progress")
+	if err == nil {
+		t.Fatal("ticket list --status in-progress: want an error, got nil")
+	}
+	if msg := err.Error(); !strings.Contains(msg, `"in-progress"`) {
+		t.Fatalf("ticket list --status in-progress: err = %q, want it to name %q", msg, "in-progress")
+	} else {
+		for _, st := range models.Statuses {
+			if !strings.Contains(msg, st) {
+				t.Fatalf("ticket list --status in-progress: err = %q, want it to name %q", msg, st)
+			}
+		}
+	}
 }

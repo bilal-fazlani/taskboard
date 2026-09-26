@@ -70,6 +70,9 @@ func TestListTicketsToolFilters(t *testing.T) {
 	check(map[string]any{"ready": true, "excludeLabel": "hold", "projectId": "bill", "label": "api", "epic": "none"}, "startable")
 	check(map[string]any{"ready": true, "status": "in_progress"})
 	check(map[string]any{"status": "todo", "excludeLabel": "hold", "projectId": "BILL"}, "startable", "waits on doing")
+	// A single string with several comma-separated statuses behaves the same
+	// as an array, matching the CLI's --status.
+	check(map[string]any{"status": "in_progress,agent_review"}, "doing", "reviewing")
 
 	for _, bad := range []map[string]any{
 		{"status": 1},
@@ -81,9 +84,28 @@ func TestListTicketsToolFilters(t *testing.T) {
 			t.Fatalf("list_tickets %v: err = %v, want an invalid arguments error", bad, err)
 		}
 	}
+
+	// A mistyped status is a clear error naming the allowed values, not a
+	// silent empty list.
+	for _, bad := range []map[string]any{
+		{"status": "in-progress"},
+		{"status": []string{"todo", "in-progress"}},
+	} {
+		_, err := s.callTool("list_tickets", mustJSON(t, bad))
+		if err == nil || !strings.Contains(err.Error(), `"in-progress"`) {
+			t.Fatalf("list_tickets %v: err = %v, want it to name %q", bad, err, "in-progress")
+		}
+		for _, st := range models.Statuses {
+			if !strings.Contains(err.Error(), st) {
+				t.Fatalf("list_tickets %v: err = %v, want it to name %q", bad, err, st)
+			}
+		}
+	}
 }
 
-// The tool definition describes the new filters, and status takes an array.
+// The tool definition describes the new filters, status takes an array, and
+// its items carry an enum of the valid statuses (restored after ACP-147 lost
+// it, since jsonSchema.Items had no Enum field).
 func TestListTicketsToolDefinitionHasNewFilters(t *testing.T) {
 	s := newTestServer(t)
 	for _, td := range s.toolDefinitions() {
@@ -93,6 +115,9 @@ func TestListTicketsToolDefinitionHasNewFilters(t *testing.T) {
 		props := td.InputSchema.Properties
 		if props["status"].Type != "array" || props["status"].Items == nil || props["status"].Items.Type != "string" {
 			t.Fatalf("list_tickets status = %+v, want an array of strings", props["status"])
+		}
+		if !reflect.DeepEqual(props["status"].Items.Enum, models.Statuses) {
+			t.Fatalf("list_tickets status items enum = %v, want %v", props["status"].Items.Enum, models.Statuses)
 		}
 		for _, st := range models.Statuses {
 			if !strings.Contains(props["status"].Description, st) {

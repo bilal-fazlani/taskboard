@@ -50,6 +50,11 @@ type jsonSchema struct {
 	Type       string                `json:"type"`
 	Properties map[string]schemaProp `json:"properties,omitempty"`
 	Required   []string              `json:"required,omitempty"`
+	// Enum restricts an array property's items to these values, e.g.
+	// list_tickets' status items. schemaProp has its own Enum for a
+	// non-array property; this one is for Items, which is a *jsonSchema
+	// rather than a schemaProp.
+	Enum []string `json:"enum,omitempty"`
 }
 
 type schemaProp struct {
@@ -1019,8 +1024,8 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 					"projectId": {Type: "string", Description: "Filter by project ID or prefix (case-insensitive); an unknown one returns no tickets rather than an error"},
 					"status": {
 						Type:        "array",
-						Description: "Filter by status: tickets in any of these (" + strings.Join(models.Statuses, ", ") + "), e.g. [\"todo\", \"in_progress\"]. A single status string is accepted too.",
-						Items:       &jsonSchema{Type: "string"},
+						Description: "Filter by status: tickets in any of these (" + strings.Join(models.Statuses, ", ") + "), e.g. [\"todo\", \"in_progress\"]. A single status string is accepted too, including several comma-separated (\"todo,in_progress\").",
+						Items:       &jsonSchema{Type: "string", Enum: models.Statuses},
 					},
 					"priority":     {Type: "string", Description: "Filter by priority", Enum: []string{"urgent", "high", "medium", "low"}},
 					"repo":         {Type: "string", Description: "Filter to tickets attached to this repo, matched exactly"},

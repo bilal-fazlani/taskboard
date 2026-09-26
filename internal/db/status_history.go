@@ -53,10 +53,11 @@ func (o writeOptions) checkStatusChange(from, to, note string) error {
 }
 
 // validStatus reports whether status is one of models.Statuses, the single
-// source of truth for the status set. It gates writes only (CreateTicket,
-// UpdateTicket, MoveTicket): a row already holding some other value, from
-// before this check existed, must still be readable, so no read path calls
-// it.
+// source of truth for the status set. It gates writes (CreateTicket,
+// UpdateTicket, MoveTicket) and a list's status filter (splitStatusFilter): a
+// row already holding some other value, from before this check existed, must
+// still be readable, so no path that reads a ticket's own stored status
+// calls it.
 func validStatus(status string) bool {
 	for _, s := range models.Statuses {
 		if status == s {

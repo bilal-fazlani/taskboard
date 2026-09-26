@@ -262,6 +262,16 @@ func (s *Store) listTickets(filter models.TicketFilter, page *ticketPage) ([]mod
 	query := ticketSelect + ` WHERE 1=1`
 	args := []any{}
 
+	// Validated before the project short-circuit below, so a mistyped
+	// status is always the error, even paired with an unknown project or
+	// label: an early "no match" return must never hide bad input from a
+	// caller who will only find out about the status once the project name
+	// is fixed.
+	statuses, err := splitStatusFilter(filter.Statuses)
+	if err != nil {
+		return nil, err
+	}
+
 	projectID := ""
 	if filter.ProjectID != "" {
 		// Accepts a project id or prefix, same as ResolveProjectRef. An
@@ -278,7 +288,7 @@ func (s *Store) listTickets(filter models.TicketFilter, page *ticketPage) ([]mod
 		query += " AND t.project_id = ?"
 		args = append(args, projectID)
 	}
-	if statuses := nonBlank(filter.Statuses); len(statuses) > 0 {
+	if len(statuses) > 0 {
 		query += " AND t.status IN (" + strings.TrimSuffix(strings.Repeat("?,", len(statuses)), ",") + ")"
 		for _, st := range statuses {
 			args = append(args, st)
@@ -395,17 +405,31 @@ func (s *Store) listTickets(filter models.TicketFilter, page *ticketPage) ([]mod
 	return tickets, nil
 }
 
-// nonBlank returns values trimmed of surrounding whitespace, without the
-// ones left empty, so a stray "" from a query string or flag does not
-// narrow a filter to nothing.
-func nonBlank(values []string) []string {
+// splitStatusFilter is the single place MCP, CLI and HTTP all end up
+// validating a status filter, since each of them reaches it through
+// ListTickets or ListTicketsPage. Every value is split on commas first, so a
+// single comma-separated string (HTTP's "?status=todo,in_progress", or MCP's
+// status given as one string instead of an array) behaves the same as
+// several repeated or array values; the CLI already splits its flag itself,
+// so this is a harmless no-op for it. Blank pieces, and surrounding
+// whitespace, are dropped rather than narrowing the filter to nothing, the
+// same as before. Anything left that is not one of models.Statuses is
+// refused with invalidStatus, naming the allowed values, instead of quietly
+// matching no tickets.
+func splitStatusFilter(values []string) ([]string, error) {
 	var out []string
 	for _, v := range values {
-		if v = strings.TrimSpace(v); v != "" {
-			out = append(out, v)
+		for _, part := range strings.Split(v, ",") {
+			if part = strings.TrimSpace(part); part == "" {
+				continue
+			}
+			if !validStatus(part) {
+				return nil, invalidStatus(part)
+			}
+			out = append(out, part)
 		}
 	}
-	return out
+	return out, nil
 }
 
 // attachListDetails fills Repos, Labels, Subtasks, DependsOn, ReviewRounds and DocumentCount

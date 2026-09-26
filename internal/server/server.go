@@ -431,10 +431,14 @@ func (s *Server) deleteProject(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// listTickets answers GET /api/tickets. Several statuses are repeated
-// params, the way the web URL filters carry several values
-// (?status=todo&status=in_progress); ready=true keeps the todo tickets whose
-// dependencies are all done; excludeLabel leaves out tickets with that label.
+// listTickets answers GET /api/tickets. Several statuses are repeated params,
+// the way the web URL filters carry several values
+// (?status=todo&status=in_progress), or one comma-separated value
+// (?status=todo,in_progress), matching the CLI's --status; the store splits
+// and validates them, so a mistyped status is a 400 naming the allowed
+// values instead of a silent empty list. ready=true keeps the todo tickets
+// whose dependencies are all done; excludeLabel leaves out tickets with that
+// label.
 func (s *Server) listTickets(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	ready, err := parseBoolParam(q.Get("ready"))
@@ -454,7 +458,7 @@ func (s *Server) listTickets(w http.ResponseWriter, r *http.Request) {
 	}
 	tickets, err := s.store.ListTickets(filter)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeStoreError(w, err)
 		return
 	}
 	if tickets == nil {
