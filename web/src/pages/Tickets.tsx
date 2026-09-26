@@ -23,6 +23,7 @@ import { awaitingProject } from "../lib/defaultProject";
 import { formatDueDate } from "../lib/dueDate";
 import { nextEpicSort, sortByEpic, type EpicSort } from "../lib/epicSort";
 import { inProject, matchesFilters, repoOptions } from "../lib/filters";
+import { newTicketBlocked } from "../lib/newTicketDefaults";
 import { STATUS_LABELS, STATUS_STYLES, isStatus, isDone } from "../lib/status";
 
 const PRIORITY_CONFIG: Record<string, { style: string; icon: typeof ArrowUp }> = {
@@ -142,6 +143,9 @@ export default function Tickets() {
   // there are none to wait for).
   const waiting = loading || awaitingProject(filters.project, projects);
   const repos = useMemo(() => repoOptions(projectTickets, filters.repo), [projectTickets, filters.repo]);
+  // Why New Ticket can't open the form here, if it can't (see newTicketBlocked).
+  // The projects are unknown until the first load is over.
+  const createBlocked = newTicketBlocked(filters.project, loading ? null : projects);
 
   const handleCreate = async (data: TicketWrite) => {
     await api.tickets.create(data);
@@ -163,9 +167,16 @@ export default function Tickets() {
     <div className="h-full flex flex-col">
       <header className="shrink-0 flex items-center justify-between px-6 h-14 border-b border-slate-800">
         <h1 className="text-lg font-semibold text-white">Table</h1>
+        {/* aria-disabled rather than disabled, so the reason shows on hover and
+            the button stays focusable for a screen reader to announce it. */}
         <button
-          onClick={() => setShowCreate(true)}
-          className="inline-flex items-center gap-2 px-3.5 py-1.5 text-sm font-medium bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors"
+          type="button"
+          aria-disabled={createBlocked !== null || undefined}
+          title={createBlocked ?? undefined}
+          onClick={() => {
+            if (createBlocked === null) setShowCreate(true);
+          }}
+          className="inline-flex items-center gap-2 px-3.5 py-1.5 text-sm font-medium bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors aria-disabled:cursor-not-allowed aria-disabled:opacity-50 aria-disabled:hover:bg-blue-600"
         >
           <Plus className="w-4 h-4" />
           New Ticket

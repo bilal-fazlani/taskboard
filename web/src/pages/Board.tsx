@@ -25,6 +25,7 @@ import { useLiveRefresh } from "../hooks/useLiveRefresh";
 import { useTicketParam } from "../hooks/useTicketParam";
 import { awaitingProject } from "../lib/defaultProject";
 import { inProject, matchesFilters, repoOptions } from "../lib/filters";
+import { newTicketBlocked } from "../lib/newTicketDefaults";
 import { STATUSES, STATUS_LABELS, STATUS_COLORS, isStatus, type Status } from "../lib/status";
 
 function DraggableTicket({
@@ -56,11 +57,14 @@ function Column({
   tickets,
   onTicketClick,
   onAddTicket,
+  addBlocked,
 }: {
   status: Status;
   tickets: Ticket[];
   onTicketClick: (ticket: Ticket) => void;
   onAddTicket: (status: string) => void;
+  /** Why + can't open the new-ticket form, or null when it can (see newTicketBlocked). */
+  addBlocked: string | null;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: status });
 
@@ -72,11 +76,19 @@ function Column({
           {STATUS_LABELS[status]}
         </h3>
         <span className="text-xs text-slate-600 ml-auto">{tickets.length}</span>
+        {/* aria-disabled rather than disabled, so the reason shows on hover and
+            the button stays focusable for a screen reader to announce it. */}
         <button
-          onClick={() => onAddTicket(status)}
-          className="text-slate-600 hover:text-slate-300 transition-colors"
+          type="button"
+          aria-label={`New ticket in ${STATUS_LABELS[status]}`}
+          aria-disabled={addBlocked !== null || undefined}
+          title={addBlocked ?? undefined}
+          onClick={() => {
+            if (addBlocked === null) onAddTicket(status);
+          }}
+          className="text-slate-600 hover:text-slate-300 transition-colors aria-disabled:cursor-not-allowed aria-disabled:opacity-50 aria-disabled:hover:text-slate-600"
         >
-          <Plus className="w-4 h-4" />
+          <Plus aria-hidden="true" className="w-4 h-4" />
         </button>
       </div>
       <div
@@ -217,6 +229,7 @@ export default function Board() {
   // board waits rather than showing every project's tickets.
   const waiting = loading || awaitingProject(filters.project, projects);
   const repos = useMemo(() => repoOptions(projectTickets, filters.repo), [projectTickets, filters.repo]);
+  const addBlocked = newTicketBlocked(filters.project, projects);
 
   const findTicketById = (id: UniqueIdentifier): Ticket | undefined => {
     for (const col of columns) {
@@ -350,6 +363,7 @@ export default function Board() {
                   tickets={getColumnTickets(status)}
                   onTicketClick={handleTicketClick}
                   onAddTicket={setCreateForStatus}
+                  addBlocked={addBlocked}
                 />
               ))}
             </div>

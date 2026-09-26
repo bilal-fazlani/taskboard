@@ -4,11 +4,16 @@ import { api, type TicketWrite, type Project } from "../api/client";
 import ImageUploadStatus from "./ImageUploadStatus";
 import LabelPicker from "./LabelPicker";
 import { usePasteImages } from "../hooks/usePasteImages";
+import { activeProjects } from "../lib/defaultProject";
 import { DEFAULT_STATUS } from "../lib/status";
 import type { Filters } from "../lib/filters";
 import { newTicketDefaults, type ProjectEpics } from "../lib/newTicketDefaults";
 
 const PRIORITIES = ["urgent", "high", "medium", "low"];
+
+// A project's icon and name, as the filter bar shows them. The API leaves out
+// an empty icon, so it can be missing as well as blank.
+const projectLabel = (p: Project) => [p.icon, p.name].filter(Boolean).join(" ");
 
 export default function CreateTicketModal({
   projects,
@@ -24,9 +29,13 @@ export default function CreateTicketModal({
   onClose: () => void;
   onCreate: (data: TicketWrite) => void;
 }) {
-  // Null until the user picks a project. Until then the form follows the
-  // view's, so projects that load after the form opens still preselect it.
-  const [pickedProjectId, setPickedProjectId] = useState<string | null>(null);
+  // The project the form is on: null until the projects are known, then the
+  // one it starts on (the view's, see newTicketDefaults), and whichever the
+  // user picks after that. The views open the form only once the projects
+  // have loaded (see newTicketBlocked); handed none, it waits for them all
+  // the same. A later refresh never moves the form to another project on its
+  // own.
+  const [chosenProjectId, setChosenProjectId] = useState<string | null>(null);
   // The epics of the project the form is on, tagged with it so a list for the
   // project just left is never offered for the new one.
   const [epics, setEpics] = useState<ProjectEpics | null>(null);
@@ -35,8 +44,23 @@ export default function CreateTicketModal({
   // project's epics have loaded, as long as it is on the view's project.
   const [pickedEpicId, setPickedEpicId] = useState<string | null>(null);
   const defaults = newTicketDefaults(filters, projects, epics);
-  const projectId = pickedProjectId ?? defaults.projectId;
+  if (chosenProjectId === null && defaults.projectId !== "") setChosenProjectId(defaults.projectId);
+  // Same offering as the filter bar's project dropdown (see defaultProject.ts):
+  // active projects only, sorted by name. With none, the placeholder mirrors
+  // ProjectSelect's rather than falling back to an archived project.
+  const activeProjectsList = activeProjects(projects);
+  // A project archived while the form is open (a live refresh brings the
+  // change in) is no longer offered, so the form drops it and waits for
+  // another pick rather than creating the ticket there.
+  const chosen = chosenProjectId ?? defaults.projectId;
+  const projectId = activeProjectsList.some((p) => p.id === chosen) ? chosen : "";
   const epicId = pickedEpicId ?? defaults.epicId;
+  const projectPlaceholder =
+    activeProjectsList.length === 0
+      ? projects.length
+        ? "No active projects"
+        : "No projects"
+      : "Select project…";
   const projectEpics = epics && epics.projectId === projectId ? epics.epics : [];
   const dialogTitleId = useId();
   const projectFieldId = useId();
@@ -121,16 +145,20 @@ export default function CreateTicketModal({
                 id={projectFieldId}
                 value={projectId}
                 onChange={(e) => {
-                  setPickedProjectId(e.target.value);
+                  setChosenProjectId(e.target.value);
                   setPickedEpicId(null);
                 }}
                 required
                 className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
               >
-                <option value="">Select project…</option>
-                {projects.map((p) => (
+                {projectId === "" && (
+                  <option value="" disabled>
+                    {projectPlaceholder}
+                  </option>
+                )}
+                {activeProjectsList.map((p) => (
                   <option key={p.id} value={p.id}>
-                    {p.icon} {p.name}
+                    {projectLabel(p)}
                   </option>
                 ))}
               </select>

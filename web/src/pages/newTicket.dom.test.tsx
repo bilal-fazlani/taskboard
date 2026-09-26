@@ -27,14 +27,14 @@ vi.mock("../api/client", () => ({ api: mockApi }));
 import Board from "./Board";
 import Tickets from "./Tickets";
 
-const project = (prefix: string): Project => ({
+const project = (prefix: string, name = prefix, status = "active"): Project => ({
   id: `p-${prefix}`,
-  name: prefix,
+  name,
   prefix,
   description: "",
   icon: "",
   color: "",
-  status: "active",
+  status,
   createdAt: "",
   updatedAt: "",
 });
@@ -126,14 +126,23 @@ async function mount(page: React.ReactNode, url: string) {
   await settle();
 }
 
+// Each view, with the button a test opens the form from, and every way the
+// view has of opening it: Table's New Ticket, and each Kanban column's +.
 const views = [
   [
     "Kanban",
     () => <Board />,
     "/kanban",
     () => within(screen.getByRole("heading", { name: STATUS_LABELS.todo }).parentElement!).getByRole("button"),
+    () => screen.getAllByRole("button", { name: /^New ticket in / }),
   ],
-  ["Table", () => <Tickets />, "/table", () => screen.getByRole("button", { name: "New Ticket" })],
+  [
+    "Table",
+    () => <Tickets />,
+    "/table",
+    () => screen.getByRole("button", { name: "New Ticket" }),
+    () => [screen.getByRole("button", { name: "New Ticket" })],
+  ],
 ] as const;
 
 const form = () => screen.getByRole("heading", { name: "New Ticket" }).closest("form")!;
@@ -228,15 +237,75 @@ describe.each(views)("%s's new-ticket form accessibility", (_name, page, path, n
   });
 });
 
-describe("Table's new-ticket form opened before the projects load", () => {
-  it("starts in the view's project once they arrive", async () => {
+describe.each(views)("%s's ways to open the new-ticket form", (_name, page, path, _button, openers) => {
+  const count = path === "/kanban" ? Object.keys(STATUS_LABELS).length : 1;
+  // Each one is disabled with the reason as its title, which hovering shows
+  // and a screen reader announces as its description; a click opens nothing.
+  const expectDisabled = async (reason: string) => {
+    const all = openers();
+    expect(all).toHaveLength(count);
+    for (const opener of all) {
+      expect(opener.getAttribute("aria-disabled")).toBe("true");
+      expect(opener.getAttribute("title")).toBe(reason);
+      await act(async () => opener.click());
+    }
+    expect(screen.getAllByRole("button", { description: reason })).toHaveLength(count);
+    expect(screen.queryByRole("dialog")).toBeNull();
+  };
+
+  it("are enabled, with no reason, on an active project", async () => {
+    await mount(page(), `${path}?project=LDR`);
+    expect(openers()).toHaveLength(count);
+    for (const opener of openers()) {
+      expect(opener.getAttribute("aria-disabled")).toBeNull();
+      expect(opener.getAttribute("title")).toBeNull();
+    }
+  });
+
+  it("are disabled on an archived project the URL keeps selected, naming it", async () => {
+    serves([...PROJECTS, project("OLD", "Old stuff", "archived")]);
+    await mount(page(), `${path}?project=OLD`);
+    await expectDisabled("Old stuff is archived. Unarchive it to add tickets.");
+  });
+
+  it("are disabled when no project is active", async () => {
+    serves([project("OLD", "Old stuff", "archived")]);
+    await mount(page(), path);
+    await expectDisabled("Create a project to add tickets.");
+  });
+
+  it("are disabled when there are no projects at all", async () => {
+    serves([]);
+    await mount(page(), path);
+    await expectDisabled("Create a project to add tickets.");
+  });
+
+  it("wait for the projects to load, then open the form on the view's project", async () => {
+    let arrive!: (projects: Project[]) => void;
+    serves(new Promise<Project[]>((resolve) => (arrive = resolve)));
+    await mount(page(), `${path}?project=LDR`);
+    await expectDisabled("Loading projects…");
+
+    arrive(PROJECTS);
+    await settle();
+    await act(async () => openers()[0].click());
+    expect(projectSelect().value).toBe("p-LDR");
+  });
+});
+
+describe("Table's new-ticket form and the projects loading", () => {
+  it("never opens before they arrive, so it never shows 'No projects'", async () => {
     let arrive!: (projects: Project[]) => void;
     serves(new Promise<Project[]>((resolve) => (arrive = resolve)));
     await mount(<Tickets />, "/table?project=LDR");
     await act(async () => screen.getByRole("button", { name: "New Ticket" }).click());
-    expect(projectSelect().value).toBe("");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.queryByText("No projects")).toBeNull();
+
     arrive(PROJECTS);
     await settle();
+    await act(async () => screen.getByRole("button", { name: "New Ticket" }).click());
+    expect([...projectSelect().options].map((o) => o.textContent)).toEqual(["ACP", "LDR"]);
     expect(projectSelect().value).toBe("p-LDR");
   });
 
@@ -244,9 +313,9 @@ describe("Table's new-ticket form opened before the projects load", () => {
     let arrive!: (projects: Project[]) => void;
     serves(new Promise<Project[]>((resolve) => (arrive = resolve)));
     await mount(<Tickets />, "/table?project=LDR");
-    await act(async () => screen.getByRole("button", { name: "New Ticket" }).click());
     arrive(PROJECTS);
     await settle();
+    await act(async () => screen.getByRole("button", { name: "New Ticket" }).click());
     fireEvent.change(projectSelect(), { target: { value: "p-ACP" } });
     await liveChange();
     expect(projectSelect().value).toBe("p-ACP");
