@@ -786,6 +786,20 @@ func (s *MCPServer) resolveEpicRefOrError(ref, projectRef string) (string, error
 	return e.ID, nil
 }
 
+// imageRefsHelp tells an agent how text refers to its owner's images. It is
+// appended to the descriptions of the tools that write text (or read a
+// document) and pinned by TestImageRefsHelpIsInToolDescriptions.
+const imageRefsHelp = " To show one of the owner's own images in text, refer to it by name with its extension: " +
+	"![](Login screen.png), ![](<Login screen.png>) or ![](Login%20screen.png) in markdown, " +
+	"<img src=\"Login screen.png\"> in an HTML document. Only the ticket's or epic's own images resolve; " +
+	"a name that matches none shows as a missing image."
+
+// ticketImageRefsHelp is imageRefsHelp for the ticket tools, whose text is a
+// description: a ticket's description shows only that ticket's own images.
+const ticketImageRefsHelp = " To show one of the ticket's own images in its description, refer to it by name with its extension: " +
+	"![](Login screen.png), ![](<Login screen.png>) or ![](Login%20screen.png). Only that ticket's own images " +
+	"show, not its epic's; a name that matches none shows as a missing image."
+
 // appendDescriptionHelp documents update_ticket's appendDescription; the
 // rule it states is models.AppendToDescription, shared with HTTP and the CLI.
 const appendDescriptionHelp = "Text to add to the end of the description, leaving the existing text untouched. " +
@@ -1159,6 +1173,7 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 				"create_project instead for a distinct, larger body of work. " +
 				"Use create_subtask or batch_create_subtasks to break tickets into steps. " +
 				"Hierarchy: Project → Epic (optional) → Ticket → Subtask." +
+				ticketImageRefsHelp +
 				shortAnswerHelp(ticketHolds, "created: true", ticketWhole),
 			InputSchema: jsonSchema{
 				Type: "object",
@@ -1199,6 +1214,7 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 			Description: "Update ticket properties. Changing the status out of agent_review requires a note. " +
 				"To add a line or paragraph to the description, pass appendDescription rather than resending the whole description. " +
 				"To record the branch, worktree, pull request or landed commits, pass delivery." +
+				ticketImageRefsHelp +
 				shortAnswerHelp(ticketHolds, changedHelp, ticketWhole),
 			InputSchema: jsonSchema{
 				Type: "object",

@@ -115,6 +115,7 @@ func ticketCommands() *cobra.Command {
 	createCmd := &cobra.Command{
 		Use:   "create",
 		Short: "Create a new ticket",
+		Long:  "Create a new ticket. " + ticketImageRefsHelp,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			store, err := openStore()
 			if err != nil {
@@ -279,6 +280,7 @@ func ticketCommands() *cobra.Command {
 			"description the text starts a new paragraph (a blank line before it), on " +
 			"an empty one it becomes the description. It cannot be combined with " +
 			"--description and must not be empty.\n\n" +
+			ticketImageRefsHelp + "\n\n" +
 			deliveryFlagsHelp,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -550,3 +552,16 @@ func formatHistory(key string, changes []models.StatusChange) string {
 	}
 	return b.String()
 }
+
+// imageRefsHelp tells how text refers to its owner's images, in the wording
+// of the MCP tool descriptions.
+const imageRefsHelp = "To show one of the owner's own images in text, refer to it by name with its extension: " +
+	"![](Login screen.png), ![](<Login screen.png>) or ![](Login%20screen.png) in markdown, " +
+	"<img src=\"Login screen.png\"> in an HTML document. Only the ticket's or epic's own images resolve; " +
+	"a name that matches none shows as a missing image."
+
+// ticketImageRefsHelp is imageRefsHelp for a ticket's description, which shows
+// only that ticket's own images.
+const ticketImageRefsHelp = "To show one of the ticket's own images in its description, refer to it by name with its extension: " +
+	"![](Login screen.png), ![](<Login screen.png>) or ![](Login%20screen.png). Only that ticket's own images " +
+	"show, not its epic's; a name that matches none shows as a missing image."

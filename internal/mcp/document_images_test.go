@@ -387,3 +387,32 @@ func TestImageRenameAndDeleteKeepTextInStep(t *testing.T) {
 		}
 	}
 }
+
+func TestImageRefsHelpIsInToolDescriptions(t *testing.T) {
+	s := newTestServer(t)
+	forms := []string{"![](Login screen.png)", "![](<Login screen.png>)", "![](Login%20screen.png)",
+		"with its extension", "shows as a missing image"}
+	want := map[string][]string{
+		"create_ticket":   {"Only that ticket's own images show, not its epic's"},
+		"update_ticket":   {"Only that ticket's own images show, not its epic's"},
+		"create_document": {`<img src="Login screen.png">`, "Only the ticket's or epic's own images resolve"},
+		"update_document": {`<img src="Login screen.png">`, "Only the ticket's or epic's own images resolve"},
+		"get_document":    {`<img src="Login screen.png">`, "Only the ticket's or epic's own images resolve"},
+	}
+	seen := 0
+	for _, def := range s.toolDefinitions() {
+		extra, ok := want[def.Name]
+		if !ok {
+			continue
+		}
+		seen++
+		for _, w := range append(append([]string{}, forms...), extra...) {
+			if !strings.Contains(def.Description, w) {
+				t.Errorf("%s description lacks %q", def.Name, w)
+			}
+		}
+	}
+	if seen != len(want) {
+		t.Errorf("checked %d of the %d tools", seen, len(want))
+	}
+}

@@ -18,7 +18,7 @@ func documentCommands() *cobra.Command {
 		Use:   "doc",
 		Short: "Manage documents attached to tickets and epics",
 		Long: "Manage documents attached to tickets and epics. A document's owner is a ticket (by id or key), " +
-			"or an epic given with --epic (its id, or its name together with --project).",
+			"or an epic given with --epic (its id, or its name together with --project). " + imageRefsHelp,
 	}
 
 	var listEpic, listProject string
@@ -95,7 +95,7 @@ func documentCommands() *cobra.Command {
 			"the extension (.md, .html, .htm, or for an image .png, .jpg, .jpeg, .gif or .webp) is removed and other symbols become spaces. With --name, the " +
 			"format still comes from a known extension unless --format is given. Names hold letters, " +
 			"digits, spaces, _ and - only. An image must really be the format its extension names, at most 8 MB; " +
-			"its location, camera and other metadata are removed without re-encoding the picture. SVG is refused.",
+			"its location, camera and other metadata are removed without re-encoding the picture. SVG is refused. " + imageRefsHelp,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name, format := addName, addFormat

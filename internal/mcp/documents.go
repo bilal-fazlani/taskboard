@@ -52,7 +52,7 @@ func (s *MCPServer) documentToolDefinitions() []toolDef {
 				"(png, jpeg, gif, webp) it returns its details (name, format, size, width, height, link, downloadUrl) and the picture " +
 				"itself as image content, so you can look at screenshots and mocks; an image over 1568 px on its long side or " +
 				"over 3.5 MB comes as a scaled-down copy fitting 1568 px, which the details' preview field describes. get_ticket and " +
-				"list_documents list documents (name, format, size, updated time, link) without content.",
+				"list_documents list documents (name, format, size, updated time, link) without content." + imageRefsHelp,
 			InputSchema: jsonSchema{
 				Type: "object",
 				Properties: documentOwnerProps(documentTicketDescription, map[string]schemaProp{
@@ -71,7 +71,7 @@ func (s *MCPServer) documentToolDefinitions() []toolDef {
 				"own process reads it, so the file never passes through your context; prefer it to content and data " +
 				"whenever the file is on this machine. Pass only one of content, data or path. " +
 				"Names hold letters, digits, spaces, _ and - only, with no extension, and are unique per ticket or " +
-				"epic ignoring case. Content is at most 8 MB." +
+				"epic ignoring case. Content is at most 8 MB." + imageRefsHelp +
 				shortAnswerHelp(documentHolds, "created: true", documentWhole) +
 				" The url opens the document in the web UI.",
 			InputSchema: jsonSchema{
@@ -104,7 +104,7 @@ func (s *MCPServer) documentToolDefinitions() []toolDef {
 				"text (the ticket's description and the ticket's or epic's markdown and HTML documents), in the same " +
 				"form, together with the rename: each rewritten document gets a new revision. The result's " +
 				"referencesUpdated lists the places rewritten, and referencesLeft any place where a reference could not " +
-				"be rewritten and now shows a missing image; both are in the short confirmation too." +
+				"be rewritten and now shows a missing image; both are in the short confirmation too." + imageRefsHelp +
 				shortAnswerHelp(documentHolds, "changed: the names of the fields the call changed ([] when it changed nothing; "+
 					"data whenever an image's picture is replaced)", documentWhole),
 			InputSchema: jsonSchema{
