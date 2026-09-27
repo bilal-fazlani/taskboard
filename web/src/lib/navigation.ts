@@ -1,5 +1,6 @@
 import {
   FolderKanban,
+  History,
   Layers,
   LayoutDashboard,
   Radio,
@@ -29,6 +30,9 @@ export const viewItems: NavItem[] = [
   { to: "/", icon: Workflow, label: "Dependencies" },
   { to: "/kanban", icon: LayoutDashboard, label: "Kanban" },
   { to: "/table", icon: Table, label: "Table" },
+  // Activity is the project's history rather than its tickets, but it
+  // follows the filter bar's project like the views, so it sits with them.
+  { to: "/activity", icon: History, label: "Activity" },
 ];
 
 // Projects, Epics and Labels sit outside the Views group and carry no

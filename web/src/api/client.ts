@@ -196,6 +196,27 @@ export interface StatusChange {
   createdAt: string;
 }
 
+/**
+ * One status change in a project's activity feed, with its ticket's key,
+ * title and epic as they are now. The API leaves epic out for a ticket
+ * without one.
+ */
+export interface ProjectActivityEntry extends StatusChange {
+  ticketKey: string;
+  ticketTitle: string;
+  epic?: { id: string; name: string };
+}
+
+/**
+ * A run of a project's activity, newest first. When hasMore is true, the next
+ * (older) page is the one read with before set to nextBefore.
+ */
+export interface ActivityPage {
+  entries: ProjectActivityEntry[];
+  hasMore: boolean;
+  nextBefore?: string;
+}
+
 /** The formats a document holding text may have. */
 export type TextDocumentFormat = "markdown" | "html";
 /** The image formats (internal/models/document.go); images are uploaded as files. */
@@ -426,6 +447,19 @@ export const api = {
       if (params.limit !== undefined) qs.set("limit", String(params.limit));
       const query = qs.toString();
       return request<JournalPage>(`/api/projects/${id}/journal${query ? `?${query}` : ""}`);
+    },
+    /**
+     * One page of the project's status changes, newest first. epics narrows
+     * it to tickets in any of them (names, or "none" for no epic); before is
+     * the previous page's nextBefore.
+     */
+    activity: (id: string, params: { epics?: readonly string[]; before?: string; limit?: number } = {}) => {
+      const qs = new URLSearchParams();
+      for (const epic of params.epics ?? []) qs.append("epic", epic);
+      if (params.before) qs.set("before", params.before);
+      if (params.limit !== undefined) qs.set("limit", String(params.limit));
+      const query = qs.toString();
+      return request<ActivityPage>(`/api/projects/${encodeURIComponent(id)}/activity${query ? `?${query}` : ""}`);
     },
     appendJournal: (id: string, entry: { author: string; text: string }) =>
       request<JournalEntry>(`/api/projects/${id}/journal`, {

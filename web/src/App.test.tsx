@@ -44,12 +44,13 @@ function activeLink(html: string): string | undefined {
 }
 
 describe("views navigation", () => {
-  it("groups exactly Dependencies, Kanban and Table under Views, with Projects, Epics and Labels outside", () => {
+  it("groups exactly Dependencies, Kanban, Table and Activity under Views, with Projects, Epics and Labels outside", () => {
     expect(VIEWS_GROUP_LABEL).toBe("Views");
     expect(viewItems.map((i) => `${i.label} ${i.to}`)).toEqual([
       "Dependencies /",
       "Kanban /kanban",
       "Table /table",
+      "Activity /activity",
     ]);
     expect(otherItems.map((i) => `${i.label} ${i.to}`)).toEqual([
       "Projects /projects",
@@ -62,7 +63,7 @@ describe("views navigation", () => {
     const html = render("/");
     expect(html).toContain('<p id="nav-views"');
     expect(html).toMatch(/id="nav-views"[^>]*>Views<\/p>/);
-    expect(viewsGroupLinks(html)).toEqual(["Dependencies /", "Kanban /kanban", "Table /table"]);
+    expect(viewsGroupLinks(html)).toEqual(["Dependencies /", "Kanban /kanban", "Table /table", "Activity /activity"]);
     expect(html).toMatch(/href="\/projects"[^>]*>.*?Projects<\/a>/);
     expect(html).toMatch(/href="\/epics"[^>]*>.*?Epics<\/a>/);
     expect(html).toMatch(/href="\/labels"[^>]*>.*?Labels<\/a>/);
@@ -72,6 +73,7 @@ describe("views navigation", () => {
     ["/", "Dependencies"],
     ["/kanban", "Kanban"],
     ["/table", "Table"],
+    ["/activity", "Activity"],
     ["/epics", "Epics"],
   ])("serves %s with the heading and active nav entry %s", (path, name) => {
     const html = render(path);
@@ -97,7 +99,7 @@ describe("views navigation", () => {
       expect(heading(html)).toBe("Page not found");
       expect(html).toContain(`>${path}</code>`);
       // The sidebar is there, with no entry marked as the current page.
-      expect(viewsGroupLinks(html)).toEqual(["Dependencies /", "Kanban /kanban", "Table /table"]);
+      expect(viewsGroupLinks(html)).toEqual(["Dependencies /", "Kanban /kanban", "Table /table", "Activity /activity"]);
       expect(html).toMatch(/href="\/projects"/);
       expect(activeLink(html)).toBeUndefined();
       // A way back to the default view.
@@ -121,7 +123,22 @@ function filterReads(html: string, name: string): string | undefined {
 }
 
 describe("filter panel", () => {
-  const views = viewItems.map((i) => [i.label, i.to]);
+  // The views of tickets, which offer every filter; Activity offers only the
+  // project and the epic.
+  const views = viewItems.filter((i) => i.to !== "/activity").map((i) => [i.label, i.to]);
+
+  it("renders on Activity with only the project and the epic, read from the URL", () => {
+    const html = render("/activity?project=ACP&epic=none&epic=Views&status=todo&q=x");
+    expect(html).toContain('role="search"');
+    expect(selectedOption(html, "Project")).toBe("ACP");
+    expect(filterReads(html, "Epic")).toBe("No epic, Views");
+    expect(html.match(/<(?:select|div role="group") aria-label="(\w+)"/g)).toEqual([
+      '<select aria-label="Project"',
+      '<div role="group" aria-label="Epic"',
+    ]);
+    expect(html).not.toContain('aria-label="Search"');
+    expect(html).not.toContain("Clear filters");
+  });
 
   it.each(views)("renders on %s with every filter and no other project selector", (_name, path) => {
     const html = render(path);
@@ -212,6 +229,7 @@ describe("filter panel", () => {
       "Dependencies /?project=ACP&amp;label=web&amp;unmatched=hide",
       "Kanban /kanban?project=ACP&amp;label=web&amp;unmatched=hide",
       "Table /table?project=ACP&amp;label=web&amp;unmatched=hide",
+      "Activity /activity?project=ACP&amp;label=web&amp;unmatched=hide",
     ]);
     // Kanban ignores it but keeps it in its links, for the way back.
     expect(viewsGroupLinks(render("/kanban?project=ACP&unmatched=hide"))[0]).toBe("Dependencies /?project=ACP&amp;unmatched=hide");
@@ -225,6 +243,7 @@ describe("filter panel", () => {
       "Dependencies /?project=ACP&amp;label=web",
       "Kanban /kanban?project=ACP&amp;label=web",
       "Table /table?project=ACP&amp;label=web",
+      "Activity /activity?project=ACP&amp;label=web",
     ]);
     expect(activeLink(html)).toBe("Kanban");
     // Projects, Epics and Labels sit outside the group and have no filters to

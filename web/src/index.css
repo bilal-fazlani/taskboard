@@ -316,3 +316,31 @@ body {
     animation: none;
   }
 }
+
+/* An Activity entry a live refresh just brought in (FEED_FRESH_CLASS in
+   src/lib/activityFeed.ts), for as long as a changed card glows on the board:
+   a blue tint with a bar down its left edge. It slides in and starts
+   brighter, then settles; with reduced motion it simply shows settled. */
+@keyframes activity-fresh-in {
+  from {
+    background-color: color-mix(in oklab, var(--color-blue-500) 25%, transparent);
+    transform: translateY(-6px);
+    opacity: 0;
+  }
+  30% {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.activity-fresh {
+  background-color: color-mix(in oklab, var(--color-blue-500) 8%, transparent);
+  box-shadow: inset 2px 0 0 var(--color-blue-400);
+  animation: activity-fresh-in 2s ease-out 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .activity-fresh {
+    animation: none;
+  }
+}

@@ -16,9 +16,9 @@ export function activityEntries(changes: readonly StatusChange[]): ActivityEntry
     .sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
 }
 
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+export const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-const pad = (n: number) => String(n).padStart(2, "0");
+export const pad = (n: number) => String(n).padStart(2, "0");
 
 /**
  * When an entry happened, in local time, as the list shows it: "today 20:12"

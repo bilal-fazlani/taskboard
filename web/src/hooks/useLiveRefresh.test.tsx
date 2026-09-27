@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { useLiveRefresh } from "./useLiveRefresh";
+import { useLiveRefresh, useLiveStatus, type LiveStatus } from "./useLiveRefresh";
 import { DEBOUNCE_MS, EVENTS_URL, reconnectDelay } from "../lib/liveRefresh";
 
 // jsdom has no EventSource, and the tests must not reach a server anyway, so
@@ -177,6 +177,41 @@ describe("useLiveRefresh", () => {
     act(() => third.emit("error"));
     act(() => vi.advanceTimersByTime(reconnectDelay(1)));
     expect(FakeEventSource.opened).toHaveLength(4);
+  });
+
+  it("reports the stream's state: connecting, live, reconnecting after a drop, live again", () => {
+    const seen: LiveStatus[] = [];
+    function StatusProbe() {
+      useLiveRefresh(() => {});
+      seen.push(useLiveStatus());
+      return null;
+    }
+    const last = () => seen[seen.length - 1];
+    act(() => {
+      root.render(<StatusProbe />);
+    });
+    expect(last()).toBe("connecting");
+
+    act(() => current().emit("open"));
+    expect(last()).toBe("live");
+
+    act(() => current().emit("error"));
+    expect(last()).toBe("reconnecting");
+    // Still down while the backoff runs and the new stream hasn't opened.
+    act(() => vi.advanceTimersByTime(reconnectDelay(1)));
+    expect(FakeEventSource.opened).toHaveLength(2);
+    expect(last()).toBe("reconnecting");
+
+    act(() => current().emit("open"));
+    expect(last()).toBe("live");
+
+    // With the last subscriber gone the stream is closed, and a page that
+    // opens it again starts from connecting.
+    act(() => root.render(<></>));
+    act(() => {
+      root.render(<StatusProbe />);
+    });
+    expect(last()).toBe("connecting");
   });
 
   it("keeps one stream when the callback identity changes", () => {

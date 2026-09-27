@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { ArrowRight } from "lucide-react";
 import type { StatusChange } from "../api/client";
 import { activityTime, type ActivityEntry } from "../lib/activity";
@@ -13,7 +14,8 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
-function StatusChangeEntry({ change }: { change: StatusChange }) {
+/** A status change as its badges: from → to, or "Created in" and the first status. */
+export function StatusChangeEntry({ change }: { change: Pick<StatusChange, "fromStatus" | "toStatus"> }) {
   return change.fromStatus ? (
     <span className="flex min-w-0 flex-wrap items-center gap-1.5">
       <StatusBadge status={change.fromStatus} />
@@ -25,6 +27,18 @@ function StatusChangeEntry({ change }: { change: StatusChange }) {
       Created in
       <StatusBadge status={change.toStatus} />
     </span>
+  );
+}
+
+/** The note a change was made with, set under its entry. */
+export function ActivityNote({ children }: { children: ReactNode }) {
+  return (
+    <p
+      data-testid="activity-note"
+      className="ml-2 mt-1.5 whitespace-pre-wrap border-l-2 border-slate-700 pl-3 text-sm text-slate-300"
+    >
+      {children}
+    </p>
   );
 }
 
@@ -53,14 +67,7 @@ export default function ActivityList({ entries, now }: { entries: ActivityEntry[
                 {activityTime(entry.at, now)}
               </time>
             </div>
-            {note && (
-              <p
-                data-testid="activity-note"
-                className="ml-2 mt-1.5 whitespace-pre-wrap border-l-2 border-slate-700 pl-3 text-sm text-slate-300"
-              >
-                {note}
-              </p>
-            )}
+            {note && <ActivityNote>{note}</ActivityNote>}
           </li>
         );
       })}

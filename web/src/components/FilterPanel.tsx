@@ -86,7 +86,8 @@ function UnmatchedToggle({ mode, onChange }: { mode: UnmatchedMode; onChange: (m
 }
 
 /**
- * The filter bar shared by Dependencies, Kanban and Table. Its state is the
+ * The filter bar shared by Dependencies, Kanban and Table, and in part by
+ * Activity (see epicOnly). Its state is the
  * URL's (see useFilters); each page decides what a filter does to its tickets
  * and passes the counts to show. Every view always shows one project, so the
  * bar offers no "All projects" and picks one for a URL without it.
@@ -98,6 +99,7 @@ export default function FilterPanel({
   count,
   unmatched,
   onProjects,
+  epicOnly = false,
 }: {
   state: FilterState;
   /**
@@ -126,6 +128,12 @@ export default function FilterPanel({
    * need leaves this out.
    */
   onProjects?: (projects: Project[] | null, failed: boolean) => void;
+  /**
+   * Offer only the project and the epic, inline, for a page whose one filter
+   * is the epic (Activity). The URL's other filters are left alone for the
+   * views to pick up again.
+   */
+  epicOnly?: boolean;
 }) {
   const { filters, active, latestFilters, setFilter, dropValues, clearFilters } = state;
   // The projects and labels the bar offers, and checks the URL's filters
@@ -281,12 +289,8 @@ export default function FilterPanel({
     clearFilters();
   };
 
-  return (
-    <div
-      role="search"
-      aria-label="Filter tickets"
-      className="shrink-0 flex flex-wrap items-center gap-2 px-6 py-3 border-b border-slate-800/50"
-    >
+  const projectAndEpic = (
+    <>
       <ProjectSelect state={state} projects={projects} tickets={tickets} />
       <FilterMultiSelect
         name="Epic"
@@ -298,6 +302,24 @@ export default function FilterPanel({
         renderOption={drawEpic}
         onChange={set("epic")}
       />
+    </>
+  );
+
+  if (epicOnly) {
+    return (
+      <div role="search" aria-label="Filter activity" className="flex flex-wrap items-center gap-2">
+        {projectAndEpic}
+      </div>
+    );
+  }
+
+  return (
+    <div
+      role="search"
+      aria-label="Filter tickets"
+      className="shrink-0 flex flex-wrap items-center gap-2 px-6 py-3 border-b border-slate-800/50"
+    >
+      {projectAndEpic}
       <FilterMultiSelect
         name="Status"
         allLabel="All statuses"

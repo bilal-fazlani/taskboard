@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useSyncExternalStore } from "react";
 import { DEBOUNCE_MS, EVENTS_URL, debounce, reconnectDelay, type Debounced } from "../lib/liveRefresh";
 
 // One stream for the whole document, shared by every caller of the hook.
@@ -15,6 +15,21 @@ let retry: ReturnType<typeof setTimeout> | undefined;
 let failures = 0;
 let fire: Debounced | null = null;
 
+/**
+ * Where the shared stream stands: "connecting" until it first opens (and
+ * whenever no one is subscribed), "live" while it is open, and "reconnecting"
+ * from a drop until it opens again.
+ */
+export type LiveStatus = "connecting" | "live" | "reconnecting";
+let status: LiveStatus = "connecting";
+const statusListeners = new Set<() => void>();
+
+function setStatus(next: LiveStatus) {
+  if (status === next) return;
+  status = next;
+  for (const listener of [...statusListeners]) listener();
+}
+
 function notify() {
   for (const listener of [...listeners]) listener();
 }
@@ -24,6 +39,7 @@ function connect() {
   source = es;
   es.addEventListener("open", () => {
     failures = 0;
+    if (source === es) setStatus("live");
     fire?.call();
   });
   es.addEventListener("changed", () => fire?.call());
@@ -37,6 +53,7 @@ function connect() {
     if (source !== es) return;
     source = null;
     failures += 1;
+    setStatus("reconnecting");
     retry = setTimeout(connect, reconnectDelay(failures));
   });
 }
@@ -55,6 +72,23 @@ function stop() {
   const open = source;
   source = null;
   open?.close();
+  setStatus("connecting");
+}
+
+function subscribeStatus(listener: () => void) {
+  statusListeners.add(listener);
+  return () => {
+    statusListeners.delete(listener);
+  };
+}
+
+/**
+ * Where the stream useLiveRefresh shares stands (see LiveStatus), for a page
+ * that shows whether it is live. It only watches: the stream is opened by the
+ * page's own useLiveRefresh, and without one it stays "connecting".
+ */
+export function useLiveStatus(): LiveStatus {
+  return useSyncExternalStore(subscribeStatus, () => status, () => "connecting");
 }
 
 /**

@@ -8,6 +8,7 @@ import Labels from "./pages/Labels";
 import Epics from "./pages/Epics";
 import Now from "./pages/Now";
 import NotFound from "./pages/NotFound";
+import Activity from "./pages/Activity";
 
 // Routes: Now at /now; the views at /, /kanban and /table; Epics, Projects
 // and Labels at /epics, /projects and /labels. The old paths (/board, /tickets, /graph)
@@ -21,6 +22,7 @@ export function AppRoutes() {
         <Route path="now" element={<Now />} />
         <Route path="kanban" element={<Board />} />
         <Route path="table" element={<Tickets />} />
+        <Route path="activity" element={<Activity />} />
         <Route path="epics" element={<Epics />} />
         <Route path="projects" element={<Projects />} />
         <Route path="labels" element={<Labels />} />

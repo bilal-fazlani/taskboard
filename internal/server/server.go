@@ -193,6 +193,7 @@ func (s *Server) setupRoutes(webFS fs.FS) {
 			r.Delete("/{id}", s.deleteProject)
 			r.Get("/{id}/journal", s.listJournal)
 			r.Post("/{id}/journal", s.appendJournalEntry)
+			r.Get("/{id}/activity", s.listActivity)
 		})
 
 		r.Route("/tickets", func(r chi.Router) {
