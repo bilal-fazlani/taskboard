@@ -3,6 +3,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { BrowserRouter } from "react-router-dom";
 import type { LandedTicket, Now, NowTicket, Project } from "../api/client";
+import { LAST_PROJECT_KEY } from "../lib/defaultProject";
+import { TICK_MS } from "../lib/now";
+import { NOW_PROJECT_KEY } from "../lib/nowProject";
+import { memoryStorage } from "../test/memoryStorage";
 
 // The Now page inside the app's routes and layout, with the API mocked and
 // the live-refresh stream replaced by a function the tests call.
@@ -109,11 +113,13 @@ beforeEach(() => {
   live.refresh = [];
   mockApi.now.get.mockReset().mockResolvedValue(BOARD);
   mockApi.projects.list.mockReset().mockResolvedValue(PROJECTS);
+  vi.stubGlobal("localStorage", memoryStorage());
 });
 
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
+  vi.unstubAllGlobals();
 });
 
 describe("Now page", () => {
@@ -283,5 +289,153 @@ describe("Now page", () => {
     await settle();
     expect(cards("In Progress")).toHaveLength(3);
     expect(screen.getByText(/Can't reach the board/)).toBeTruthy();
+  });
+});
+
+describe("Now's remembered project", () => {
+  const remember = (value: string) => globalThis.localStorage.setItem(NOW_PROJECT_KEY, value);
+  const remembered = () => globalThis.localStorage.getItem(NOW_PROJECT_KEY);
+  const select = () => screen.getByLabelText("Project") as HTMLSelectElement;
+  const pickProject = async (value: string) => {
+    fireEvent.change(select(), { target: { value } });
+    await settle();
+  };
+  const reopen = async (url = "/now") => {
+    cleanup();
+    await mount(url);
+  };
+
+  it("restores the project last picked here into a URL without one, never loading every project first", async () => {
+    remember("IAGML");
+    await mount("/now");
+    expect(params().get("project")).toBe("IAGML");
+    expect(select().value).toBe("IAGML");
+    expect(mockApi.now.get.mock.calls).toEqual([["IAGML"]]);
+  });
+
+  it("spells a remembered project as the list does", async () => {
+    remember("ldr");
+    await mount("/now");
+    expect(params().get("project")).toBe("LDR");
+    expect(mockApi.now.get).toHaveBeenLastCalledWith("LDR");
+  });
+
+  it("restores it when coming back through the sidebar", async () => {
+    await mount("/now");
+    await pickProject("IAGML");
+    fireEvent.click(within(screen.getByRole("navigation")).getByRole("link", { name: "Now" }));
+    await settle();
+    expect(params().get("project")).toBe("IAGML");
+    expect(select().value).toBe("IAGML");
+  });
+
+  it("remembers a pick from the dropdown, All projects included", async () => {
+    await mount("/now");
+    await pickProject("ACP");
+    expect(remembered()).toBe("ACP");
+    await reopen();
+    expect(params().get("project")).toBe("ACP");
+
+    await pickProject("");
+    expect(remembered()).toBe("");
+    await reopen();
+    expect(params().get("project")).toBeNull();
+    expect(select().value).toBe("");
+    expect(mockApi.now.get).toHaveBeenLastCalledWith(undefined);
+  });
+
+  it("lets a URL naming a project win, and remembers it", async () => {
+    remember("IAGML");
+    await mount("/now?project=LDR");
+    expect(params().get("project")).toBe("LDR");
+    expect(mockApi.now.get.mock.calls).toEqual([["LDR"]]);
+    expect(remembered()).toBe("LDR");
+    await reopen();
+    expect(params().get("project")).toBe("LDR");
+  });
+
+  it("reads the remembered pick once per arrival, so a pick saved elsewhere never moves a page already open", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+    vi.setSystemTime(NOW);
+    await mount("/now");
+    // Another tab picks ACP on its Now page.
+    remember("ACP");
+    await act(async () => {
+      vi.advanceTimersByTime(TICK_MS);
+    });
+    await act(async () => {
+      for (const refresh of live.refresh) refresh();
+    });
+    await settle();
+    expect(params().get("project")).toBeNull();
+    expect(select().value).toBe("");
+    expect(mockApi.now.get.mock.calls.length).toBeGreaterThan(1);
+    expect(mockApi.now.get.mock.calls.every(([project]) => project === undefined)).toBe(true);
+  });
+
+  it("stays on All projects once it has fallen back, when a later refresh could restore", async () => {
+    remember("IAGML");
+    mockApi.projects.list.mockRejectedValue(new Error("down"));
+    await mount("/now");
+    expect(params().get("project")).toBeNull();
+    mockApi.projects.list.mockResolvedValue(PROJECTS);
+    await act(async () => {
+      for (const refresh of live.refresh) refresh();
+    });
+    await settle();
+    expect(params().get("project")).toBeNull();
+    expect(mockApi.now.get).toHaveBeenLastCalledWith(undefined);
+  });
+
+  it("shows every project with nothing remembered", async () => {
+    await mount("/now");
+    expect(params().get("project")).toBeNull();
+    expect(select().value).toBe("");
+    expect(mockApi.now.get.mock.calls).toEqual([[undefined]]);
+  });
+
+  it.each([
+    ["archived", "OLD"],
+    ["deleted", "GONE"],
+  ])("falls back to All projects when the remembered project is %s", async (_why, prefix) => {
+    remember(prefix);
+    await mount("/now");
+    expect(params().get("project")).toBeNull();
+    expect(select().value).toBe("");
+    expect(mockApi.now.get.mock.calls).toEqual([[undefined]]);
+  });
+
+  it("falls back to All projects when the projects can't be loaded to check the remembered one", async () => {
+    remember("IAGML");
+    mockApi.projects.list.mockRejectedValue(new Error("down"));
+    await mount("/now");
+    expect(params().get("project")).toBeNull();
+    expect(mockApi.now.get).toHaveBeenLastCalledWith(undefined);
+    expect(cards("In Progress")).toHaveLength(3);
+  });
+
+  it("shows every project, and picks still work, when storage throws", async () => {
+    vi.stubGlobal("localStorage", {
+      getItem: () => {
+        throw new Error("SecurityError");
+      },
+      setItem: () => {
+        throw new Error("QuotaExceededError");
+      },
+    });
+    await mount("/now");
+    expect(params().get("project")).toBeNull();
+    await pickProject("ACP");
+    expect(params().get("project")).toBe("ACP");
+    expect(mockApi.now.get).toHaveBeenLastCalledWith("ACP");
+  });
+
+  it("leaves the views' last project alone", async () => {
+    globalThis.localStorage.setItem(LAST_PROJECT_KEY, "LDR");
+    await mount("/now?project=ACP");
+    await pickProject("IAGML");
+    await pickProject("");
+    expect(remembered()).toBe("");
+    expect(globalThis.localStorage.getItem(LAST_PROJECT_KEY)).toBe("LDR");
   });
 });

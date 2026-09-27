@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { api, type LandedTicket, type Now as NowData, type NowTicket, type Project } from "../api/client";
 import { fieldClass } from "../components/controlStyles";
 import { useLiveRefresh } from "../hooks/useLiveRefresh";
@@ -13,16 +13,46 @@ import {
   shortSha,
   withinLandedWindow,
 } from "../lib/now";
+import { readNowProject, rememberNowProject, restoredNowProject } from "../lib/nowProject";
 import { AGENT_REVIEW_STATUS, IN_PROGRESS_STATUS, STATUS_LABELS, STATUS_STYLES } from "../lib/status";
 
 // The Now page: what is moving right now, and what just landed, across every
 // project unless the dropdown narrows it to one. The project lives in the URL
-// (`project`, a prefix) like the views' filter, but with no project picked
-// automatically: "All projects" is the default. It is the present only; the
-// history of status changes is the Activity feed's.
+// (`project`, a prefix) like the views' filter, and Now remembers its own
+// pick, apart from the views' last project (see nowProject.ts): a URL without
+// a project gets the pick last made here back, "All projects" included. A
+// remembered project archived or deleted since, like nothing remembered,
+// gives "All projects". A URL naming a project wins and is remembered. It is
+// the present only; the history of status changes is the Activity feed's.
 
 /** The `project` parameter, or "" for every project. */
 const PROJECT_PARAM = "project";
+
+/**
+ * One arrival at the page, a location: the pick remembered then, and whether
+ * it has been checked against the projects yet. Once checked, `pick` is the
+ * project to restore into the URL, or "" for "All projects".
+ */
+interface Arrival {
+  key: string;
+  pick: string;
+  checked: boolean;
+}
+
+/**
+ * Reads the remembered pick for an arrival at `project` (the URL's, "" for
+ * none). Storage is read here only, once per location, so a pick another tab
+ * saves never moves a page already open; the sidebar's Now link is a new
+ * location, and restores. It is checked at once when the projects are in
+ * hand, or have failed to load; else when they first answer.
+ */
+function arrive(key: string, project: string, projects: readonly Project[] | null, projectsFailed: boolean): Arrival {
+  const remembered = project === "" ? readNowProject() : "";
+  if (remembered === "") return { key, pick: "", checked: true };
+  if (projects !== null) return { key, pick: restoredNowProject(projects, remembered), checked: true };
+  if (projectsFailed) return { key, pick: "", checked: true };
+  return { key, pick: remembered, checked: false };
+}
 
 /** The clock the timers read, redrawn every TICK_MS. */
 function useClock(): number {
@@ -154,12 +184,47 @@ export default function Now() {
   const [data, setData] = useState<NowData | null>(null);
   const [failed, setFailed] = useState(false);
   const [projects, setProjects] = useState<Project[] | null>(null);
+  const [projectsFailed, setProjectsFailed] = useState(false);
   const now = useClock();
   // Only the latest request's answer is shown, so a slow answer for the
   // project picked before never overwrites the one picked now.
   const latest = useRef(0);
 
+  // A URL without a project gets the remembered pick back once the projects
+  // have loaded and show it is still active; until then nothing loads, so
+  // the page never shows every project on its way to one. A remembered
+  // project archived or deleted since, or projects that fail to load, leave
+  // "All projects". The pick is read once per arrival (see arrive), so a
+  // redraw or a live refresh never moves a page already open.
+  const { key: locationKey } = useLocation();
+  const [arrival, setArrival] = useState(() => arrive(locationKey, project, null, false));
+  let current = arrival;
+  if (arrival.key !== locationKey) {
+    current = arrive(locationKey, project, projects, projectsFailed);
+    setArrival(current);
+  }
+  const restore = project === "" && current.checked ? current.pick : "";
+  const holding = project === "" && current.pick !== "";
+
+  useEffect(() => {
+    if (!restore) return;
+    setParams(
+      (current) => {
+        const next = new URLSearchParams(current);
+        next.set(PROJECT_PARAM, restore);
+        return next;
+      },
+      { replace: true },
+    );
+  }, [restore, setParams]);
+
+  // A project the URL names wins, and is what Now shows next time.
+  useEffect(() => {
+    if (project) rememberNowProject(project);
+  }, [project]);
+
   const load = useCallback(() => {
+    if (holding) return;
     const request = ++latest.current;
     api.now.get(project || undefined).then(
       (next) => {
@@ -170,11 +235,22 @@ export default function Now() {
       // A failed refetch keeps what is on screen; the next change retries.
       () => request === latest.current && setFailed(true),
     );
-  }, [project]);
+  }, [project, holding]);
 
-  // A failed load keeps "All projects" and whatever the URL names.
+  // A failed load keeps "All projects" and whatever the URL names. The first
+  // answer after an arrival settles its remembered pick, once.
   const loadProjects = useCallback(() => {
-    api.projects.list().then(setProjects, () => {});
+    api.projects.list().then(
+      (list) => {
+        setProjects(list);
+        setProjectsFailed(false);
+        setArrival((a) => (a.checked ? a : { ...a, pick: restoredNowProject(list, a.pick), checked: true }));
+      },
+      () => {
+        setProjectsFailed(true);
+        setArrival((a) => (a.checked ? a : { ...a, pick: "", checked: true }));
+      },
+    );
   }, []);
 
   useEffect(() => {
@@ -207,7 +283,10 @@ export default function Now() {
   // day old since the last fetch.
   const landed = useMemo(() => (data ? withinLandedWindow(data.landed, now) : []), [data, now]);
 
+  // "All projects" leaves the URL without a project, so it is remembered
+  // here rather than by the effect above.
   const pick = (value: string) => {
+    rememberNowProject(value);
     const next = new URLSearchParams(params);
     if (value) next.set(PROJECT_PARAM, value);
     else next.delete(PROJECT_PARAM);
