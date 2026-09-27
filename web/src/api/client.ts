@@ -280,6 +280,45 @@ export interface Board {
   columns: BoardColumn[];
 }
 
+/** Where a ticket in agent_review stands, from its latest `Review <round>`
+ * document: its reviewer is still at work, or the review approved it (it
+ * waits on the person) or asked for changes. */
+export type NowReview = "running" | "approved" | "changes";
+
+/** A ticket in progress or in review, as the Now page shows it. */
+export interface NowTicket {
+  id: string;
+  key: string;
+  title: string;
+  status: string;
+  projectPrefix: string;
+  subtasksDone: number;
+  subtasksTotal: number;
+  /** How many times it has entered agent_review. */
+  reviewRounds: number;
+  /** When it last entered its current status. */
+  since: string;
+  /** Set only on a ticket in agent_review. */
+  review?: NowReview;
+}
+
+/** A ticket that moved to done in the last day, with its landed commits. */
+export interface LandedTicket {
+  id: string;
+  key: string;
+  title: string;
+  projectPrefix: string;
+  doneAt: string;
+  commits: LandedCommit[];
+}
+
+/** GET /api/now: what is moving now, and what just landed. */
+export interface Now {
+  inProgress: NowTicket[];
+  inReview: NowTicket[];
+  landed: LandedTicket[];
+}
+
 // Wire (raw) shapes: what the Go models (internal/models) actually send,
 // `omitempty` fields marked optional exactly as they are on the struct. Kept
 // private to this module — the rest of the app never sees these, only the
@@ -537,5 +576,11 @@ export const api = {
 
   version: {
     get: () => request<BuildInfo>("/api/version"),
+  },
+
+  now: {
+    /** Every project's, or one project's when projectId (an id or prefix) is given. */
+    get: (projectId?: string) =>
+      request<Now>(`/api/now${projectId ? `?projectId=${encodeURIComponent(projectId)}` : ""}`),
   },
 };

@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { Link, Outlet, useLocation } from "react-router-dom";
 import { Zap } from "lucide-react";
-import { VIEWS_GROUP_LABEL, isCurrentPath, otherItems, viewItems, type NavItem } from "../lib/navigation";
+import { VIEWS_GROUP_LABEL, isCurrentPath, nowItem, otherItems, viewItems, type NavItem } from "../lib/navigation";
 import { filterSearch } from "../lib/filters";
 import { rememberView } from "../lib/lastView";
 import BuildVersion from "./BuildVersion";
@@ -43,6 +43,7 @@ export default function Layout() {
         </div>
 
         <nav className="flex-1 py-3 px-2.5 space-y-4">
+          <NavEntry item={nowItem} />
           <div role="group" aria-labelledby="nav-views">
             <p
               id="nav-views"

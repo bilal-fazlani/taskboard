@@ -2,6 +2,7 @@ import {
   FolderKanban,
   Layers,
   LayoutDashboard,
+  Radio,
   Tag,
   Table,
   Workflow,
@@ -13,6 +14,11 @@ export interface NavItem {
   icon: LucideIcon;
   label: string;
 }
+
+// Now sits at the top of the sidebar, above the Views group: it shows what is
+// moving across every project, so it is not a view of one project's tickets,
+// and it carries no filters.
+export const nowItem: NavItem = { to: "/now", icon: Radio, label: "Now" };
 
 // The views show a project's tickets three ways, ticket by ticket, so the
 // sidebar groups them together and carries the shared filters between them
