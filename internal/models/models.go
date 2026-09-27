@@ -47,6 +47,12 @@ type Ticket struct {
 	// ticket's own project.
 	Epic *EpicRef `json:"epic,omitempty"`
 
+	// Agent is the agent holding the ticket, if any, and OpenRequest the
+	// request for user input the ticket waits on, if any. Lists and the full
+	// ticket both carry them.
+	Agent       *Agent         `json:"agent,omitempty"`
+	OpenRequest *TicketRequest `json:"openRequest,omitempty"`
+
 	// Populated fields (not stored directly)
 	ProjectPrefix string   `json:"projectPrefix,omitempty"`
 	Repos         []string `json:"repos,omitempty"`

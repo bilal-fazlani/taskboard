@@ -131,8 +131,9 @@ func (s *Store) ListStatusChanges(ticketID string) ([]models.StatusChange, error
 
 // reviewRoundsQuery counts entries into agent_review. The list form groups it
 // by ticket, so a page of tickets costs one query rather than one per ticket.
+// A row that keeps the status (a takeover in review) is not an entry.
 const reviewRoundsQuery = `SELECT ticket_id, COUNT(*) FROM ticket_status_changes
-	WHERE to_status = '` + models.StatusAgentReview + `'`
+	WHERE to_status = '` + models.StatusAgentReview + `' AND from_status <> to_status`
 
 func (s *Store) getTicketReviewRounds(ticketID string) (int, error) {
 	var id string

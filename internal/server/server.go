@@ -264,6 +264,7 @@ func (s *Server) setupRoutes(webFS fs.FS) {
 		r.Get("/now", s.getNow)
 		r.Get("/events", s.handleEvents)
 		r.Get("/version", getVersion)
+		r.Get("/config", s.getConfig)
 	})
 
 	if webFS == nil {
@@ -372,6 +373,28 @@ func rejectCrossOriginWrites(next http.Handler) http.Handler {
 // built from and whether it is a dev build (internal/buildinfo).
 func getVersion(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, buildinfo.Get())
+}
+
+// configResponse is the install's settings the web UI reads: the agent
+// timings, in seconds, as the database holds them (`taskboard settings`).
+type configResponse struct {
+	// StaleAfterSeconds is how long an agent goes unseen before it is stale.
+	StaleAfterSeconds int64 `json:"staleAfterSeconds"`
+	// LeaseSeconds is how long an agent goes unseen before its ticket is
+	// given back.
+	LeaseSeconds int64 `json:"leaseSeconds"`
+}
+
+func (s *Server) getConfig(w http.ResponseWriter, r *http.Request) {
+	settings, err := s.store.AgentSettings()
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, configResponse{
+		StaleAfterSeconds: int64(settings.StaleAfter / time.Second),
+		LeaseSeconds:      int64(settings.Lease / time.Second),
+	})
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

@@ -152,8 +152,28 @@ func agentExists(q dbtx, id, what string) error {
 //
 // Replaces names an earlier entry of the same type on the same owner that
 // this one replaces; each entry is replaced at most once. Anything else
-// wrong is an ErrInvalidInput and writes nothing.
+// wrong is an ErrInvalidInput and writes nothing. An agent's entry touches
+// the agent.
 func (s *Store) CreateEntry(req models.CreateEntryRequest) (*models.Entry, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, fmt.Errorf("beginning transaction: %w", err)
+	}
+	defer tx.Rollback()
+	id, err := createEntry(tx, req, time.Now().UTC())
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return s.GetEntry(id)
+}
+
+// createEntry is CreateEntry inside q's transaction, stamped now, so a write
+// such as ReleaseTicket can leave its entry in the same transaction as its
+// other changes. It answers with the new entry's id.
+func createEntry(q dbtx, req models.CreateEntryRequest, now time.Time) (string, error) {
 	e := models.Entry{
 		Type:       strings.TrimSpace(req.Type),
 		Text:       strings.TrimSpace(req.Text),
@@ -163,61 +183,57 @@ func (s *Store) CreateEntry(req models.CreateEntryRequest) (*models.Entry, error
 		Replaces:   strings.TrimSpace(req.Replaces),
 		About:      strings.TrimSpace(req.About),
 		Verdict:    strings.TrimSpace(req.Verdict),
-		CreatedAt:  time.Now().UTC(),
+		CreatedAt:  now,
 	}
 	reportDocument := strings.TrimSpace(req.ReportDocument)
 	if !models.ValidEntryType(e.Type) {
-		return nil, invalidInput("type %q is not an entry type: use one of %s", e.Type, strings.Join(models.EntryTypes, ", "))
+		return "", invalidInput("type %q is not an entry type: use one of %s", e.Type, strings.Join(models.EntryTypes, ", "))
 	}
 	if e.Text == "" {
-		return nil, invalidInput("text is required")
+		return "", invalidInput("text is required")
 	}
 	if (e.AgentID == "") == (e.AuthorName == "") {
-		return nil, invalidInput("author is required: the agent that writes the entry (agentId) or the person's name (authorName), not both")
+		return "", invalidInput("author is required: the agent that writes the entry (agentId) or the person's name (authorName), not both")
 	}
 	if n := utf8.RuneCountInString(e.AuthorName); n > EntryAuthorNameMaxLength {
-		return nil, invalidInput("author is %d characters long; at most %d are allowed", n, EntryAuthorNameMaxLength)
+		return "", invalidInput("author is %d characters long; at most %d are allowed", n, EntryAuthorNameMaxLength)
 	}
 	if err := checkEntryTypeFields(&e, req.Findings, reportDocument); err != nil {
-		return nil, err
+		return "", err
 	}
 
-	tx, err := s.db.Begin()
-	if err != nil {
-		return nil, fmt.Errorf("beginning transaction: %w", err)
-	}
-	defer tx.Rollback()
-	if e.EntryOwner, err = resolveEntryOwner(tx, req.EntryOwner); err != nil {
-		return nil, err
+	var err error
+	if e.EntryOwner, err = resolveEntryOwner(q, req.EntryOwner); err != nil {
+		return "", err
 	}
 	if models.TicketOnlyEntryType(e.Type) && e.TicketID == "" {
-		return nil, invalidInput("a %s entry goes on a ticket only, not on a %s", e.Type, ownerKind(e.EntryOwner))
+		return "", invalidInput("a %s entry goes on a ticket only, not on a %s", e.Type, ownerKind(e.EntryOwner))
 	}
 	if e.AgentID != "" {
-		if err := agentExists(tx, e.AgentID, "agentId"); err != nil {
-			return nil, err
+		if err := agentExists(q, e.AgentID, "agentId"); err != nil {
+			return "", err
 		}
 	}
 	if e.About != "" {
-		if _, err := entryOnOwner(tx, e.EntryOwner, e.About, "about"); err != nil {
-			return nil, err
+		if _, err := entryOnOwner(q, e.EntryOwner, e.About, "about"); err != nil {
+			return "", err
 		}
 	}
 	if e.Replaces != "" {
-		old, err := entryOnOwner(tx, e.EntryOwner, e.Replaces, "replaces")
+		old, err := entryOnOwner(q, e.EntryOwner, e.Replaces, "replaces")
 		if err != nil {
-			return nil, err
+			return "", err
 		}
 		if old.Type != e.Type {
-			return nil, invalidInput("replaces %q is a %s entry: an entry replaces one of its own type (%s)", e.Replaces, old.Type, e.Type)
+			return "", invalidInput("replaces %q is a %s entry: an entry replaces one of its own type (%s)", e.Replaces, old.Type, e.Type)
 		}
 		if old.ReplacedBy != "" {
-			return nil, invalidInput("entry %q is already replaced by %q: replace that one instead", e.Replaces, old.ReplacedBy)
+			return "", invalidInput("entry %q is already replaced by %q: replace that one instead", e.Replaces, old.ReplacedBy)
 		}
 	}
 	if reportDocument != "" {
-		if e.ReportDocument, err = ticketDocumentName(tx, e.TicketID, reportDocument); err != nil {
-			return nil, err
+		if e.ReportDocument, err = ticketDocumentName(q, e.TicketID, reportDocument); err != nil {
+			return "", err
 		}
 	}
 
@@ -226,22 +242,24 @@ func (s *Store) CreateEntry(req models.CreateEntryRequest) (*models.Entry, error
 	if e.Findings != nil {
 		raw, err := json.Marshal(e.Findings)
 		if err != nil {
-			return nil, err
+			return "", err
 		}
 		findings = string(raw)
 	}
-	if _, err := tx.Exec(`INSERT INTO entries (id, project_id, epic_id, ticket_id, type, text, agent_id, author_name,
+	if _, err := q.Exec(`INSERT INTO entries (id, project_id, epic_id, ticket_id, type, text, agent_id, author_name,
 			source, replaces_id, about_id, verdict, findings, report_document, created_at)
 		VALUES (?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?, ?, NULLIF(?, ''), ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?)`,
 		e.ID, e.ProjectID, e.EpicID, e.TicketID, e.Type, e.Text, e.AgentID, e.AuthorName,
 		e.Source, e.Replaces, e.About, e.Verdict, findings, e.ReportDocument, stamp(e.CreatedAt),
 	); err != nil {
-		return nil, fmt.Errorf("writing entry: %w", err)
+		return "", fmt.Errorf("writing entry: %w", err)
 	}
-	if err := tx.Commit(); err != nil {
-		return nil, err
+	if e.AgentID != "" {
+		if err := touchAgent(q, e.AgentID, now); err != nil {
+			return "", err
+		}
 	}
-	return s.GetEntry(e.ID)
+	return e.ID, nil
 }
 
 // checkEntryTypeFields checks the fields that belong to one type against
@@ -336,7 +354,7 @@ func (s *Store) GetEntry(id string) (*models.Entry, error) {
 // longer open. It answers with the note. Only an open note can be handled
 // (models.Entry.Open), and only once; an unknown note or agent, or a note
 // already handled or replaced by a revised one, is an ErrInvalidInput and
-// changes nothing.
+// changes nothing. It touches the agent.
 func (s *Store) MarkNoteHandled(noteID, agentID string) (*models.Entry, error) {
 	noteID, agentID = strings.TrimSpace(noteID), strings.TrimSpace(agentID)
 	tx, err := s.db.Begin()
@@ -366,9 +384,13 @@ func (s *Store) MarkNoteHandled(noteID, agentID string) (*models.Entry, error) {
 	if note.ReplacedBy != "" {
 		return nil, invalidInput("note %q is replaced by %q, so it is not open: handle the note that replaced it", noteID, note.ReplacedBy)
 	}
+	now := time.Now().UTC()
 	if _, err := tx.Exec(`UPDATE entries SET handled_by = ?, handled_at = ? WHERE id = ? AND handled_at IS NULL`,
-		agentID, stamp(time.Now().UTC()), noteID); err != nil {
+		agentID, stamp(now), noteID); err != nil {
 		return nil, fmt.Errorf("marking note handled: %w", err)
+	}
+	if err := touchAgent(tx, agentID, now); err != nil {
+		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err

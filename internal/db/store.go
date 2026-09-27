@@ -15,10 +15,12 @@ import (
 
 type Store struct {
 	db *sql.DB
+	// awaitPoll is how often AwaitAnswer reads the request again.
+	awaitPoll time.Duration
 }
 
 func NewStore(database *sql.DB) *Store {
-	return &Store{db: database}
+	return &Store{db: database, awaitPoll: DefaultAwaitPoll}
 }
 
 // dbtx is the subset of *sql.DB and *sql.Tx that the query helpers below need.
@@ -502,6 +504,8 @@ func (s *Store) attachListDetails(tickets []models.Ticket) error {
 		tickets[i].ReviewRounds = 0
 		tickets[i].DoneAt = nil
 		tickets[i].DocumentCount = 0
+		tickets[i].Agent = nil
+		tickets[i].OpenRequest = nil
 	}
 	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
 
@@ -515,6 +519,9 @@ func (s *Store) attachListDetails(tickets []models.Ticket) error {
 		return err
 	}
 	if err := s.attachSurfacedFrom(tickets, index, placeholders, ids); err != nil {
+		return err
+	}
+	if err := s.attachHolding(tickets, index, placeholders, ids); err != nil {
 		return err
 	}
 
@@ -674,6 +681,11 @@ func (s *Store) GetTicket(id string) (*models.Ticket, error) {
 	if t.Delivery, err = getTicketDelivery(s.db, t.ID); err != nil {
 		return nil, err
 	}
+	one := []models.Ticket{t}
+	if err := s.attachHolding(one, map[string]int{t.ID: 0}, "?", []any{t.ID}); err != nil {
+		return nil, err
+	}
+	t.Agent, t.OpenRequest = one[0].Agent, one[0].OpenRequest
 
 	return &t, nil
 }

@@ -171,12 +171,13 @@ func (s *Store) nowSubtasks(tickets []models.NowTicket, index map[string]int, pl
 }
 
 // nowSince sets each ticket's Since to its latest entry into the status it
-// has now. A ticket with no such entry keeps its created_at.
+// has now. A ticket with no such entry keeps its created_at. A row that keeps
+// the status (a takeover) is not an entry.
 func (s *Store) nowSince(tickets []models.NowTicket, index map[string]int, placeholders string, args []any) error {
 	// Oldest first, rowid for changes within the same instant, so the last
 	// matching row read for a ticket is its latest entry.
 	rows, err := s.db.Query(`SELECT ticket_id, to_status, created_at FROM ticket_status_changes
-		WHERE ticket_id IN (`+placeholders+`) ORDER BY created_at ASC, rowid ASC`, args...)
+		WHERE ticket_id IN (`+placeholders+`) AND from_status <> to_status ORDER BY created_at ASC, rowid ASC`, args...)
 	if err != nil {
 		return fmt.Errorf("loading status history: %w", err)
 	}

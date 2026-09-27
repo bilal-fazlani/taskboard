@@ -48,6 +48,18 @@ type TicketRequest struct {
 	AnsweredAt *time.Time `json:"answeredAt,omitempty"`
 }
 
+// CreateUserInputRequest is an agent asking the person for user input on a
+// ticket. Choices, when given, are the only answers the person can give.
+type CreateUserInputRequest struct {
+	TicketID string `json:"ticketId"`
+	// AgentID is the agent asking, which collects the answer.
+	AgentID string `json:"agentId"`
+	// Type is one of UserInputTypes.
+	Type    string   `json:"type"`
+	Prompt  string   `json:"prompt"`
+	Choices []string `json:"choices,omitempty"`
+}
+
 // Answered reports whether the request has been answered.
 func (r TicketRequest) Answered() bool {
 	return r.AnsweredAt != nil
