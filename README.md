@@ -271,6 +271,8 @@ The reverse direction is derived, not stored. When `BILL-5` depends on `BILL-2`,
 | `find_tickets_by_commit` | Find the tickets that landed a commit, by sha    |
 | **Board**                |                                                  |
 | `get_board`              | Get full Kanban board grouped by status          |
+| **Now**                  |                                                  |
+| `get_now`                | What's moving now: in progress, in review, landed, compactly |
 | **Subtasks**             |                                                  |
 | `create_subtask`         | Add a subtask to a ticket                        |
 | `batch_create_subtasks`  | Add multiple subtasks to a ticket at once        |

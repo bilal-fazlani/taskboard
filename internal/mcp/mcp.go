@@ -595,6 +595,13 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 		}
 		return s.store.GetBoard(a.projectRef())
 
+	case "get_now":
+		var a nowArgs
+		if err := decodeArgs(args, &a); err != nil {
+			return nil, err
+		}
+		return s.getNow(a)
+
 	case "create_subtask":
 		var a struct {
 			TicketID string `json:"ticketId"`
@@ -1401,6 +1408,17 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 			InputSchema: jsonSchema{
 				Type:       "object",
 				Properties: projectRefProps("Filter by project ID or prefix (optional, case-insensitive); an unknown one returns no tickets rather than an error."),
+			},
+		},
+		// --- Now (what's moving right now) ---
+		{
+			Name: "get_now",
+			Description: "What's moving right now, across all projects by default: tickets in progress or in review, with " +
+				"their subtask and review progress, plus what landed in the last 24 hours with its commit shas. Checking a " +
+				"run's state costs one cheap call, instead of a list_tickets per status plus a get_ticket per ticket.",
+			InputSchema: jsonSchema{
+				Type:       "object",
+				Properties: projectRefProps("Filter by project ID or prefix (optional, case-insensitive); an unknown one returns no tickets rather than an error, like get_board."),
 			},
 		},
 		// --- Subtasks (steps within a ticket) ---

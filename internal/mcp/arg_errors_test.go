@@ -181,6 +181,7 @@ func TestToolHandlersRejectWronglyTypedArguments(t *testing.T) {
 		{"delete_ticket", map[string]any{"id": 1}},
 		{"find_tickets_by_commit", map[string]any{"sha": 1}},
 		{"get_board", map[string]any{"projectId": 1}},
+		{"get_now", map[string]any{"projectId": 1}},
 		{"create_subtask", map[string]any{"ticketId": f.ticketID, "title": 1}},
 		{"batch_create_subtasks", map[string]any{"ticketId": f.ticketID, "subtasks": "not-a-list"}},
 		{"delete_subtask", map[string]any{"id": 1}},
@@ -241,7 +242,7 @@ func TestToolCallsWithNoArgumentsStillSucceed(t *testing.T) {
 		t.Fatalf("CreateProject: %v", err)
 	}
 
-	for _, tool := range []string{"list_projects", "list_tickets", "get_board"} {
+	for _, tool := range []string{"list_projects", "list_tickets", "get_board", "get_now"} {
 		t.Run(tool, func(t *testing.T) {
 			params := mustJSON(t, map[string]any{"name": tool})
 			resp := s.handleToolCall(jsonrpcRequest{JSONRPC: "2.0", ID: 1, Method: "tools/call", Params: params})
