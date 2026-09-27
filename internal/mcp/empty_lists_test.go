@@ -48,8 +48,8 @@ func TestListLabelsToolEmptyIsArray(t *testing.T) {
 	wantEmptyJSONArray(t, "list_labels()", out)
 }
 
-// list_projects with no projects created, or a status filter matching
-// none, must be [] rather than null.
+// list_projects with no projects created, or with every project deleted,
+// must be [] rather than null.
 func TestListProjectsToolEmptyIsArray(t *testing.T) {
 	s := newTestServer(t)
 
@@ -62,11 +62,14 @@ func TestListProjectsToolEmptyIsArray(t *testing.T) {
 	if _, err := s.store.CreateProject(models.CreateProjectRequest{Name: "Billing", Prefix: "BILL"}); err != nil {
 		t.Fatal(err)
 	}
-	out, err = s.callTool("list_projects", mustJSON(t, map[string]any{"status": "archived"}))
+	if _, err := s.callTool("delete_project", mustJSON(t, map[string]any{"id": "BILL"})); err != nil {
+		t.Fatal(err)
+	}
+	out, err = s.callTool("list_projects", mustJSON(t, map[string]any{}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantEmptyJSONArray(t, `list_projects(status=archived)`, out)
+	wantEmptyJSONArray(t, `list_projects() after deleting the only project`, out)
 }
 
 // list_epics answers {"epics": [...], "noEpic": {...}}; a project with no

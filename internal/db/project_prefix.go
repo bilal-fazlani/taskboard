@@ -13,19 +13,30 @@ import (
 // what counts as the same prefix. exceptID is the project being renamed, which
 // may change the case of its own prefix; it is "" on create.
 //
+// A deleted project keeps its prefix, so an old key like ACP-12 never names
+// a different ticket: this reads every project, deleted ones too, and says
+// which kind holds the prefix without naming a deleted one.
+//
 // Callers run it in the transaction that writes the prefix. The index is the
 // backstop; this is what turns a clash into a clear ErrInvalidInput.
 func checkPrefixFree(q dbtx, prefix, exceptID string) error {
-	var name, taken string
+	var name, taken, status string
 	err := q.QueryRow(
-		"SELECT name, prefix FROM projects WHERE LOWER(prefix) = LOWER(?) AND id <> ? LIMIT 1",
+		"SELECT name, prefix, status FROM projects WHERE LOWER(prefix) = LOWER(?) AND id <> ? LIMIT 1",
 		prefix, exceptID,
-	).Scan(&name, &taken)
+	).Scan(&name, &taken, &status)
 	if err == sql.ErrNoRows {
 		return nil
 	}
 	if err != nil {
 		return fmt.Errorf("checking project prefix %q: %w", prefix, err)
+	}
+	if status == ProjectArchived {
+		if taken == prefix {
+			return invalidInput("project prefix %q is already used by a deleted project", prefix)
+		}
+		return invalidInput("project prefix %q is already used by a deleted project as %q; prefixes must differ by more than letter case",
+			prefix, taken)
 	}
 	if taken == prefix {
 		return invalidInput("project prefix %q is already used by project %q", prefix, name)

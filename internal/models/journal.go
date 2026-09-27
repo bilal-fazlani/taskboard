@@ -3,7 +3,7 @@ package models
 import "time"
 
 // JournalEntry is one entry in a project's journal. Entries are appended and
-// never rewritten; they go only with their project.
+// never rewritten or removed; deleting their project hides them with it.
 type JournalEntry struct {
 	ID        string `json:"id"`
 	ProjectID string `json:"projectId"`

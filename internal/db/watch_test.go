@@ -70,7 +70,7 @@ func TestDataVersionSeesCommitsFromOtherConnections(t *testing.T) {
 	}
 
 	// A read is not a change.
-	if _, err := store.ListProjects(""); err != nil {
+	if _, err := store.ListProjects(); err != nil {
 		t.Fatal(err)
 	}
 	if v, _ := w.dataVersion(ctx); v != v2 {

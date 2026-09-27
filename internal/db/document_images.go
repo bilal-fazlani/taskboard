@@ -105,7 +105,7 @@ func (s *Store) ReplaceDocumentImage(id string, data []byte, name *string) (*mod
 	// A document's format never changes, so reading it ahead of the
 	// transaction is safe.
 	var format string
-	err := s.db.QueryRow("SELECT format FROM documents WHERE id = ?", id).Scan(&format)
+	err := s.db.QueryRow("SELECT format FROM "+liveDocuments+" WHERE id = ?", id).Scan(&format)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -128,7 +128,7 @@ func (s *Store) ReplaceDocumentImage(id string, data []byte, name *string) (*mod
 
 	var owner DocumentOwner
 	var current string
-	err = tx.QueryRow("SELECT COALESCE(ticket_id, ''), COALESCE(epic_id, ''), name FROM documents WHERE id = ?", id).
+	err = tx.QueryRow("SELECT COALESCE(ticket_id, ''), COALESCE(epic_id, ''), name FROM "+liveDocuments+" WHERE id = ?", id).
 		Scan(&owner.TicketID, &owner.EpicID, &current)
 	if err == sql.ErrNoRows {
 		return nil, nil // deleted meanwhile
@@ -191,7 +191,7 @@ func (s *Store) getImageFile(id string, thumbnail bool) (*ImageFile, error) {
 	var contentType sql.NullString
 	var data []byte
 	meta, err := scanDocumentMeta(s.db.QueryRow("SELECT "+documentMetaColumns+", thumbnail_type, "+column+`
-		FROM documents LEFT JOIN document_images ON document_id = id WHERE id = ?`, id), &contentType, &data)
+		FROM `+liveDocuments+` LEFT JOIN document_images ON document_id = id WHERE id = ?`, id), &contentType, &data)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}

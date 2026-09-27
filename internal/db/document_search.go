@@ -25,8 +25,8 @@ func (s *Store) SearchDocumentTickets(q, projectRef string) ([]string, error) {
 	if needle == "" {
 		return ids, nil
 	}
-	query := `SELECT d.ticket_id, d.name, d.format, COALESCE(ds.text, '') FROM documents d
-		JOIN tickets t ON t.id = d.ticket_id
+	query := `SELECT d.ticket_id, d.name, d.format, COALESCE(ds.text, '') FROM ` + liveDocuments + ` d
+		JOIN ` + liveTickets + ` t ON t.id = d.ticket_id
 		LEFT JOIN document_search ds ON ds.document_id = d.id`
 	var args []any
 	if strings.TrimSpace(projectRef) != "" {

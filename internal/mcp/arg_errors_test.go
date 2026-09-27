@@ -75,7 +75,7 @@ func (f *argErrorFixture) snapshot(t *testing.T) string {
 	t.Helper()
 	s := f.s
 
-	projects, err := s.store.ListProjects("")
+	projects, err := s.store.ListProjects()
 	if err != nil {
 		t.Fatalf("ListProjects: %v", err)
 	}
@@ -148,8 +148,8 @@ func (f *argErrorFixture) snapshot(t *testing.T) string {
 // handler must now return an error, and the store must be left exactly as it
 // was — checked with a full snapshot, not just the presence of an error.
 //
-// list_labels takes no arguments, so it has no wrongly typed argument to
-// send and is not in this table; toggle_subtask is included even though
+// list_labels and list_projects take no arguments, so they have no wrongly
+// typed argument to send and are not in this table; toggle_subtask is included even though
 // ACP-83 already covers it (TestToggleSubtaskToolRejectsNonBooleanCompleted),
 // so this table alone demonstrates every handler is covered.
 func TestToolHandlersRejectWronglyTypedArguments(t *testing.T) {
@@ -159,7 +159,6 @@ func TestToolHandlersRejectWronglyTypedArguments(t *testing.T) {
 		tool string
 		args map[string]any
 	}{
-		{"list_projects", map[string]any{"status": 1}},
 		{"get_project", map[string]any{"id": 1}},
 		{"create_project", map[string]any{"name": 1, "prefix": "X"}},
 		{"update_project", map[string]any{"id": f.projectID, "agentInstructions": 1}},
@@ -198,7 +197,7 @@ func TestToolHandlersRejectWronglyTypedArguments(t *testing.T) {
 		seen[tc.tool] = true
 	}
 	for _, def := range f.s.toolDefinitions() {
-		if !seen[def.Name] && def.Name != "list_labels" {
+		if !seen[def.Name] && def.Name != "list_labels" && def.Name != "list_projects" {
 			t.Errorf("tool %q has no entry in this table", def.Name)
 		}
 	}

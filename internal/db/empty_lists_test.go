@@ -94,27 +94,30 @@ func TestListLabelsEmptyIsNeverNil(t *testing.T) {
 	wantEmptyJSONArray(t, "ListLabels()", labels)
 }
 
-// ListProjects with no projects created, or a status filter matching none,
+// ListProjects with no projects created, or with every project deleted,
 // gives [] rather than null.
 func TestListProjectsEmptyIsNeverNil(t *testing.T) {
 	s := newTestStore(t)
 
-	projects, err := s.ListProjects("")
+	projects, err := s.ListProjects()
 	if err != nil {
 		t.Fatal(err)
 	}
 	if projects == nil {
-		t.Fatal(`ListProjects("") = nil, want a non-nil empty slice`)
+		t.Fatal(`ListProjects() = nil, want a non-nil empty slice`)
 	}
-	wantEmptyJSONArray(t, `ListProjects("")`, projects)
+	wantEmptyJSONArray(t, `ListProjects()`, projects)
 
-	seedProject(t, s, "Billing", "BILL")
-	archived, err := s.ListProjects("archived")
+	p := seedProject(t, s, "Billing", "BILL")
+	if err := s.DeleteProject(p.ID); err != nil {
+		t.Fatal(err)
+	}
+	projects, err = s.ListProjects()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if archived == nil {
-		t.Fatal(`ListProjects("archived") = nil, want a non-nil empty slice`)
+	if projects == nil {
+		t.Fatal(`ListProjects() after deleting the only project = nil, want a non-nil empty slice`)
 	}
-	wantEmptyJSONArray(t, `ListProjects("archived")`, archived)
+	wantEmptyJSONArray(t, `ListProjects() after deleting the only project`, projects)
 }

@@ -399,9 +399,10 @@ type projectListItem struct {
 	HasAgentInstructions bool `json:"hasAgentInstructions"`
 }
 
+// listProjects answers GET /api/projects with every project there is. A
+// deleted project is gone, so there is no status to filter on.
 func (s *Server) listProjects(w http.ResponseWriter, r *http.Request) {
-	status := r.URL.Query().Get("status")
-	projects, err := s.store.ListProjects(status)
+	projects, err := s.store.ListProjects()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -644,7 +645,7 @@ func (s *Server) addSubtask(w http.ResponseWriter, r *http.Request) {
 	}
 	st, err := s.store.AddSubtask(chi.URLParam(r, "id"), req)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeLookupError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, st)
@@ -653,7 +654,7 @@ func (s *Server) addSubtask(w http.ResponseWriter, r *http.Request) {
 func (s *Server) toggleSubtask(w http.ResponseWriter, r *http.Request) {
 	st, err := s.store.ToggleSubtask(chi.URLParam(r, "id"))
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeLookupError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, st)

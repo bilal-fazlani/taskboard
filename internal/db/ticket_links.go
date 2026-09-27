@@ -66,9 +66,10 @@ func resolveDependencies(q dbtx, selfID string, entries []models.DependencyInput
 }
 
 // replaceDependencies makes deps the ticket's whole set of dependencies,
-// kinds and notes included.
+// kinds and notes included. A dependency on a ticket in a deleted project is
+// not part of the set the caller sees or sends, so it stays as it is.
 func replaceDependencies(tx dbtx, ticketID string, deps []dependency) error {
-	if _, err := tx.Exec("DELETE FROM ticket_dependencies WHERE ticket_id = ?", ticketID); err != nil {
+	if _, err := tx.Exec("DELETE FROM ticket_dependencies WHERE ticket_id = ? AND blocked_by_id IN ("+liveTicketIDs+")", ticketID); err != nil {
 		return fmt.Errorf("clearing dependencies: %w", err)
 	}
 	for _, d := range deps {
@@ -108,11 +109,12 @@ func resolveSurfacedFrom(q dbtx, selfID, raw string) (*string, error) {
 
 	// Walk up from the named ticket. Every ticket has at most one link, so
 	// this is a chain; the visited set only guards against a loop already in
-	// the data.
+	// the data. The walk stops at a ticket in a deleted project, as the
+	// links shown do.
 	visited := map[string]bool{id: true}
 	for at := id; ; {
 		var next string
-		err := q.QueryRow("SELECT source_id FROM ticket_surfaced_from WHERE ticket_id = ?", at).Scan(&next)
+		err := q.QueryRow("SELECT source_id FROM ticket_surfaced_from WHERE ticket_id = ? AND source_id IN ("+liveTicketIDs+")", at).Scan(&next)
 		if err == sql.ErrNoRows {
 			break
 		}
@@ -149,11 +151,12 @@ func setSurfacedFrom(tx dbtx, ticketID string, sourceID *string) error {
 }
 
 // dependencyRefSelect is ticketRefSelect with the dependency's kind and
-// note; the caller joins ticket_dependencies as d.
+// note; the caller joins ticket_dependencies as d. A ticket in a deleted
+// project is not read, so a dependency on or from one is left out.
 const dependencyRefSelect = `SELECT t.id,
 	COALESCE(p.prefix, '') || '-' || t.number AS key,
 	t.title, t.status, d.kind, d.note
-	FROM tickets t LEFT JOIN projects p ON t.project_id = p.id`
+	FROM ` + liveTickets + ` t LEFT JOIN ` + liveProjects + ` p ON t.project_id = p.id`
 
 func scanDependencyRefs(rows *sql.Rows) ([]models.TicketRef, error) {
 	defer rows.Close()
@@ -201,8 +204,8 @@ func (s *Store) attachSurfacedFrom(tickets []models.Ticket, index map[string]int
 		`SELECT sf.ticket_id, t.id,
 		COALESCE(p.prefix, '') || '-' || t.number, t.title, t.status
 		FROM ticket_surfaced_from sf
-		JOIN tickets t ON t.id = sf.source_id
-		LEFT JOIN projects p ON p.id = t.project_id
+		JOIN `+liveTickets+` t ON t.id = sf.source_id
+		LEFT JOIN `+liveProjects+` p ON p.id = t.project_id
 		WHERE sf.ticket_id IN (`+placeholders+`)`, ids...)
 	if err != nil {
 		return fmt.Errorf("loading surfaced-from links: %w", err)

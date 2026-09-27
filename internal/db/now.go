@@ -76,7 +76,7 @@ func inList(ids []string) (string, []any) {
 // their review.
 func (s *Store) nowActive(projectID string) ([]models.NowTicket, error) {
 	rows, err := s.db.Query(`SELECT t.id, COALESCE(p.prefix, ''), t.number, t.title, t.status, t.created_at
-		FROM tickets t LEFT JOIN projects p ON p.id = t.project_id
+		FROM `+liveTickets+` t LEFT JOIN `+liveProjects+` p ON p.id = t.project_id
 		WHERE t.status IN (?, ?) AND (? = '' OR t.project_id = ?)`,
 		models.StatusInProgress, models.StatusAgentReview, projectID, projectID)
 	if err != nil {
@@ -151,7 +151,7 @@ func (s *Store) nowActive(projectID string) ([]models.NowTicket, error) {
 // nowSubtasks fills each ticket's subtask progress.
 func (s *Store) nowSubtasks(tickets []models.NowTicket, index map[string]int, placeholders string, args []any) error {
 	rows, err := s.db.Query(`SELECT ticket_id, COUNT(*), COALESCE(SUM(CASE WHEN completed THEN 1 ELSE 0 END), 0)
-		FROM subtasks WHERE ticket_id IN (`+placeholders+`) GROUP BY ticket_id`, args...)
+		FROM `+liveSubtasks+` WHERE ticket_id IN (`+placeholders+`) GROUP BY ticket_id`, args...)
 	if err != nil {
 		return fmt.Errorf("loading subtask progress: %w", err)
 	}
@@ -247,7 +247,7 @@ func (s *Store) nowReviews(tickets []models.NowTicket, index map[string]int) err
 	}
 	placeholders, args := inList(ids)
 	// Only the start of each report is read: the verdict is its first line.
-	rows, err := s.db.Query(`SELECT ticket_id, name, updated_at, substr(content, 1, 64) FROM documents
+	rows, err := s.db.Query(`SELECT ticket_id, name, updated_at, substr(content, 1, 64) FROM `+liveDocuments+`
 		WHERE ticket_id IN (`+placeholders+`) AND format IN ('markdown', 'html')
 		AND name LIKE 'review %'`, args...)
 	if err != nil {
@@ -296,8 +296,8 @@ func (s *Store) nowLanded(projectID string, now time.Time) ([]models.LandedTicke
 	// row kept per ticket is its DoneAt.
 	rows, err := s.db.Query(`SELECT t.id, COALESCE(p.prefix, ''), t.number, t.title, c.created_at
 		FROM ticket_status_changes c
-		JOIN tickets t ON t.id = c.ticket_id
-		LEFT JOIN projects p ON p.id = t.project_id
+		JOIN `+liveTickets+` t ON t.id = c.ticket_id
+		LEFT JOIN `+liveProjects+` p ON p.id = t.project_id
 		WHERE c.to_status = ? AND t.status = ? AND c.created_at >= ?
 		AND (? = '' OR t.project_id = ?)
 		ORDER BY c.created_at ASC, c.rowid ASC`,

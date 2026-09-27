@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
+	"github.com/tcarac/taskboard/internal/db"
 	"github.com/tcarac/taskboard/internal/models"
 )
 
@@ -21,7 +22,7 @@ func projectCommands() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			projects, err := store.ListProjects("")
+			projects, err := store.ListProjects()
 			if err != nil {
 				return err
 			}
@@ -34,7 +35,7 @@ func projectCommands() *cobra.Command {
 				if icon == "" {
 					icon = " "
 				}
-				fmt.Fprintf(cmd.OutOrStdout(), "%s %s [%s] (%s) - %s\n", icon, p.Name, p.Prefix, p.Status, p.ID)
+				fmt.Fprintf(cmd.OutOrStdout(), "%s %s [%s] - %s\n", icon, p.Name, p.Prefix, p.ID)
 			}
 			return nil
 		},
@@ -77,6 +78,7 @@ func projectCommands() *cobra.Command {
 	deleteCmd := &cobra.Command{
 		Use:   "delete [id-or-prefix]",
 		Short: "Delete a project, by id or prefix (case-insensitive)",
+		Long:  db.DeleteProjectHelp + ".\n\nThe project is named by its id or prefix (case-insensitive).",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			store, err := openStore()

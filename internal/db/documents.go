@@ -199,12 +199,12 @@ func checkOwnerExists(q dbtx, owner DocumentOwner) error {
 	if err := owner.check(); err != nil {
 		return err
 	}
-	table, id := "tickets", owner.TicketID
+	source, id := liveTickets, owner.TicketID
 	if owner.EpicID != "" {
-		table, id = "epics", owner.EpicID
+		source, id = liveEpics, owner.EpicID
 	}
 	var one int
-	err := q.QueryRow("SELECT 1 FROM "+table+" WHERE id = ?", id).Scan(&one)
+	err := q.QueryRow("SELECT 1 FROM "+source+" WHERE id = ?", id).Scan(&one)
 	if err == sql.ErrNoRows {
 		return invalidInput("%s not found", owner.noun())
 	}
@@ -239,7 +239,7 @@ func scanDocumentMeta(row interface{ Scan(...any) error }, extra ...any) (models
 // added. The result is never nil.
 func loadOwnerDocuments(q dbtx, owner DocumentOwner) ([]models.DocumentMeta, error) {
 	cond, arg := owner.where()
-	rows, err := q.Query("SELECT "+documentMetaColumns+" FROM documents WHERE "+cond+" ORDER BY created_at, id", arg)
+	rows, err := q.Query("SELECT "+documentMetaColumns+" FROM "+liveDocuments+" WHERE "+cond+" ORDER BY created_at, id", arg)
 	if err != nil {
 		return nil, fmt.Errorf("loading documents: %w", err)
 	}
@@ -289,7 +289,7 @@ func (s *Store) ListDocuments(owner DocumentOwner) ([]models.DocumentMeta, error
 func (s *Store) GetDocument(id string) (*models.Document, error) {
 	var content string
 	meta, err := scanDocumentMeta(
-		s.db.QueryRow("SELECT "+documentMetaColumns+", content FROM documents WHERE id = ?", id),
+		s.db.QueryRow("SELECT "+documentMetaColumns+", content FROM "+liveDocuments+" WHERE id = ?", id),
 		&content,
 	)
 	if err == sql.ErrNoRows {
@@ -400,7 +400,7 @@ func (s *Store) UpdateDocument(id string, req models.UpdateDocumentRequest) (*mo
 		// A document's format never changes, so reading it ahead of the
 		// transaction is safe.
 		var format string
-		err := s.db.QueryRow("SELECT format FROM documents WHERE id = ?", id).Scan(&format)
+		err := s.db.QueryRow("SELECT format FROM "+liveDocuments+" WHERE id = ?", id).Scan(&format)
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
@@ -422,7 +422,7 @@ func (s *Store) UpdateDocument(id string, req models.UpdateDocumentRequest) (*mo
 	var owner DocumentOwner
 	var name, format string
 	var revision int
-	err = tx.QueryRow("SELECT COALESCE(ticket_id, ''), COALESCE(epic_id, ''), name, format, revision FROM documents WHERE id = ?", id).
+	err = tx.QueryRow("SELECT COALESCE(ticket_id, ''), COALESCE(epic_id, ''), name, format, revision FROM "+liveDocuments+" WHERE id = ?", id).
 		Scan(&owner.TicketID, &owner.EpicID, &name, &format, &revision)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -485,13 +485,13 @@ func (s *Store) UpdateDocument(id string, req models.UpdateDocumentRequest) (*mo
 // DeleteDocument removes a document for good. It reports ErrInvalidInput for
 // an unknown id rather than silently succeeding.
 func (s *Store) DeleteDocument(id string) error {
-	return deleteRowOrNotFound(s.db, "documents", "document", id)
+	return deleteRowOrNotFound(s.db, "documents", liveDocuments, "document", id)
 }
 
 // attachDocumentCounts fills DocumentCount for a page of tickets in one
 // grouped query. index, placeholders and ids are attachListDetails' own.
 func (s *Store) attachDocumentCounts(tickets []models.Ticket, index map[string]int, placeholders string, ids []any) error {
-	rows, err := s.db.Query(`SELECT ticket_id, COUNT(*) FROM documents
+	rows, err := s.db.Query(`SELECT ticket_id, COUNT(*) FROM `+liveDocuments+`
 		WHERE ticket_id IN (`+placeholders+`) GROUP BY ticket_id`, ids...)
 	if err != nil {
 		return fmt.Errorf("counting documents: %w", err)

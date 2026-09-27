@@ -91,7 +91,7 @@ func TestListProjectsFlagsAgentInstructionsWithoutText(t *testing.T) {
 	}
 	without := seedProject(t, s, "Support", "SUP")
 
-	projects, err := s.ListProjects("")
+	projects, err := s.ListProjects()
 	if err != nil {
 		t.Fatalf("ListProjects: %v", err)
 	}
@@ -186,7 +186,7 @@ func TestAgentInstructionsAreStoredTrimmed(t *testing.T) {
 		t.Fatalf("whitespace update read back %q (has %v)", *got.AgentInstructions, got.HasAgentInstructions)
 	}
 
-	projects, err := s.ListProjects("")
+	projects, err := s.ListProjects()
 	if err != nil {
 		t.Fatalf("ListProjects: %v", err)
 	}

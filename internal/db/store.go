@@ -70,17 +70,11 @@ func newID() string {
 }
 
 // ListProjects returns the projects without their agent instructions, which
-// can be long; each says only whether it has some.
-func (s *Store) ListProjects(status string) ([]models.Project, error) {
-	query := "SELECT id, name, prefix, description, agent_instructions <> '', icon, color, status, created_at, updated_at FROM projects"
-	args := []any{}
-	if status != "" {
-		query += " WHERE status = ?"
-		args = append(args, status)
-	}
-	query += " ORDER BY created_at DESC"
-
-	rows, err := s.db.Query(query, args...)
+// can be long; each says only whether it has some. A deleted project is not
+// among them.
+func (s *Store) ListProjects() ([]models.Project, error) {
+	rows, err := s.db.Query("SELECT id, name, prefix, description, agent_instructions <> '', icon, color, status, created_at, updated_at FROM " +
+		liveProjects + " ORDER BY created_at DESC")
 	if err != nil {
 		return nil, err
 	}
@@ -97,12 +91,19 @@ func (s *Store) ListProjects(status string) ([]models.Project, error) {
 	return projects, rows.Err()
 }
 
-// GetProject returns one project with its agent instructions.
+// GetProject returns one project with its agent instructions, or (nil, nil)
+// for an unknown or deleted one.
 func (s *Store) GetProject(id string) (*models.Project, error) {
+	return getProject(s.db, id)
+}
+
+// getProject is GetProject on q, so UpdateProject can read inside its
+// transaction.
+func getProject(q dbtx, id string) (*models.Project, error) {
 	var p models.Project
 	var instructions string
-	err := s.db.QueryRow(
-		"SELECT id, name, prefix, description, agent_instructions, icon, color, status, created_at, updated_at FROM projects WHERE id = ?", id,
+	err := q.QueryRow(
+		"SELECT id, name, prefix, description, agent_instructions, icon, color, status, created_at, updated_at FROM "+liveProjects+" WHERE id = ?", id,
 	).Scan(&p.ID, &p.Name, &p.Prefix, &p.Description, &instructions, &p.Icon, &p.Color, &p.Status, &p.CreatedAt, &p.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -145,8 +146,23 @@ func (s *Store) CreateProject(req models.CreateProjectRequest) (*models.Project,
 	return &p, tx.Commit()
 }
 
+// UpdateProject returns (nil, nil) for an unknown or deleted project. Its
+// status can only be set to ProjectActive, which it already is: deleting
+// (DeleteProject) is the only way to archive a project, and nothing here
+// writes the status. The project is read inside the transaction, and the
+// write matches only a live project (writeProject), so a delete that lands
+// meanwhile is never undone.
 func (s *Store) UpdateProject(id string, req models.UpdateProjectRequest) (*models.Project, error) {
-	p, err := s.GetProject(id)
+	if req.Status != nil && *req.Status != ProjectActive {
+		return nil, invalidInput("status %q is not allowed: a project's status can only be %q; to archive a project, delete it", *req.Status, ProjectActive)
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, fmt.Errorf("beginning transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	p, err := getProject(tx, id)
 	if err != nil || p == nil {
 		return nil, err
 	}
@@ -169,35 +185,57 @@ func (s *Store) UpdateProject(id string, req models.UpdateProjectRequest) (*mode
 	if req.Color != nil {
 		p.Color = *req.Color
 	}
-	if req.Status != nil {
-		p.Status = *req.Status
-	}
 	p.UpdatedAt = time.Now().UTC()
 
-	tx, err := s.db.Begin()
-	if err != nil {
-		return nil, fmt.Errorf("beginning transaction: %w", err)
-	}
-	defer tx.Rollback()
 	if req.Prefix != nil {
 		if err := checkPrefixFree(tx, p.Prefix, p.ID); err != nil {
 			return nil, err
 		}
 	}
-	if _, err := tx.Exec(
-		"UPDATE projects SET name=?, prefix=?, description=?, agent_instructions=?, icon=?, color=?, status=?, updated_at=? WHERE id=?",
-		p.Name, p.Prefix, p.Description, *p.AgentInstructions, p.Icon, p.Color, p.Status, stamp(p.UpdatedAt), p.ID,
-	); err != nil {
+	written, err := writeProject(tx, p)
+	if err != nil || !written {
 		return nil, err
 	}
 	return p, tx.Commit()
 }
 
-// DeleteProject removes a project and, via cascading foreign keys, its
-// tickets and epics. It reports ErrInvalidInput for an unknown id rather than
-// silently succeeding.
+// writeProject writes p's editable fields over its row, and reports false,
+// writing nothing, when the project is not live: a p read before a delete
+// landed can never bring the project back. It never writes the status.
+func writeProject(q dbtx, p *models.Project) (bool, error) {
+	res, err := q.Exec(
+		"UPDATE projects SET name=?, prefix=?, description=?, agent_instructions=?, icon=?, color=?, updated_at=? WHERE id=? AND id IN ("+liveProjectIDs+")",
+		p.Name, p.Prefix, p.Description, *p.AgentInstructions, p.Icon, p.Color, stamp(p.UpdatedAt), p.ID,
+	)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n > 0, err
+}
+
+// DeleteProject archives a project: it sets its status to ProjectArchived and
+// removes nothing, and from then on the project and its tickets, epics,
+// documents and journal are gone from every read (see live.go). Nothing
+// restores it, and its prefix stays taken (checkPrefixFree). An unknown or
+// already deleted project reports ErrInvalidInput rather than silently
+// succeeding.
 func (s *Store) DeleteProject(id string) error {
-	return deleteRowOrNotFound(s.db, "projects", "project", id)
+	res, err := s.db.Exec(
+		`UPDATE projects SET status = ?, updated_at = ? WHERE id = ? AND id IN (`+liveProjectIDs+`)`,
+		ProjectArchived, stamp(time.Now().UTC()), id,
+	)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return invalidInput("project not found: %q", id)
+	}
+	return nil
 }
 
 // nextTicketNumber takes the project's next ticket number from its
@@ -215,7 +253,7 @@ func nextTicketNumber(q dbtx, projectID string) (int, error) {
 	var num int
 	err := q.QueryRow(`UPDATE projects SET last_ticket_number = MAX(
 			last_ticket_number,
-			COALESCE((SELECT MAX(number) FROM tickets WHERE project_id = ?), 0)
+			COALESCE((SELECT MAX(number) FROM `+liveTickets+` WHERE project_id = ?), 0)
 		) + 1
 		WHERE id = ?
 		RETURNING last_ticket_number`, projectID, projectID).Scan(&num)
@@ -302,10 +340,11 @@ func (s *Store) listTickets(filter models.TicketFilter, page *ticketPage) ([]mod
 		// ANDed with Statuses like every other filter: a status list
 		// without todo leaves nothing ready. A dependency on any ticket not
 		// done holds the ticket back, whichever project that ticket is in; a
-		// deleted dependency takes its row with it.
+		// deleted dependency takes its row with it, and one in a deleted
+		// project no longer counts.
 		query += ` AND t.status = ? AND NOT EXISTS (
 			SELECT 1 FROM ticket_dependencies d
-			JOIN tickets b ON b.id = d.blocked_by_id
+			JOIN ` + liveTickets + ` b ON b.id = d.blocked_by_id
 			WHERE d.ticket_id = t.id AND b.status != ?)`
 		args = append(args, models.StatusTodo, models.StatusDone)
 	}
@@ -518,7 +557,7 @@ func (s *Store) attachListDetails(tickets []models.Ticket) error {
 	}
 
 	subtaskRows, err := s.db.Query(
-		`SELECT id, ticket_id, title, completed, position FROM subtasks
+		`SELECT id, ticket_id, title, completed, position FROM `+liveSubtasks+`
 		WHERE ticket_id IN (`+placeholders+`) ORDER BY position`, ids...)
 	if err != nil {
 		return fmt.Errorf("loading subtasks: %w", err)
@@ -545,8 +584,8 @@ func (s *Store) attachListDetails(tickets []models.Ticket) error {
 		`SELECT d.ticket_id, t.id,
 		COALESCE(p.prefix, '') || '-' || t.number, t.title, t.status, d.kind, d.note
 		FROM ticket_dependencies d
-		JOIN tickets t ON t.id = d.blocked_by_id
-		LEFT JOIN projects p ON p.id = t.project_id
+		JOIN `+liveTickets+` t ON t.id = d.blocked_by_id
+		LEFT JOIN `+liveProjects+` p ON p.id = t.project_id
 		WHERE d.ticket_id IN (`+placeholders+`) ORDER BY t.number`, ids...)
 	if err != nil {
 		return fmt.Errorf("loading dependencies: %w", err)
@@ -567,13 +606,13 @@ func (s *Store) attachListDetails(tickets []models.Ticket) error {
 
 // ticketSelect reads a ticket's own columns, its project prefix and its epic.
 // The epic comes from a join rather than a per-ticket lookup, so a list costs
-// no extra query for it.
+// no extra query for it. A ticket in a deleted project is not read.
 const ticketSelect = `SELECT t.id, t.project_id, t.number, t.title, t.description,
 	t.status, t.priority, t.due_date, t.position, t.created_at, t.updated_at,
 	COALESCE(p.prefix, '') as project_prefix, e.id, e.name
-	FROM tickets t
-	LEFT JOIN projects p ON t.project_id = p.id
-	LEFT JOIN epics e ON e.id = t.epic_id`
+	FROM ` + liveTickets + ` t
+	LEFT JOIN ` + liveProjects + ` p ON t.project_id = p.id
+	LEFT JOIN ` + liveEpics + ` e ON e.id = t.epic_id`
 
 func scanTicket(row interface{ Scan(...any) error }) (models.Ticket, error) {
 	var t models.Ticket
@@ -830,7 +869,7 @@ func (s *Store) UpdateTicket(id string, req models.UpdateTicketRequest, opts ...
 		// IMMEDIATE), so no other write lands between this read and the
 		// UPDATE below, and two appends at once both keep their text.
 		var current string
-		if err := tx.QueryRow("SELECT description FROM tickets WHERE id = ?", id).Scan(&current); err != nil {
+		if err := tx.QueryRow("SELECT description FROM "+liveTickets+" WHERE id = ?", id).Scan(&current); err != nil {
 			return nil, fmt.Errorf("reading description: %w", err)
 		}
 		t.Description = models.AppendToDescription(current, *req.AppendDescription)
@@ -980,7 +1019,7 @@ func (s *Store) MoveTicket(id string, req models.MoveTicketRequest, opts ...Writ
 	if req.Position != nil {
 		position = *req.Position
 	} else if err := tx.QueryRow(
-		"SELECT COALESCE(MAX(position), 0) + 1000 FROM tickets WHERE status = ?", req.Status,
+		"SELECT COALESCE(MAX(position), 0) + 1000 FROM "+liveTickets+" WHERE status = ?", req.Status,
 	).Scan(&position); err != nil {
 		return nil, fmt.Errorf("finding the end of the column: %w", err)
 	}
@@ -1003,9 +1042,10 @@ func (s *Store) MoveTicket(id string, req models.MoveTicketRequest, opts ...Writ
 
 // DeleteTicket removes a ticket and, via cascading foreign keys, its
 // documents, subtasks and status history. It reports ErrInvalidInput for an
-// unknown id rather than silently succeeding.
+// unknown id, or a ticket in a deleted project, rather than silently
+// succeeding.
 func (s *Store) DeleteTicket(id string) error {
-	return deleteRowOrNotFound(s.db, "tickets", "ticket", id)
+	return deleteRowOrNotFound(s.db, "tickets", liveTickets, "ticket", id)
 }
 
 func (s *Store) GetBoard(projectID string) (*models.Board, error) {
@@ -1172,13 +1212,19 @@ func invalidInput(format string, a ...any) error {
 // deleteRowOrNotFound runs "DELETE FROM <table> WHERE id = ?" and reports an
 // ErrInvalidInput, naming noun and id, when it matched no row, instead of
 // letting a delete of an unknown id silently succeed. It is shared by every
-// Delete* store method that deletes a single row by id. q may be *sql.DB or a
+// Delete* store method that deletes a single row by id. live, when not "",
+// is the table's live source (live.go): a row outside it, one in a deleted
+// project, is not found either and stays. q may be *sql.DB or a
 // transaction, so callers that need the delete inside a larger transaction
 // (DeleteLabel, DeleteEpic) can still get the same not-found check. The HTTP
 // layer recognizes ErrInvalidInput here as a 404, via writeLookupError, the
 // same mapping already used for an unresolvable reference.
-func deleteRowOrNotFound(q dbtx, table, noun, id string) error {
-	res, err := q.Exec("DELETE FROM "+table+" WHERE id = ?", id)
+func deleteRowOrNotFound(q dbtx, table, live, noun, id string) error {
+	query := "DELETE FROM " + table + " WHERE id = ?"
+	if live != "" {
+		query += " AND id IN (SELECT id FROM " + live + ")"
+	}
+	res, err := q.Exec(query, id)
 	if err != nil {
 		return err
 	}
@@ -1258,7 +1304,7 @@ func isCanonicalNumber(s string) bool {
 func lookupTicketRef(q dbtx, ref string) (string, error) {
 	if isULID(ref) {
 		var id string
-		err := q.QueryRow("SELECT id FROM tickets WHERE id = ?", ref).Scan(&id)
+		err := q.QueryRow("SELECT id FROM "+liveTickets+" WHERE id = ?", ref).Scan(&id)
 		if err == sql.ErrNoRows {
 			return "", invalidInput("no ticket matches %q", ref)
 		}
@@ -1296,7 +1342,7 @@ func lookupTicketRef(q dbtx, ref string) (string, error) {
 
 	var id string
 	err = q.QueryRow(
-		"SELECT id FROM tickets WHERE project_id = ? AND number = ?",
+		"SELECT id FROM "+liveTickets+" WHERE project_id = ? AND number = ?",
 		projectID, number,
 	).Scan(&id)
 	if err == sql.ErrNoRows {
@@ -1333,7 +1379,7 @@ func (s *Store) ResolveTicketID(ref string) (string, error) {
 // resolved by picking whichever row SQLite returns first. found is false,
 // with a nil error, only when nothing matches at all.
 func resolveProjectByPrefix(q dbtx, prefix string) (id string, found bool, err error) {
-	rows, err := q.Query("SELECT id, prefix FROM projects WHERE LOWER(prefix) = LOWER(?)", prefix)
+	rows, err := q.Query("SELECT id, prefix FROM "+liveProjects+" WHERE LOWER(prefix) = LOWER(?)", prefix)
 	if err != nil {
 		return "", false, fmt.Errorf("looking up project prefix %q: %w", prefix, err)
 	}
@@ -1391,7 +1437,7 @@ func resolveProjectRef(q dbtx, ref string) (string, error) {
 
 	if isULID(trimmed) {
 		var id string
-		err := q.QueryRow("SELECT id FROM projects WHERE id = ?", trimmed).Scan(&id)
+		err := q.QueryRow("SELECT id FROM "+liveProjects+" WHERE id = ?", trimmed).Scan(&id)
 		if err == sql.ErrNoRows {
 			return "", invalidInput("project not found: %q", trimmed)
 		}
@@ -1436,9 +1482,11 @@ func resolveProjectFilterID(q dbtx, ref string) (id string, ok bool, err error) 
 }
 
 func (s *Store) ListLabels() ([]models.Label, error) {
+	// A ticket in a deleted project does not count.
 	rows, err := s.db.Query(
 		`SELECT l.id, l.name, l.color, COUNT(tl.ticket_id)
 		FROM labels l LEFT JOIN ticket_labels tl ON tl.label_id = l.id
+			AND tl.ticket_id IN (` + liveTicketIDs + `)
 		GROUP BY l.id, l.name, l.color
 		ORDER BY l.name`)
 	if err != nil {
@@ -1536,7 +1584,7 @@ func (s *Store) UpdateLabel(id string, req models.UpdateLabelRequest) (*models.L
 	if _, err := s.db.Exec("UPDATE labels SET name=?, color=? WHERE id=?", l.Name, l.Color, l.ID); err != nil {
 		return nil, err
 	}
-	if err := s.db.QueryRow("SELECT COUNT(*) FROM ticket_labels WHERE label_id = ?", l.ID).Scan(&l.TicketCount); err != nil {
+	if err := s.db.QueryRow("SELECT COUNT(*) FROM ticket_labels WHERE label_id = ? AND ticket_id IN ("+liveTicketIDs+")", l.ID).Scan(&l.TicketCount); err != nil {
 		return nil, err
 	}
 	return &l, nil
@@ -1567,7 +1615,8 @@ func (s *Store) ResolveLabelRef(ref string) (string, error) {
 
 // DeleteLabel removes a label and detaches it from every ticket that carried
 // it (the ticket_labels rows cascade on delete), reporting how many tickets
-// it was detached from. The count is read in the same transaction as the
+// it was detached from, not counting those in a deleted project, which lose
+// it too. The count is read in the same transaction as the
 // delete, so it always reflects exactly what was removed. An unknown id
 // reports ErrInvalidInput rather than silently succeeding with a count of 0.
 func (s *Store) DeleteLabel(id string) (int, error) {
@@ -1578,11 +1627,11 @@ func (s *Store) DeleteLabel(id string) (int, error) {
 	defer tx.Rollback()
 
 	var count int
-	if err := tx.QueryRow("SELECT COUNT(*) FROM ticket_labels WHERE label_id = ?", id).Scan(&count); err != nil {
+	if err := tx.QueryRow("SELECT COUNT(*) FROM ticket_labels WHERE label_id = ? AND ticket_id IN ("+liveTicketIDs+")", id).Scan(&count); err != nil {
 		return 0, fmt.Errorf("counting tickets for label: %w", err)
 	}
 
-	if err := deleteRowOrNotFound(tx, "labels", "label", id); err != nil {
+	if err := deleteRowOrNotFound(tx, "labels", "", "label", id); err != nil {
 		return 0, err
 	}
 
@@ -1592,9 +1641,18 @@ func (s *Store) DeleteLabel(id string) (int, error) {
 	return count, nil
 }
 
+// AddSubtask adds a subtask at the end of a ticket's list. An unknown ticket,
+// or one in a deleted project, is an ErrInvalidInput.
 func (s *Store) AddSubtask(ticketID string, req models.CreateSubtaskRequest) (*models.Subtask, error) {
+	exists, err := s.TicketExists(ticketID)
+	if err != nil {
+		return nil, err
+	}
+	if !exists {
+		return nil, invalidInput("ticket not found: %q", ticketID)
+	}
 	var maxPos int
-	s.db.QueryRow("SELECT COALESCE(MAX(position), -1) + 1 FROM subtasks WHERE ticket_id = ?", ticketID).Scan(&maxPos)
+	s.db.QueryRow("SELECT COALESCE(MAX(position), -1) + 1 FROM "+liveSubtasks+" WHERE ticket_id = ?", ticketID).Scan(&maxPos)
 
 	st := models.Subtask{
 		ID:       newID(),
@@ -1602,18 +1660,20 @@ func (s *Store) AddSubtask(ticketID string, req models.CreateSubtaskRequest) (*m
 		Title:    req.Title,
 		Position: maxPos,
 	}
-	_, err := s.db.Exec("INSERT INTO subtasks (id, ticket_id, title, completed, position) VALUES (?, ?, ?, ?, ?)",
+	_, err = s.db.Exec("INSERT INTO subtasks (id, ticket_id, title, completed, position) VALUES (?, ?, ?, ?, ?)",
 		st.ID, st.TicketID, st.Title, st.Completed, st.Position)
 	return &st, err
 }
 
+// ToggleSubtask flips a subtask. An unknown subtask, or one in a deleted
+// project, is an ErrInvalidInput and changes nothing.
 func (s *Store) ToggleSubtask(id string) (*models.Subtask, error) {
-	_, err := s.db.Exec("UPDATE subtasks SET completed = NOT completed WHERE id = ?", id)
+	_, err := s.db.Exec("UPDATE subtasks SET completed = NOT completed WHERE id = ? AND id IN (SELECT id FROM "+liveSubtasks+")", id)
 	if err != nil {
 		return nil, err
 	}
 	var st models.Subtask
-	err = s.db.QueryRow("SELECT id, ticket_id, title, completed, position FROM subtasks WHERE id = ?", id).
+	err = s.db.QueryRow("SELECT id, ticket_id, title, completed, position FROM "+liveSubtasks+" WHERE id = ?", id).
 		Scan(&st.ID, &st.TicketID, &st.Title, &st.Completed, &st.Position)
 	if err == sql.ErrNoRows {
 		return nil, invalidInput("subtask not found: %q", id)
@@ -1627,14 +1687,15 @@ func (s *Store) ToggleSubtask(id string) (*models.Subtask, error) {
 // target state, so a call that finds the subtask already there writes
 // nothing: no row changes, so PRAGMA data_version (and with it, any
 // live-refresh event a watcher drives from it) is untouched, exactly as if
-// the call had never been made. An unknown id is reported clearly rather than
-// as a bare sql.ErrNoRows.
+// the call had never been made. An unknown id, or a subtask in a deleted
+// project, is reported clearly rather than as a bare sql.ErrNoRows.
 func (s *Store) SetSubtaskState(id string, completed bool) (*models.Subtask, error) {
-	if _, err := s.db.Exec("UPDATE subtasks SET completed = ? WHERE id = ? AND completed != ?", completed, id, completed); err != nil {
+	if _, err := s.db.Exec("UPDATE subtasks SET completed = ? WHERE id = ? AND completed != ? AND id IN (SELECT id FROM "+liveSubtasks+")",
+		completed, id, completed); err != nil {
 		return nil, err
 	}
 	var st models.Subtask
-	err := s.db.QueryRow("SELECT id, ticket_id, title, completed, position FROM subtasks WHERE id = ?", id).
+	err := s.db.QueryRow("SELECT id, ticket_id, title, completed, position FROM "+liveSubtasks+" WHERE id = ?", id).
 		Scan(&st.ID, &st.TicketID, &st.Title, &st.Completed, &st.Position)
 	if err == sql.ErrNoRows {
 		return nil, invalidInput("subtask not found: %q", id)
@@ -1642,10 +1703,11 @@ func (s *Store) SetSubtaskState(id string, completed bool) (*models.Subtask, err
 	return &st, err
 }
 
-// GetSubtask returns one subtask, or (nil, nil) for an unknown id.
+// GetSubtask returns one subtask, or (nil, nil) for an unknown id or one in
+// a deleted project.
 func (s *Store) GetSubtask(id string) (*models.Subtask, error) {
 	var st models.Subtask
-	err := s.db.QueryRow("SELECT id, ticket_id, title, completed, position FROM subtasks WHERE id = ?", id).
+	err := s.db.QueryRow("SELECT id, ticket_id, title, completed, position FROM "+liveSubtasks+" WHERE id = ?", id).
 		Scan(&st.ID, &st.TicketID, &st.Title, &st.Completed, &st.Position)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -1657,9 +1719,9 @@ func (s *Store) GetSubtask(id string) (*models.Subtask, error) {
 }
 
 // DeleteSubtask removes a subtask. It reports ErrInvalidInput for an unknown
-// id rather than silently succeeding.
+// id, or a subtask in a deleted project, rather than silently succeeding.
 func (s *Store) DeleteSubtask(id string) error {
-	return deleteRowOrNotFound(s.db, "subtasks", "subtask", id)
+	return deleteRowOrNotFound(s.db, "subtasks", liveSubtasks, "subtask", id)
 }
 
 // normalizeRepos trims each entry and drops blanks, so a stray "  " never
@@ -1731,7 +1793,7 @@ func (s *Store) getTicketLabels(ticketID string) ([]models.EmbeddedLabel, error)
 
 func (s *Store) getTicketSubtasks(ticketID string) ([]models.Subtask, error) {
 	rows, err := s.db.Query(
-		"SELECT id, ticket_id, title, completed, position FROM subtasks WHERE ticket_id = ? ORDER BY position",
+		"SELECT id, ticket_id, title, completed, position FROM "+liveSubtasks+" WHERE ticket_id = ? ORDER BY position",
 		ticketID)
 	if err != nil {
 		return nil, err
@@ -1749,10 +1811,12 @@ func (s *Store) getTicketSubtasks(ticketID string) ([]models.Subtask, error) {
 	return subtasks, rows.Err()
 }
 
+// ticketRefSelect reads tickets as links show them. A ticket in a deleted
+// project is not read, so a link to one is left out.
 const ticketRefSelect = `SELECT t.id,
 	COALESCE(p.prefix, '') || '-' || t.number AS key,
 	t.title, t.status
-	FROM tickets t LEFT JOIN projects p ON t.project_id = p.id`
+	FROM ` + liveTickets + ` t LEFT JOIN ` + liveProjects + ` p ON t.project_id = p.id`
 
 func scanTicketRefs(rows *sql.Rows) ([]models.TicketRef, error) {
 	defer rows.Close()

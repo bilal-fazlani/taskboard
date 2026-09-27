@@ -28,7 +28,7 @@ func loadOwnerTexts(q dbtx, owner DocumentOwner) ([]ownerText, error) {
 	var texts []ownerText
 	if owner.TicketID != "" {
 		var description string
-		err := q.QueryRow("SELECT description FROM tickets WHERE id = ?", owner.TicketID).Scan(&description)
+		err := q.QueryRow("SELECT description FROM "+liveTickets+" WHERE id = ?", owner.TicketID).Scan(&description)
 		if err != nil && err != sql.ErrNoRows {
 			return nil, fmt.Errorf("reading description: %w", err)
 		}
@@ -40,7 +40,7 @@ func loadOwnerTexts(q dbtx, owner DocumentOwner) ([]ownerText, error) {
 		}
 	}
 	cond, arg := owner.where()
-	rows, err := q.Query(`SELECT id, name, format, content, revision FROM documents
+	rows, err := q.Query(`SELECT id, name, format, content, revision FROM `+liveDocuments+`
 		WHERE `+cond+` AND format IN ('markdown', 'html') ORDER BY created_at, id`, arg)
 	if err != nil {
 		return nil, fmt.Errorf("reading documents: %w", err)
@@ -80,7 +80,7 @@ func imageUsage(q dbtx, owner DocumentOwner, img imageref.Image) ([]models.Image
 // references name it. It is worked out from the text each time. found is
 // false for an unknown id; a document that is not an image is refused.
 func (s *Store) ImageUsage(id string) (places []models.ImagePlace, found bool, err error) {
-	meta, err := scanDocumentMeta(s.db.QueryRow("SELECT "+documentMetaColumns+" FROM documents WHERE id = ?", id))
+	meta, err := scanDocumentMeta(s.db.QueryRow("SELECT "+documentMetaColumns+" FROM "+liveDocuments+" WHERE id = ?", id))
 	if err == sql.ErrNoRows {
 		return nil, false, nil
 	}
@@ -106,7 +106,7 @@ func (s *Store) DeleteDocumentReportingUse(id string) (usedIn []models.ImagePlac
 		return nil, fmt.Errorf("beginning transaction: %w", err)
 	}
 	defer tx.Rollback()
-	meta, err := scanDocumentMeta(tx.QueryRow("SELECT "+documentMetaColumns+" FROM documents WHERE id = ?", id))
+	meta, err := scanDocumentMeta(tx.QueryRow("SELECT "+documentMetaColumns+" FROM "+liveDocuments+" WHERE id = ?", id))
 	if err == sql.ErrNoRows {
 		return nil, invalidInput("document not found: %q", id)
 	}

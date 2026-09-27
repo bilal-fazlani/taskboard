@@ -45,9 +45,9 @@ func (s *Store) ListActivity(projectRef string, epics []string, before string, l
 	query := `SELECT c.id, c.ticket_id, c.from_status, c.to_status, c.note, c.created_at,
 			p.prefix, t.number, t.title, e.id, e.name, c.rowid, c.created_at || ''
 		FROM ticket_status_changes c
-		JOIN tickets t ON t.id = c.ticket_id
-		JOIN projects p ON p.id = t.project_id
-		LEFT JOIN epics e ON e.id = t.epic_id
+		JOIN ` + liveTickets + ` t ON t.id = c.ticket_id
+		JOIN ` + liveProjects + ` p ON p.id = t.project_id
+		LEFT JOIN ` + liveEpics + ` e ON e.id = t.epic_id
 		WHERE t.project_id = ?`
 	args := []any{projectID}
 

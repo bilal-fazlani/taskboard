@@ -208,8 +208,8 @@ func (s *Store) FindTicketsByCommit(sha, repo string) ([]models.CommitTicket, er
 	repo = strings.TrimSpace(repo)
 	rows, err := s.db.Query(`SELECT t.id, COALESCE(p.prefix, ''), t.number, t.title, t.status, c.sha, c.repo
 		FROM ticket_landed_commits c
-		JOIN tickets t ON t.id = c.ticket_id
-		LEFT JOIN projects p ON p.id = t.project_id
+		JOIN `+liveTickets+` t ON t.id = c.ticket_id
+		LEFT JOIN `+liveProjects+` p ON p.id = t.project_id
 		WHERE (substr(c.sha, 1, length(?1)) = ?1 OR substr(?1, 1, length(c.sha)) = c.sha)
 		  AND (?2 = '' OR c.repo = ?2)
 		ORDER BY p.prefix, t.number, c.position`, sha, repo)

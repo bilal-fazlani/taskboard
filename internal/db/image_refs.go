@@ -14,7 +14,7 @@ import (
 // fromID gets that owner's images; see getReferencedImage for the boundary
 // that sets.
 func (s *Store) ReferencedImage(fromID, ref string) (*ImageFile, error) {
-	from, err := scanDocumentMeta(s.db.QueryRow("SELECT "+documentMetaColumns+" FROM documents WHERE id = ?", fromID))
+	from, err := scanDocumentMeta(s.db.QueryRow("SELECT "+documentMetaColumns+" FROM "+liveDocuments+" WHERE id = ?", fromID))
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}

@@ -76,9 +76,9 @@ func invalidStatus(status string) error {
 
 // currentStatus reads a ticket's status inside q's transaction, so a rule
 // checked against it and the write that follows see the same value. found is
-// false when there is no such ticket.
+// false when there is no such ticket, or it is in a deleted project.
 func currentStatus(q dbtx, ticketID string) (status string, found bool, err error) {
-	err = q.QueryRow("SELECT status FROM tickets WHERE id = ?", ticketID).Scan(&status)
+	err = q.QueryRow("SELECT status FROM "+liveTickets+" WHERE id = ?", ticketID).Scan(&status)
 	if err == sql.ErrNoRows {
 		return "", false, nil
 	}
@@ -103,13 +103,14 @@ func recordStatusChange(q dbtx, ticketID, from, to, note string, at time.Time) e
 }
 
 // ListStatusChanges returns a ticket's status history, newest first. A ticket
-// with no history, or no ticket at all, gives an empty list.
+// with no history, no ticket at all, or one in a deleted project, gives an
+// empty list.
 func (s *Store) ListStatusChanges(ticketID string) ([]models.StatusChange, error) {
 	// rowid breaks ties between changes written within the same instant, in
 	// the order they were written.
 	rows, err := s.db.Query(
 		`SELECT id, ticket_id, from_status, to_status, note, created_at
-		FROM ticket_status_changes WHERE ticket_id = ?
+		FROM ticket_status_changes WHERE ticket_id = ? AND ticket_id IN (`+liveTicketIDs+`)
 		ORDER BY created_at DESC, rowid DESC`, ticketID)
 	if err != nil {
 		return nil, err

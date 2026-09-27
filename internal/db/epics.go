@@ -30,7 +30,7 @@ type epicRef struct {
 // folded in Go with strings.EqualFold, as label names are, because SQLite's
 // NOCASE and LOWER() fold ASCII only.
 func loadProjectEpics(q dbtx, projectID string) ([]epicRef, error) {
-	rows, err := q.Query("SELECT id, name FROM epics WHERE project_id = ?", projectID)
+	rows, err := q.Query("SELECT id, name FROM "+liveEpics+" WHERE project_id = ?", projectID)
 	if err != nil {
 		return nil, fmt.Errorf("loading epics: %w", err)
 	}
@@ -95,7 +95,7 @@ func resolveEpicInProject(q dbtx, projectID, ref string) (string, error) {
 	}
 
 	var otherName string
-	err = q.QueryRow("SELECT name FROM epics WHERE id = ?", trimmed).Scan(&otherName)
+	err = q.QueryRow("SELECT name FROM "+liveEpics+" WHERE id = ?", trimmed).Scan(&otherName)
 	if err == nil {
 		return "", invalidInput(`Epic "%s" belongs to another project.`, otherName)
 	}
@@ -120,7 +120,7 @@ func (s *Store) ResolveEpicRef(projectRef, ref string) (string, error) {
 	return resolveEpicInProject(s.db, projectID, ref)
 }
 
-const epicSelect = `SELECT id, project_id, name, COALESCE(description, ''), created_at, updated_at FROM epics`
+const epicSelect = `SELECT id, project_id, name, COALESCE(description, ''), created_at, updated_at FROM ` + liveEpics
 
 func scanEpic(row interface{ Scan(...any) error }) (models.Epic, error) {
 	var e models.Epic
@@ -141,7 +141,7 @@ func scanEpic(row interface{ Scan(...any) error }) (models.Epic, error) {
 // text; the groups of an epic are then compared as times here.
 func loadProgress(q dbtx, where string, args ...any) (map[string]*models.EpicProgress, error) {
 	rows, err := q.Query(`SELECT COALESCE(t.epic_id, ''), t.status, COUNT(*), MAX(t.updated_at), t.updated_at
-		FROM tickets t WHERE `+where+` GROUP BY t.epic_id, t.status`, args...)
+		FROM `+liveTickets+` t WHERE `+where+` GROUP BY t.epic_id, t.status`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("counting epic tickets: %w", err)
 	}
@@ -273,8 +273,8 @@ func (s *Store) ListEpics(projectRef string) ([]models.Epic, error) {
 // loadEpicDocumentCounts counts the documents of every epic in a project in
 // one grouped query, keyed by epic id; an epic with none has no key.
 func loadEpicDocumentCounts(q dbtx, projectID string) (map[string]int, error) {
-	rows, err := q.Query(`SELECT d.epic_id, COUNT(*) FROM documents d
-		JOIN epics e ON e.id = d.epic_id WHERE e.project_id = ? GROUP BY d.epic_id`, projectID)
+	rows, err := q.Query(`SELECT d.epic_id, COUNT(*) FROM `+liveDocuments+` d
+		JOIN `+liveEpics+` e ON e.id = d.epic_id WHERE e.project_id = ? GROUP BY d.epic_id`, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("counting epic documents: %w", err)
 	}
@@ -372,10 +372,10 @@ func (s *Store) DeleteEpic(id string) (int, error) {
 	defer tx.Rollback()
 
 	var count int
-	if err := tx.QueryRow("SELECT COUNT(*) FROM tickets WHERE epic_id = ?", id).Scan(&count); err != nil {
+	if err := tx.QueryRow("SELECT COUNT(*) FROM "+liveTickets+" WHERE epic_id = ?", id).Scan(&count); err != nil {
 		return 0, fmt.Errorf("counting tickets for epic: %w", err)
 	}
-	if err := deleteRowOrNotFound(tx, "epics", "epic", id); err != nil {
+	if err := deleteRowOrNotFound(tx, "epics", liveEpics, "epic", id); err != nil {
 		return 0, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -415,7 +415,7 @@ func resolveTicketEpic(q dbtx, projectID, raw string) (*string, error) {
 // projectID, or in any project when projectID is "". It never errors on no
 // match; an empty result means the filter matches no tickets.
 func findEpicIDs(q dbtx, projectID, ref string) ([]string, error) {
-	query := "SELECT id, name FROM epics"
+	query := "SELECT id, name FROM " + liveEpics
 	var args []any
 	if projectID != "" {
 		query += " WHERE project_id = ?"

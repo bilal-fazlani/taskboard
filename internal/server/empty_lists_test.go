@@ -56,10 +56,14 @@ func TestListProjectsHTTPEmptyIsArray(t *testing.T) {
 	r := serve(t)
 	wantEmptyJSONArrayBody(t, "GET /api/projects", r.url+"/api/projects")
 
-	if _, err := r.srv.store.CreateProject(models.CreateProjectRequest{Name: "Billing", Prefix: "BILL"}); err != nil {
+	p, err := r.srv.store.CreateProject(models.CreateProjectRequest{Name: "Billing", Prefix: "BILL"})
+	if err != nil {
 		t.Fatal(err)
 	}
-	wantEmptyJSONArrayBody(t, "GET /api/projects?status=archived", r.url+"/api/projects?status=archived")
+	if err := r.srv.store.DeleteProject(p.ID); err != nil {
+		t.Fatal(err)
+	}
+	wantEmptyJSONArrayBody(t, "GET /api/projects after deleting the only project", r.url+"/api/projects")
 }
 
 func TestListTicketDocumentsHTTPEmptyIsArray(t *testing.T) {

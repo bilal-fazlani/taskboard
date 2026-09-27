@@ -52,7 +52,7 @@ func assertPrefixRefused(t *testing.T, err error, context string, want ...string
 
 func projectPrefixes(t *testing.T, s *Store) []string {
 	t.Helper()
-	projects, err := s.ListProjects("")
+	projects, err := s.ListProjects()
 	if err != nil {
 		t.Fatal(err)
 	}

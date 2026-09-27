@@ -98,7 +98,7 @@ func TestAppendJournalEntryRejectsBadInput(t *testing.T) {
 }
 
 // Entries cannot be changed once written, whatever writes to the file; they
-// go only with their project.
+// stay when their project is deleted, gone from reads with it.
 func TestJournalEntriesAreAppendOnly(t *testing.T) {
 	s := newTestStore(t)
 	p := seedProject(t, s, "Agent Control Plane", "ACP")
@@ -125,8 +125,11 @@ func TestJournalEntriesAreAppendOnly(t *testing.T) {
 	if err := s.db.QueryRow(`SELECT COUNT(*) FROM project_journal_entries WHERE project_id = ?`, p.ID).Scan(&left); err != nil {
 		t.Fatal(err)
 	}
-	if left != 0 {
-		t.Fatalf("%d entries left after deleting their project, want 0", left)
+	if left != 1 {
+		t.Fatalf("%d entries left after deleting their project, want 1 (deleting archives)", left)
+	}
+	if _, err := s.ListJournal(p.ID, "", JournalDefaultLimit); err == nil {
+		t.Fatal("ListJournal of a deleted project: want a not-found error")
 	}
 	if page, err := s.ListJournal(other.ID, "", JournalDefaultLimit); err != nil || page.Total != 1 {
 		t.Fatalf("other project's journal: total %d, err %v, want its 1 entry kept", page.Total, err)

@@ -116,7 +116,9 @@ func TestDeletingEpicRowClearsItFromTickets(t *testing.T) {
 	}
 }
 
-func TestDeletingProjectDeletesItsEpics(t *testing.T) {
+// Deleting a project hides its epics and keeps their rows; the other
+// project's epics are untouched.
+func TestDeletingProjectHidesItsEpics(t *testing.T) {
 	s := newTestStore(t)
 	doomed := seedProject(t, s, "Billing", "BILL")
 	kept := seedProject(t, s, "Search", "SRCH")
@@ -129,11 +131,14 @@ func TestDeletingProjectDeletesItsEpics(t *testing.T) {
 		t.Fatalf("DeleteProject: %v", err)
 	}
 
-	if n := countRows(t, s, `SELECT COUNT(*) FROM epics WHERE project_id = ?`, doomed.ID); n != 0 {
-		t.Fatalf("epics of the deleted project = %d, want 0", n)
+	if n := countRows(t, s, `SELECT COUNT(*) FROM epics WHERE project_id = ?`, doomed.ID); n != 2 {
+		t.Fatalf("epic rows of the deleted project = %d, want 2 (deleting archives)", n)
 	}
-	if n := countRows(t, s, `SELECT COUNT(*) FROM epics WHERE project_id = ?`, kept.ID); n != 1 {
-		t.Fatalf("epics of the other project = %d, want 1", n)
+	if e, err := s.GetEpic("e1"); err != nil || e != nil {
+		t.Fatalf("GetEpic of a deleted project's epic = %+v, %v; want nil, nil", e, err)
+	}
+	if epics, err := s.ListEpics(kept.ID); err != nil || len(epics) != 1 {
+		t.Fatalf("epics of the other project = %+v, %v; want its 1 epic", epics, err)
 	}
 }
 

@@ -32,7 +32,7 @@ func TestProjectToolsRejectPrefixTakenIgnoringCase(t *testing.T) {
 		}
 	}
 
-	projects, err := s.store.ListProjects("")
+	projects, err := s.store.ListProjects()
 	if err != nil {
 		t.Fatal(err)
 	}

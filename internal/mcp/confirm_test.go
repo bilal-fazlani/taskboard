@@ -253,8 +253,8 @@ func TestProjectToolsAnswerShortByDefault(t *testing.T) {
 	wantKeys(t, "update_project", updated, "id", "prefix", "name", "status", "changed", "updatedAt")
 	wantChanged(t, "update_project", updated, "agentInstructions")
 
-	full := callJSON(t, s, "update_project", map[string]any{"id": "BILL", "status": "archived", "full": true})
-	if full["agentInstructions"] != "New rules." || full["description"] != "Long." || full["status"] != "archived" {
+	full := callJSON(t, s, "update_project", map[string]any{"id": "BILL", "status": "active", "full": true})
+	if full["agentInstructions"] != "New rules." || full["description"] != "Long." || full["status"] != "active" {
 		t.Fatalf("update_project full answer = %v", full)
 	}
 	full = callJSON(t, s, "create_project", map[string]any{"name": "Support", "prefix": "SUP", "agentInstructions": "Rules.", "full": true})

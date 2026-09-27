@@ -196,13 +196,7 @@ func (s *MCPServer) handleToolCall(req jsonrpcRequest) *jsonrpcResponse {
 func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 	switch name {
 	case "list_projects":
-		var a struct {
-			Status string `json:"status"`
-		}
-		if err := decodeArgs(args, &a); err != nil {
-			return nil, err
-		}
-		projects, err := s.store.ListProjects(a.Status)
+		projects, err := s.store.ListProjects()
 		if err != nil {
 			return nil, err
 		}
@@ -1066,16 +1060,11 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 		// --- Projects (top-level grouping) ---
 		{
 			Name: "list_projects",
-			Description: "List all projects with optional status filter. Projects are the top-level grouping — use them like epics or initiatives to organize related work. " +
+			Description: "List all projects. Projects are the top-level grouping — use them like epics or initiatives to organize related work. " +
 				"The list leaves out each project's agent instructions, and shortens each description to its first paragraph, " +
 				fmt.Sprintf("capped at %d characters, with descriptionTruncated saying whether it was cut; ", projectDescriptionPreviewLimit) +
 				"get_project returns the full description and the agent instructions.",
-			InputSchema: jsonSchema{
-				Type: "object",
-				Properties: map[string]schemaProp{
-					"status": {Type: "string", Description: "Filter by status", Enum: []string{"active", "archived"}},
-				},
-			},
+			InputSchema: jsonSchema{Type: "object", Properties: map[string]schemaProp{}},
 		},
 		{
 			Name: "get_project",
@@ -1122,14 +1111,14 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 					"agentInstructions": {Type: "string", Description: projectAgentInstructionsHelp + " Leave it out to keep them as they are; an empty string clears them."},
 					"icon":              {Type: "string", Description: "Emoji icon"},
 					"color":             {Type: "string", Description: "Hex color"},
-					"status":            {Type: "string", Description: "Status", Enum: []string{"active", "archived"}},
+					"status":            {Type: "string", Description: "Status: a project is always active; delete_project is the only way to remove one", Enum: []string{db.ProjectActive}},
 					"full":              fullProp(projectWhole),
 				}),
 			},
 		},
 		{
 			Name:        "delete_project",
-			Description: "Delete a project and all its tickets",
+			Description: db.DeleteProjectHelp,
 			InputSchema: jsonSchema{
 				Type:       "object",
 				Properties: idOrKeyProps("Project ID or prefix (case-insensitive)."),

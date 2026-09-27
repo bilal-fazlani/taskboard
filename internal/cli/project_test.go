@@ -110,6 +110,64 @@ func TestProjectCreateTakesAgentInstructions(t *testing.T) {
 	}
 }
 
+// project list shows no status: a deleted project is gone, so every listed
+// project is active. project delete says what it does, archives rather than
+// removes, and leaves the prefix taken.
+func TestProjectDeleteArchivesAndListHasNoStatus(t *testing.T) {
+	setLiveBuild(t, false)
+	sandboxHome(t)
+	path := filepath.Join(t.TempDir(), "dev.db")
+
+	help, err := runCLI(t, "project", "delete", "--help")
+	if err != nil {
+		t.Fatalf("project delete --help: %v", err)
+	}
+	if !strings.Contains(help, db.DeleteProjectHelp) {
+		t.Fatalf("project delete --help = %q, want it to say %q", help, db.DeleteProjectHelp)
+	}
+
+	for _, prefix := range []string{"GONE", "KEEP"} {
+		if _, err := runCLI(t, "--db", path, "project", "create", prefix, "--prefix", prefix); err != nil {
+			t.Fatalf("project create %s: %v", prefix, err)
+		}
+	}
+	listed, err := runCLI(t, "--db", path, "project", "list")
+	if err != nil {
+		t.Fatalf("project list: %v", err)
+	}
+	if strings.Contains(listed, "active") || !strings.Contains(listed, "[GONE]") {
+		t.Fatalf("project list = %q, want both projects and no status column", listed)
+	}
+
+	if _, err := runCLI(t, "--db", path, "project", "delete", "GONE"); err != nil {
+		t.Fatalf("project delete GONE: %v", err)
+	}
+	if _, err := runCLI(t, "--db", path, "project", "delete", "GONE"); err == nil {
+		t.Fatal("deleting GONE twice succeeded, want not found")
+	}
+	listed, err = runCLI(t, "--db", path, "project", "list")
+	if err != nil {
+		t.Fatalf("project list: %v", err)
+	}
+	if strings.Contains(listed, "GONE") || !strings.Contains(listed, "[KEEP]") {
+		t.Fatalf("project list after delete = %q, want KEEP only", listed)
+	}
+	_, err = runCLI(t, "--db", path, "project", "create", "Again", "--prefix", "GONE")
+	if err == nil || !strings.Contains(err.Error(), "already used by a deleted project") {
+		t.Fatalf("project create with a deleted project's prefix: err = %v", err)
+	}
+
+	database, err := db.OpenAt(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	var status string
+	if err := database.QueryRow("SELECT status FROM projects WHERE prefix = 'GONE'").Scan(&status); err != nil || status != db.ProjectArchived {
+		t.Fatalf("GONE's row after delete: status %q, %v; want it kept, archived", status, err)
+	}
+}
+
 // project create stores --description, and leaves it empty without the flag.
 func TestProjectCreateTakesDescription(t *testing.T) {
 	setLiveBuild(t, false)
