@@ -421,6 +421,92 @@ func TestServeAnswersOtherCallsWhileOneWaits(t *testing.T) {
 	}
 }
 
+// A client that gives up on a wait cancels it with notifications/cancelled:
+// the wait stops, so the answer that comes later is never sent, and neither
+// that notification nor any other gets a response.
+func TestServeStopsACancelledWaitAndAnswersNoNotification(t *testing.T) {
+	f := newAgentServer(t)
+	agent := f.identify(t, "3da2c294", "implementer")
+	f.claim(t, agent)
+	id := callJSON(t, f.s, "request_user_input", map[string]any{"ticket": "ACP-1", "agentId": agent, "type": "question",
+		"prompt": "Which port?"})["id"].(string)
+
+	inR, inW := io.Pipe()
+	outR, outW := io.Pipe()
+	done := make(chan error, 1)
+	go func() {
+		done <- f.s.serve(inR, outW)
+		outW.Close()
+	}()
+	lines := make(chan map[string]any, 10)
+	go func() {
+		sc := bufio.NewScanner(outR)
+		for sc.Scan() {
+			var resp map[string]any
+			json.Unmarshal(sc.Bytes(), &resp)
+			lines <- resp
+		}
+		close(lines)
+	}()
+	send := func(msg map[string]any) {
+		data, _ := json.Marshal(msg)
+		if _, err := inW.Write(append(data, '\n')); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	send(map[string]any{"jsonrpc": "2.0", "id": 7, "method": "tools/call",
+		"params": map[string]any{"name": "await_answer", "arguments": map[string]any{"request": id, "agentId": agent, "timeoutSeconds": 600}}})
+	// A cancellation naming another request, one with the id as a string,
+	// and one with none change nothing.
+	send(map[string]any{"jsonrpc": "2.0", "method": "notifications/cancelled", "params": map[string]any{"requestId": 99}})
+	send(map[string]any{"jsonrpc": "2.0", "method": "notifications/cancelled", "params": map[string]any{"requestId": "7"}})
+	send(map[string]any{"jsonrpc": "2.0", "method": "notifications/cancelled", "params": map[string]any{}})
+	send(map[string]any{"jsonrpc": "2.0", "method": "notifications/cancelled", "params": map[string]any{"requestId": 7, "reason": "timed out"}})
+	send(map[string]any{"jsonrpc": "2.0", "method": "notifications/initialized"})
+	send(map[string]any{"jsonrpc": "2.0", "method": "notifications/unknown"})
+
+	// The answer comes after the cancellation: a wait still running would
+	// send it within a poll or two.
+	time.Sleep(200 * time.Millisecond)
+	if _, err := f.secondStore(t).AnswerRequest(id, "3014", "Bilal"); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(1500 * time.Millisecond)
+	send(map[string]any{"jsonrpc": "2.0", "id": 8, "method": "tools/call", "params": map[string]any{"name": "list_projects"}})
+	select {
+	case resp := <-lines:
+		if resp["id"] != float64(8) {
+			t.Fatalf("first line written = %v, want list_projects' answer and nothing for the cancelled wait or the notifications", resp)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("no answer to list_projects within 10s")
+	}
+
+	inW.Close()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("serve: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("serve still running 5s after its input closed")
+	}
+	for resp := range lines {
+		t.Errorf("written after list_projects' answer: %v", resp)
+	}
+}
+
+// A number id and a string id never name the same request.
+func TestRequestKeyTellsNumbersFromStrings(t *testing.T) {
+	if requestKey(float64(7)) == requestKey("7") {
+		t.Fatal("7 and \"7\" share a key")
+	}
+	if requestKey(float64(7)) != requestKey(float64(7)) {
+		t.Fatal("the same id has two keys")
+	}
+}
+
 func mustString(t *testing.T, v any) string {
 	t.Helper()
 	data, err := json.Marshal(v)

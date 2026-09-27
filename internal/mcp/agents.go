@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -89,7 +90,7 @@ var agentToolDefs = [4]toolDef{
 			Properties: map[string]schemaProp{
 				"vendor":          {Type: "string", Description: "The tool the session runs in, e.g. claude_code or codex."},
 				"vendorSessionId": {Type: "string", Description: "The session's ID in that tool."},
-				"resumeCommand":   {Type: "string", Description: "The command that resumes the session, e.g. claude --resume <id>."},
+				"resumeCommand":   {Type: "string", Description: "The command that resumes the session, e.g. claude --resume <id>; the ticket page's session chip copies it, so pass it when your tool has one."},
 				"machine":         {Type: "string", Description: "The machine the session runs on; defaults to this server's host name."},
 				"webUrl":          {Type: "string", Description: "The session's page on the vendor's site, if it has one."},
 				"role":            {Type: "string", Description: "What you do in the session, e.g. orchestrator, implementer or reviewer."},
@@ -157,7 +158,7 @@ var agentToolDefs = [4]toolDef{
 
 // callAgentTool handles the agent protocol's tools. ok is false for any
 // other name.
-func (s *MCPServer) callAgentTool(name string, args json.RawMessage) (result any, ok bool, err error) {
+func (s *MCPServer) callAgentTool(ctx context.Context, name string, args json.RawMessage) (result any, ok bool, err error) {
 	switch name {
 	case "identify_agent":
 		var a identifyArgs
@@ -185,7 +186,7 @@ func (s *MCPServer) callAgentTool(name string, args json.RawMessage) (result any
 		if err := decodeArgs(args, &a); err != nil {
 			return nil, true, err
 		}
-		result, err := s.awaitAnswer(a)
+		result, err := s.awaitAnswer(ctx, a)
 		return result, true, err
 	}
 	return nil, false, nil
@@ -230,7 +231,7 @@ func (s *MCPServer) requestUserInput(a requestInputArgs) (map[string]any, error)
 // poll. The caller must be of the asker's session, since an agent acts only
 // on the answer its own session asked for; a resumed chat's new agent
 // collects its predecessor's.
-func (s *MCPServer) awaitAnswer(a awaitArgs) (awaitAnswerResult, error) {
+func (s *MCPServer) awaitAnswer(ctx context.Context, a awaitArgs) (awaitAnswerResult, error) {
 	timeout, err := awaitTimeout(a.TimeoutSeconds)
 	if err != nil {
 		return awaitAnswerResult{}, err
@@ -252,7 +253,7 @@ func (s *MCPServer) awaitAnswer(a awaitArgs) (awaitAnswerResult, error) {
 	if err := s.sameSession(strings.TrimSpace(a.AgentID), r); err != nil {
 		return awaitAnswerResult{}, err
 	}
-	r, err = s.store.AwaitAnswer(s.ctx, requestID, timeout)
+	r, err = s.store.AwaitAnswer(ctx, requestID, timeout)
 	if err != nil {
 		return awaitAnswerResult{}, err
 	}

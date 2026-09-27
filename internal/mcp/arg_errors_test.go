@@ -256,7 +256,7 @@ func TestToolCallsWithNoArgumentsStillSucceed(t *testing.T) {
 	for _, tool := range []string{"list_projects", "list_tickets", "get_board", "get_now"} {
 		t.Run(tool, func(t *testing.T) {
 			params := mustJSON(t, map[string]any{"name": tool})
-			resp := s.handleToolCall(jsonrpcRequest{JSONRPC: "2.0", ID: 1, Method: "tools/call", Params: params})
+			resp := s.handleRequest(jsonrpcRequest{JSONRPC: "2.0", ID: 1, Method: "tools/call", Params: params})
 			if resp.Error != nil {
 				t.Fatalf("%s: unexpected JSON-RPC error: %+v", tool, resp.Error)
 			}

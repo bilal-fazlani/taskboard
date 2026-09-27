@@ -99,8 +99,10 @@ func (s *MCPServer) Run() error {
 // a long wait (await_answer), which runs on its own: subagents share their
 // parent's connection, so one agent waiting on the person must not hold up
 // the others' calls. Answers carry their request's id, so the client matches
-// them whatever the order. When in ends, running waits are cancelled and
-// serve returns once they have answered.
+// them whatever the order. A client that gives up on a wait sends
+// notifications/cancelled with its id: the wait stops and, as MCP asks, is
+// not answered. When in ends, running waits are cancelled and serve returns
+// once they have stopped.
 func (s *MCPServer) serve(in io.Reader, out io.Writer) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	s.ctx = ctx
@@ -122,6 +124,9 @@ func (s *MCPServer) serve(in io.Reader, out io.Writer) error {
 		defer mu.Unlock()
 		out.Write(append(data, '\n'))
 	}
+	// The running waits, by request id, so a cancellation can stop one.
+	var waitsMu sync.Mutex
+	waits := map[string]context.CancelFunc{}
 
 	reader := bufio.NewReader(in)
 	for {
@@ -137,16 +142,48 @@ func (s *MCPServer) serve(in io.Reader, out io.Writer) error {
 		if err := json.Unmarshal(line, &req); err != nil {
 			continue
 		}
-		if isLongWait(req) {
+		if req.Method == "notifications/cancelled" {
+			var params struct {
+				RequestID any `json:"requestId"`
+			}
+			if json.Unmarshal(req.Params, &params) == nil && params.RequestID != nil {
+				waitsMu.Lock()
+				if stop, ok := waits[requestKey(params.RequestID)]; ok {
+					stop()
+				}
+				waitsMu.Unlock()
+			}
+			continue
+		}
+		if isLongWait(req) && req.ID != nil {
+			key := requestKey(req.ID)
+			waitCtx, stop := context.WithCancel(ctx)
+			waitsMu.Lock()
+			waits[key] = stop
+			waitsMu.Unlock()
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				write(s.handleRequest(req))
+				resp := s.handle(waitCtx, req)
+				waitsMu.Lock()
+				delete(waits, key)
+				waitsMu.Unlock()
+				// A cancelled wait gets no answer: its client has moved on.
+				if waitCtx.Err() == nil {
+					write(resp)
+				}
+				stop()
 			}()
 			continue
 		}
 		write(s.handleRequest(req))
 	}
+}
+
+// requestKey is a JSON-RPC id as a map key. An id is a number or a string,
+// and the two never match: 1 and "1" are different requests.
+func requestKey(id any) string {
+	return fmt.Sprintf("%T:%v", id, id)
 }
 
 // isLongWait reports whether req is a call to a tool that may wait a long
@@ -162,6 +199,15 @@ func isLongWait(req jsonrpcRequest) bool {
 }
 
 func (s *MCPServer) handleRequest(req jsonrpcRequest) *jsonrpcResponse {
+	return s.handle(s.ctx, req)
+}
+
+// handle answers one request, with ctx ending any wait it makes. A
+// notification, which has no id, is never answered, whatever its method.
+func (s *MCPServer) handle(ctx context.Context, req jsonrpcRequest) *jsonrpcResponse {
+	if req.ID == nil {
+		return nil
+	}
 	switch req.Method {
 	case "initialize":
 		return &jsonrpcResponse{
@@ -179,9 +225,6 @@ func (s *MCPServer) handleRequest(req jsonrpcRequest) *jsonrpcResponse {
 			},
 		}
 
-	case "notifications/initialized":
-		return nil
-
 	case "tools/list":
 		return &jsonrpcResponse{
 			JSONRPC: "2.0",
@@ -192,7 +235,7 @@ func (s *MCPServer) handleRequest(req jsonrpcRequest) *jsonrpcResponse {
 		}
 
 	case "tools/call":
-		return s.handleToolCall(req)
+		return s.handleToolCall(ctx, req)
 
 	default:
 		return &jsonrpcResponse{
@@ -203,7 +246,7 @@ func (s *MCPServer) handleRequest(req jsonrpcRequest) *jsonrpcResponse {
 	}
 }
 
-func (s *MCPServer) handleToolCall(req jsonrpcRequest) *jsonrpcResponse {
+func (s *MCPServer) handleToolCall(ctx context.Context, req jsonrpcRequest) *jsonrpcResponse {
 	var params struct {
 		Name      string          `json:"name"`
 		Arguments json.RawMessage `json:"arguments"`
@@ -214,7 +257,7 @@ func (s *MCPServer) handleToolCall(req jsonrpcRequest) *jsonrpcResponse {
 
 	// Read before the call, since a delete leaves nothing to read after it.
 	ticketID := s.ticketOfCall(params.Name, params.Arguments)
-	result, err := s.callTool(params.Name, params.Arguments)
+	result, err := s.callToolCtx(ctx, params.Name, params.Arguments)
 	if err != nil {
 		return &jsonrpcResponse{
 			JSONRPC: "2.0",
@@ -244,6 +287,11 @@ func (s *MCPServer) handleToolCall(req jsonrpcRequest) *jsonrpcResponse {
 }
 
 func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
+	return s.callToolCtx(s.ctx, name, args)
+}
+
+// callToolCtx runs one tool, with ctx ending any wait it makes.
+func (s *MCPServer) callToolCtx(ctx context.Context, name string, args json.RawMessage) (any, error) {
 	switch name {
 	case "list_projects":
 		projects, err := s.store.ListProjects()
@@ -574,7 +622,7 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 		if err != nil {
 			return nil, err
 		}
-		// Until agents have identities (ACP-4), "agent" means "came through MCP"; the rule should then key off the actor.
+		// update_ticket takes no agentId, so a call through MCP stands in for an agent: the note rule is switched on here.
 		t, err := s.store.UpdateTicket(ticketID, a.UpdateTicketRequest, db.RequireNoteLeavingReview())
 		if err != nil {
 			return nil, err
@@ -601,7 +649,7 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 		if err != nil {
 			return nil, err
 		}
-		// Until agents have identities (ACP-4), "agent" means "came through MCP"; the rule should then key off the actor.
+		// move_ticket takes no agentId, so a call through MCP stands in for an agent: the note rule is switched on here.
 		t, err := s.store.MoveTicket(ticketID, a.MoveTicketRequest, db.RequireNoteLeavingReview())
 		if err != nil {
 			return nil, err
@@ -756,7 +804,7 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 		if result, ok, err := s.callEntryTool(name, args); ok {
 			return result, err
 		}
-		if result, ok, err := s.callAgentTool(name, args); ok {
+		if result, ok, err := s.callAgentTool(ctx, name, args); ok {
 			return result, err
 		}
 		if result, ok, err := s.callDocumentTool(name, args); ok {
