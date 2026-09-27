@@ -13,8 +13,7 @@ import (
 
 // entriesServer is an MCP server over a throwaway database holding a project
 // (ACP) with an epic (Write-back) and a ticket (ACP-1) in it, and an agent in
-// a session to write entries. Nothing creates agents over MCP yet, so the
-// agent is inserted directly.
+// a session to write entries, created through the store.
 type entriesServer struct {
 	s       *MCPServer
 	project *models.Project
@@ -30,17 +29,15 @@ func newEntriesServer(t *testing.T) entriesServer {
 		t.Fatalf("opening test database: %v", err)
 	}
 	t.Cleanup(func() { database.Close() })
-	for _, q := range []string{
-		`INSERT INTO sessions (id, vendor, vendor_session_id, machine, resume_command, created_at)
-			VALUES ('s1', 'claude_code', '3da2c294', 'mac', 'claude --resume 3da2c294', CURRENT_TIMESTAMP)`,
-		`INSERT INTO agents (id, session_id, role, model, provider, created_at, last_seen_at)
-			VALUES ('a1', 's1', 'implementer', 'opus', 'anthropic', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
-	} {
-		if _, err := database.Exec(q); err != nil {
-			t.Fatal(err)
-		}
+	store := db.NewStore(database)
+	// Through the store, so its times are in the store's format: every read
+	// of an agent parses them.
+	agent, err := store.IdentifyAgent(models.IdentifyAgentRequest{Vendor: "claude_code", VendorSessionID: "3da2c294",
+		Machine: "mac", ResumeCommand: "claude --resume 3da2c294", Role: "implementer", Model: "opus", Provider: "anthropic"})
+	if err != nil {
+		t.Fatal(err)
 	}
-	f := entriesServer{s: NewServer(db.NewStore(database)), agent: "a1"}
+	f := entriesServer{s: NewServer(store), agent: agent.ID}
 	if f.project, err = f.s.store.CreateProject(models.CreateProjectRequest{Name: "Agent Control Plane", Prefix: "ACP"}); err != nil {
 		t.Fatal(err)
 	}
