@@ -4,7 +4,8 @@ import { act, cleanup, fireEvent, render, screen, within } from "@testing-librar
 import type { Project } from "../api/client";
 
 // The Projects page with the API mocked: the card marker for agent
-// instructions, and the form's Description / Agent instructions tabs.
+// instructions, the trash button and its confirm dialog, and the form's
+// Description / Agent instructions tabs.
 
 const mockApi = vi.hoisted(() => ({
   projects: {
@@ -194,6 +195,173 @@ describe("project cards", () => {
     await renderPage();
     // Neither fixture in this file's default project() sets an icon.
     expect(screen.queryByTestId("project-icon")).toBeNull();
+  });
+});
+
+describe("a project card's trash button", () => {
+  function trash(name: string) {
+    return screen.getByRole("button", { name: `Delete project ${name}` });
+  }
+
+  it("is named for its project and titled Delete project", async () => {
+    await renderPage();
+    expect(trash("ACP project").getAttribute("title")).toBe("Delete project");
+    expect(trash("HOME project").getAttribute("title")).toBe("Delete project");
+    // Its icon adds nothing to the name.
+    expect(trash("ACP project").querySelector("svg")!.getAttribute("aria-hidden")).toBe("true");
+  });
+
+  it("rests faint but visible, and is reachable by Tab", async () => {
+    await renderPage();
+    const button = trash("ACP project");
+    expect(button.tagName).toBe("BUTTON");
+    expect(button.getAttribute("type")).toBe("button");
+    expect(button.tabIndex).toBe(0);
+    expect((button as HTMLButtonElement).disabled).toBe(false);
+    expect(button.className).toContain("opacity-45");
+    expect(button.className).not.toContain("opacity-0");
+    button.focus();
+    expect(document.activeElement).toBe(button);
+  });
+
+  it("turns red with a focus ring on hover or keyboard focus", async () => {
+    await renderPage();
+    const classes = trash("ACP project").className.split(/\s+/);
+    for (const state of ["hover", "focus-visible"]) {
+      expect(classes).toContain(`${state}:text-red-400`);
+      expect(classes).toContain(`${state}:opacity-100`);
+      expect(classes).toContain(`${state}:ring-2`);
+      expect(classes).toContain(`${state}:ring-blue-500`);
+    }
+  });
+});
+
+describe("deleting a project", () => {
+  const trash = (name: string) => screen.getByRole("button", { name: `Delete project ${name}` });
+
+  async function openConfirm(name = "ACP project") {
+    await renderPage();
+    fireEvent.click(trash(name));
+    return screen.getByRole("alertdialog");
+  }
+
+  it("asks first, naming the project and what goes with it", async () => {
+    const dialog = await openConfirm();
+    expect(mockApi.projects.delete).not.toHaveBeenCalled();
+    // The card's own click, which opens the edit form, is not triggered.
+    expect(screen.queryByRole("form", { name: "Edit Project" })).toBeNull();
+    expect(within(dialog).getByRole("heading").textContent).toBe("Delete ACP project?");
+    expect(dialog.getAttribute("aria-modal")).toBe("true");
+    const labelledBy = document.getElementById(dialog.getAttribute("aria-labelledby")!)!;
+    expect(labelledBy.textContent).toBe("Delete ACP project?");
+    const describedBy = document.getElementById(dialog.getAttribute("aria-describedby")!)!;
+    expect(describedBy.textContent).toBe(
+      "ACP and all its tickets, epics and documents disappear from the board, and from the API, MCP and CLI. This can't be undone.",
+    );
+  });
+
+  it("starts with focus on Cancel", async () => {
+    await openConfirm();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Cancel" }));
+  });
+
+  it("cancels on Escape without deleting, and gives focus back to the trash button", async () => {
+    await openConfirm();
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(mockApi.projects.delete).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(trash("ACP project"));
+  });
+
+  it("cancels on a click beside the box, or on Cancel", async () => {
+    const dialog = await openConfirm();
+    // The backdrop is the dialog's sibling, behind it.
+    fireEvent.click(dialog.previousElementSibling!);
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+
+    fireEvent.click(trash("ACP project"));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(mockApi.projects.delete).not.toHaveBeenCalled();
+    // Neither opened the edit form behind it.
+    expect(screen.queryByRole("form", { name: "Edit Project" })).toBeNull();
+  });
+
+  it("deletes on confirm, busy meanwhile, then closes and reloads the list", async () => {
+    let finish: () => void = () => {};
+    mockApi.projects.delete.mockReturnValue(new Promise<void>((r) => (finish = r)));
+    const dialog = await openConfirm("HOME project");
+    expect(mockApi.projects.list).toHaveBeenCalledTimes(1);
+
+    const del = within(dialog).getByRole("button", { name: "Delete" }) as HTMLButtonElement;
+    await act(async () => {
+      fireEvent.click(del);
+    });
+    expect(mockApi.projects.delete).toHaveBeenCalledWith(WITHOUT.id);
+    expect(del.disabled).toBe(true);
+    expect(dialog.getAttribute("aria-busy")).toBe("true");
+    // A second click while busy sends nothing more.
+    fireEvent.click(del);
+    expect(mockApi.projects.delete).toHaveBeenCalledTimes(1);
+
+    mockApi.projects.list.mockResolvedValue([WITH]);
+    await act(async () => finish());
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(mockApi.projects.list).toHaveBeenCalledTimes(2);
+    expect(screen.queryByText("HOME project")).toBeNull();
+    expect(screen.getByText("ACP project")).toBeTruthy();
+  });
+
+  it("stays open with the server's reason when the delete fails", async () => {
+    mockApi.projects.delete.mockRejectedValueOnce(new Error('API error 500: {"error":"database is locked"}'));
+    const dialog = await openConfirm();
+    const del = within(dialog).getByRole("button", { name: "Delete" }) as HTMLButtonElement;
+    await act(async () => {
+      fireEvent.click(del);
+    });
+    expect(screen.getByRole("alertdialog")).toBe(dialog);
+    const alert = within(dialog).getByRole("alert");
+    expect(alert.textContent).toBe("database is locked");
+    expect(alert.className).toContain("text-red-400");
+    expect(del.disabled).toBe(false);
+    expect(dialog.getAttribute("aria-busy")).toBeNull();
+    expect(mockApi.projects.list).toHaveBeenCalledTimes(1);
+
+    // Trying again can still succeed, and then the box closes.
+    mockApi.projects.delete.mockResolvedValueOnce(undefined);
+    await act(async () => {
+      fireEvent.click(del);
+    });
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(mockApi.projects.list).toHaveBeenCalledTimes(2);
+  });
+
+  it("says the project was not deleted when the server gives no reason", async () => {
+    mockApi.projects.delete.mockRejectedValueOnce(new Error("Failed to fetch"));
+    const dialog = await openConfirm();
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+    });
+    expect(within(dialog).getByRole("alert").textContent).toBe("The project was not deleted.");
+  });
+});
+
+describe("a project's status", () => {
+  it("is not shown on its card", async () => {
+    await renderPage();
+    expect(screen.queryByText(/^active$/i)).toBeNull();
+  });
+
+  it("has no select on the edit form, and a save sends none", async () => {
+    await renderPage();
+    const form = await openEdit("ACP project");
+    expect(within(form).queryByRole("combobox")).toBeNull();
+    expect(within(form).queryByText("Status")).toBeNull();
+    expect(within(form).queryByText("Archived")).toBeNull();
+    await act(async () => {
+      fireEvent.click(within(form).getByRole("button", { name: "Save Changes" }));
+    });
+    expect("status" in mockApi.projects.update.mock.calls[0][1]).toBe(false);
   });
 });
 

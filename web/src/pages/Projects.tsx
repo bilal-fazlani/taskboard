@@ -5,6 +5,7 @@ import { api, type Project } from "../api/client";
 import { useLiveRefresh } from "../hooks/useLiveRefresh";
 import ProjectTextFields from "../components/ProjectTextFields";
 import ProjectJournal from "../components/ProjectJournal";
+import DeleteProjectConfirm from "../components/DeleteProjectConfirm";
 
 const DEFAULT_COLORS = [
   "#3b82f6",
@@ -62,7 +63,6 @@ function ProjectModal({
   }, [projectId]);
   const [icon, setIcon] = useState(project?.icon || "📋");
   const [color, setColor] = useState(project?.color || DEFAULT_COLORS[0]);
-  const [status, setStatus] = useState(project?.status || "active");
 
   // The store trims instructions, so a change of whitespace alone is no change.
   const instructionsChanged =
@@ -78,7 +78,6 @@ function ProjectModal({
       ...(instructionsChanged ? { agentInstructions } : {}),
       icon,
       color,
-      status,
     });
   };
 
@@ -168,22 +167,6 @@ function ProjectModal({
                 }
                 instructionsState={instructionsState}
               />
-
-              {isEdit && (
-                <div>
-                  <label className="block text-xs font-medium text-slate-400 mb-1.5">
-                    Status
-                  </label>
-                  <select
-                    value={status}
-                    onChange={(e) => setStatus(e.target.value)}
-                    className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500 capitalize"
-                  >
-                    <option value="active">Active</option>
-                    <option value="archived">Archived</option>
-                  </select>
-                </div>
-              )}
 
               <div>
                 <label className="block text-xs font-medium text-slate-400 mb-1.5">
@@ -342,8 +325,18 @@ export default function Projects() {
     load();
   };
 
-  const handleDelete = async (id: string) => {
-    await api.projects.delete(id);
+  // The project the confirm dialog asks about, and the trash button that
+  // opened it, which gets focus back when the dialog is cancelled.
+  const [deleting, setDeleting] = useState<Project | null>(null);
+  const deleteTrigger = useRef<HTMLButtonElement | null>(null);
+  const cancelDelete = () => {
+    setDeleting(null);
+    deleteTrigger.current?.focus();
+    deleteTrigger.current = null;
+  };
+  const handleDeleted = () => {
+    setDeleting(null);
+    deleteTrigger.current = null;
     load();
   };
 
@@ -376,7 +369,7 @@ export default function Projects() {
               <div
                 key={project.id}
                 onClick={() => setEditProject(project)}
-                className="group relative bg-slate-900 border border-slate-700/50 hover:border-slate-600 rounded-xl p-5 transition-colors cursor-pointer"
+                className="relative bg-slate-900 border border-slate-700/50 hover:border-slate-600 rounded-xl p-5 transition-colors cursor-pointer"
               >
                 <div
                   className="absolute inset-x-0 top-0 h-1 rounded-t-xl"
@@ -388,14 +381,22 @@ export default function Projects() {
                       {project.icon}
                     </span>
                   )}
+                  {/* Faint at rest but always there and in the tab order, so
+                      a keyboard can reach it; red, with a ring, under the
+                      pointer or on keyboard focus. It only asks: the confirm
+                      dialog deletes. */}
                   <button
+                    type="button"
+                    aria-label={`Delete project ${project.name}`}
+                    title="Delete project"
                     onClick={(e) => {
                       e.stopPropagation();
-                      handleDelete(project.id);
+                      deleteTrigger.current = e.currentTarget;
+                      setDeleting(project);
                     }}
-                    className="opacity-0 group-hover:opacity-100 text-slate-600 hover:text-red-400 transition-all"
+                    className="inline-flex rounded p-0.5 text-slate-600 opacity-45 transition-all hover:text-red-400 hover:opacity-100 hover:ring-2 hover:ring-blue-500 focus-visible:text-red-400 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
                   >
-                    <Trash2 className="w-4 h-4" />
+                    <Trash2 aria-hidden="true" className="w-4 h-4" />
                   </button>
                 </div>
                 <h3 className="mt-3 text-sm font-semibold text-white">
@@ -417,9 +418,6 @@ export default function Projects() {
                     className="inline-block w-1.5 h-1.5 shrink-0 rounded-full"
                     style={{ backgroundColor: project.color }}
                   />
-                  <span className="text-xs text-slate-500 capitalize">
-                    {project.status}
-                  </span>
                   {project.hasAgentInstructions && (
                     <span
                       data-testid="project-agent-instructions"
@@ -450,6 +448,10 @@ export default function Projects() {
           onClose={() => setEditProject(null)}
           onSave={handleUpdate}
         />
+      )}
+
+      {deleting && (
+        <DeleteProjectConfirm project={deleting} onCancel={cancelDelete} onDeleted={handleDeleted} />
       )}
     </div>
   );
