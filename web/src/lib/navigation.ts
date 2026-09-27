@@ -27,7 +27,7 @@ export const nowItem: NavItem = { to: "/now", icon: Radio, label: "Now" };
 export const VIEWS_GROUP_LABEL = "Views";
 
 export const viewItems: NavItem[] = [
-  { to: "/", icon: Workflow, label: "Dependencies" },
+  { to: "/dependencies", icon: Workflow, label: "Dependencies" },
   { to: "/kanban", icon: LayoutDashboard, label: "Kanban" },
   { to: "/table", icon: Table, label: "Table" },
   // Activity is the project's history rather than its tickets, but it

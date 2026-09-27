@@ -95,7 +95,7 @@ describe("progressText", () => {
 describe("epicLink", () => {
   it("names only the project and the epic", () => {
     expect(epicLink("/kanban", "ACP", "M1:Graph")).toBe("/kanban?project=ACP&epic=M1%3AGraph");
-    expect(epicLink("/", "ACP", "none")).toBe("/?project=ACP&epic=none");
+    expect(epicLink("/dependencies", "ACP", "none")).toBe("/dependencies?project=ACP&epic=none");
     expect(epicLink("/table", "ACP", "a b&c")).toBe("/table?project=ACP&epic=a+b%26c");
   });
 });

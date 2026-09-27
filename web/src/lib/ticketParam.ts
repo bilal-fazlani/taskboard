@@ -3,8 +3,10 @@
 // Opening the editor on any view adds `?ticket=<KEY>` to that view's URL, and
 // closing it removes only that parameter, so the filters from the shared
 // filter bar survive both. Loading a view with the parameter opens the ticket
-// on top of it, which is what makes a ticket linkable: the canonical link is
-// the home view, http://<host>/?ticket=<KEY>.
+// on top of it, which is what makes a ticket linkable. The canonical link is
+// http://<host>/?ticket=<KEY>: / has no page of its own, and sends a link
+// naming a ticket on to the last ticket view shown, query and all (see
+// pages/Home.tsx).
 //
 // These are the pure parts, shared by the three views through
 // hooks/useTicketParam.ts.
@@ -64,8 +66,9 @@ export function findTicket<T extends TicketIdentity>(
 }
 
 /**
- * A ticket's shareable URL: the home view with the ticket parameter, whatever
- * view it was copied from, so the link always opens somewhere sensible.
+ * A ticket's shareable URL: / with the ticket parameter, whatever view it was
+ * copied from, so the link opens the ticket on whichever ticket view the one
+ * following it used last.
  * `origin` is window.location.origin in the app.
  */
 export function ticketUrl(origin: string, ticket: TicketIdentity): string {

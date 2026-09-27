@@ -10,7 +10,7 @@ export default function NotFound() {
       <p className="text-sm text-slate-400 mb-4">
         There is no page at <code className="text-slate-300">{pathname}</code>.
       </p>
-      <Link to="/" className="text-sm text-blue-400 hover:text-blue-300">
+      <Link to="/dependencies" className="text-sm text-blue-400 hover:text-blue-300">
         Go to Dependencies
       </Link>
     </div>

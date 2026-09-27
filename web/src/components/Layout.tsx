@@ -29,7 +29,8 @@ export default function Layout() {
   const location = useLocation();
   const viewSearch = filterSearch(location.search);
 
-  // The ticket view shown is the one an epic's row on the Epics view opens.
+  // The ticket view shown is the one an epic's row on the Epics view, and a
+  // ticket's canonical link, opens.
   useEffect(() => rememberView(location.pathname), [location.pathname]);
 
   return (

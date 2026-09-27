@@ -66,7 +66,7 @@ describe("reviewNote", () => {
 });
 
 describe("editorLink", () => {
-  it("opens the ticket's editor over its own project's Dependencies view", () => {
+  it("is the ticket's canonical link with its own project named", () => {
     expect(editorLink({ id: "01X", key: "LDR-4", projectPrefix: "LDR" })).toBe("/?project=LDR&ticket=LDR-4");
     expect(editorLink({ id: "01X", key: "4", projectPrefix: "" })).toBe("/?ticket=01X");
   });

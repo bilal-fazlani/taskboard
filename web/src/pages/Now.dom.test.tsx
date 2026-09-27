@@ -123,7 +123,8 @@ afterEach(() => {
 });
 
 describe("Now page", () => {
-  // It is not the landing page: App.test.tsx still serves Dependencies at /.
+  // It is the home page: / redirects here (Home.dom.test.tsx), and it keeps
+  // its own url, /now.
   it("sits at the top of the sidebar, above Views", async () => {
     await mount();
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Now");

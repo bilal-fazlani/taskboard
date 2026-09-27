@@ -89,9 +89,9 @@ export function reviewNote(ticket: Pick<NowTicket, "status" | "review" | "review
 }
 
 /**
- * Where a card goes: the ticket's editor, over the Dependencies view of the
- * ticket's own project, which is the ticket's canonical link with its
- * project named.
+ * Where a card goes: the ticket's canonical link, /?ticket=<KEY>, with its own
+ * project named, which opens its editor over the last ticket view shown (see
+ * pages/Home.tsx).
  */
 export function editorLink(ticket: { id: string; key: string; projectPrefix: string }): string {
   const params = new URLSearchParams();

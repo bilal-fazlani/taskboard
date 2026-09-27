@@ -48,7 +48,7 @@ describe("overlay params", () => {
   });
 
   it("counts epic as an overlay only in the Epics view, where it is the modal", () => {
-    for (const path of ["/", "/kanban", "/table"]) {
+    for (const path of ["/dependencies", "/kanban", "/table"]) {
       expect(hasOverlay(path, new URLSearchParams("epic=Launch"))).toBe(false);
     }
   });

@@ -541,7 +541,9 @@ describe("Epics View tasks link", () => {
   });
 
   it.each([
-    ["/", "/?project=ACP&epic=Graph"],
+    ["/dependencies", "/dependencies?project=ACP&epic=Graph"],
+    // Dependencies, remembered from before it moved off /.
+    ["/", "/dependencies?project=ACP&epic=Graph"],
     ["/table", "/table?project=ACP&epic=Graph"],
     ["/kanban", "/kanban?project=ACP&epic=Graph"],
     ["/projects", "/kanban?project=ACP&epic=Graph"],
@@ -553,7 +555,16 @@ describe("Epics View tasks link", () => {
 
   it.each([
     ["/table", "/table"],
-    ["/", "/"],
+    ["/dependencies", "/dependencies"],
+    // Matched as the sidebar matches its entries, and kept under the view's
+    // own path.
+    ["/table/", "/table"],
+    ["/kanban/", "/kanban"],
+    ["/KANBAN", "/kanban"],
+    ["/dependencies/", "/dependencies"],
+    // / is no view now: it only redirects, to Now or a ticket's view.
+    ["/", "/kanban"],
+    ["/kanban/extra", "/kanban"],
     ["/epics", "/kanban"],
     ["/labels", "/kanban"],
   ])("remembers %s as the last view when it is a ticket view", (path, last) => {

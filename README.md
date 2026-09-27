@@ -1,6 +1,6 @@
 # Taskboard
 
-A local, self-hosted project management tool with three views of your tickets (a dependency graph for a home page, a Kanban board and a table), a full CLI, and a built-in [MCP](https://modelcontextprotocol.io/) server that lets AI assistants manage your projects, tickets, and labels directly.
+A local, self-hosted project management tool with a home page of what is moving now, three views of your tickets (a dependency graph, a Kanban board and a table), a full CLI, and a built-in [MCP](https://modelcontextprotocol.io/) server that lets AI assistants manage your projects, tickets, and labels directly.
 
 Single binary. SQLite-backed. No Docker, no external database, no runtime dependencies.
 
@@ -14,9 +14,9 @@ Single binary. SQLite-backed. No Docker, no external database, no runtime depend
 
 ## Features
 
-- **Now**, at `/now`, the sidebar's top entry, shows what is moving across every project (or one, from its dropdown): each ticket in progress or in review with its subtask progress, review round and how long it has been in its status, with a review told apart as still running or approved and waiting on you, and below them the tickets that landed in the last 24 hours (at most 10) with their commits. It updates live, and each ticket opens its editor
+- **Now**, the home page at `/now` (`/` goes there) and the sidebar's top entry, shows what is moving across every project (or one, from its dropdown): each ticket in progress or in review with its subtask progress, review round and how long it has been in its status, with a review told apart as still running or approved and waiting on you, and below them the tickets that landed in the last 24 hours (at most 10) with their commits. It updates live, and each ticket opens its editor
 - **Views** — the sidebar's Views group shows the same tickets three ways:
-  - **Dependencies**, the home page at `/`, puts open tickets in columns by how many steps of unfinished work block them, with arrows from each blocker; the edge that closes a cycle is drawn in red. Hover a card to trace what blocks it and what it blocks; pan, zoom or fit the graph to the screen
+  - **Dependencies**, at `/dependencies`, puts open tickets in columns by how many steps of unfinished work block them, with arrows from each blocker; the edge that closes a cycle is drawn in red. Hover a card to trace what blocks it and what it blocks; pan, zoom or fit the graph to the screen
   - **Kanban**, at `/kanban`, is drag-and-drop ticket management across Todo, In Progress, Agent Review, and Done columns
   - **Table**, at `/table`, lists tickets with their labels, repos, status, priority and due date
   - A filter bar shared by all three views narrows them by project, status, priority, label, repo and a text search over key, title and description. Filters live in the URL (for example `/kanban?project=ACP&status=todo&label=web`), so a filtered view can be bookmarked and switching views keeps them. Dependencies dims the tickets that don't match, keeping every arrow; Kanban and Table leave them out
@@ -84,11 +84,15 @@ Any view takes a `ticket` query parameter naming a ticket by display key (or by
 id), and opens that ticket's editor on top of the page:
 
 ```
-http://localhost:3010/?ticket=AUTH-1        # the Dependencies view
-http://localhost:3010/kanban?ticket=AUTH-1  # the Kanban board
+http://localhost:3010/?ticket=AUTH-1              # the view you used last
+http://localhost:3010/kanban?ticket=AUTH-1        # the Kanban board
+http://localhost:3010/dependencies?ticket=AUTH-1  # the Dependencies view
 ```
 
-The editor's header shows the ticket's link with a button that copies it.
+`/?ticket=…` is a ticket's canonical link, the one the CLI and the MCP server
+hand out: it goes on to whichever of Dependencies, Kanban and Table you used
+last (Kanban if none), keeping every other parameter. The editor's header
+shows the ticket's link with a button that copies it.
 Opening a ticket adds the parameter to the view you are on and closing it
 removes only that parameter, so the filters you had set stay put. Back closes
 the editor, and unsaved edits are never dropped without asking — however the

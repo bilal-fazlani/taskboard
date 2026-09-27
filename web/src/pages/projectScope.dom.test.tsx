@@ -206,7 +206,7 @@ afterEach(() => {
 });
 
 const views = [
-  ["Dependencies", () => <Graph />, "/", "No open tickets"],
+  ["Dependencies", () => <Graph />, "/dependencies", "No open tickets"],
   ["Kanban", () => <Board />, "/kanban", null],
   ["Table", () => <Tickets />, "/table", "No tickets found"],
 ] as const;
@@ -734,7 +734,7 @@ describe.each([
 
 describe("Hide mode across the views", () => {
   it("goes to Kanban and back with the filters, and is still picked on Dependencies", async () => {
-    await mount(<AppRoutes />, "/?project=ACP&priority=high&unmatched=hide");
+    await mount(<AppRoutes />, "/dependencies?project=ACP&priority=high&unmatched=hide");
     expect((screen.getByRole("radio", { name: "Hide" }) as HTMLInputElement).checked).toBe(true);
     await act(async () => screen.getByRole("link", { name: "Kanban" }).click());
     expect(window.location.pathname).toBe("/kanban");
@@ -742,7 +742,7 @@ describe("Hide mode across the views", () => {
     expect(screen.queryByRole("radiogroup")).toBeNull();
     await act(async () => screen.getByRole("link", { name: "Dependencies" }).click());
     for (let i = 0; i < 3; i++) await act(async () => {});
-    expect(window.location.pathname).toBe("/");
+    expect(window.location.pathname).toBe("/dependencies");
     expect(new URLSearchParams(window.location.search).get("unmatched")).toBe("hide");
     expect((screen.getByRole("radio", { name: "Hide" }) as HTMLInputElement).checked).toBe(true);
     expect(screen.queryByRole("button", { name: /^ACP-1 / })).toBeNull();

@@ -17,9 +17,38 @@ describe("last ticket view", () => {
     expect(readLastView()).toBe("/table");
     rememberView("/epics");
     rememberView("/projects");
+    rememberView("/now");
     expect(readLastView()).toBe("/table");
+    rememberView("/dependencies");
+    expect(readLastView()).toBe("/dependencies");
+    // / is no view now: it only redirects, to Now or a ticket's view.
     rememberView("/");
-    expect(readLastView()).toBe("/");
+    expect(readLastView()).toBe("/dependencies");
+  });
+
+  it.each([
+    ["/table/", "/table"],
+    ["/kanban/", "/kanban"],
+    ["/KANBAN", "/kanban"],
+    ["/Table", "/table"],
+    ["/dependencies/", "/dependencies"],
+  ])("remembers %s as %s, matching paths as the sidebar does", (path, view) => {
+    const storage = memoryStorage();
+    vi.stubGlobal("localStorage", storage);
+    rememberView(path);
+    expect(storage.getItem(LAST_VIEW_KEY)).toBe(view);
+    expect(readLastView()).toBe(view);
+  });
+
+  it.each(["/kanban/extra", "/table//", "/dependencies/x"])("ignores %s, which is no view", (path) => {
+    vi.stubGlobal("localStorage", memoryStorage());
+    rememberView(path);
+    expect(readLastView()).toBe("/kanban");
+  });
+
+  it("reads a stored / as Dependencies, which was served there before Now became the home page", () => {
+    vi.stubGlobal("localStorage", memoryStorage({ [LAST_VIEW_KEY]: "/" }));
+    expect(readLastView()).toBe("/dependencies");
   });
 
   it("falls back on a value that names no ticket view", () => {

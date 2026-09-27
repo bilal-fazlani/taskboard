@@ -47,7 +47,7 @@ describe("views navigation", () => {
   it("groups exactly Dependencies, Kanban, Table and Activity under Views, with Projects, Epics and Labels outside", () => {
     expect(VIEWS_GROUP_LABEL).toBe("Views");
     expect(viewItems.map((i) => `${i.label} ${i.to}`)).toEqual([
-      "Dependencies /",
+      "Dependencies /dependencies",
       "Kanban /kanban",
       "Table /table",
       "Activity /activity",
@@ -60,17 +60,17 @@ describe("views navigation", () => {
   });
 
   it("renders the Views group in the sidebar with Projects, Epics and Labels outside it", () => {
-    const html = render("/");
+    const html = render("/dependencies");
     expect(html).toContain('<p id="nav-views"');
     expect(html).toMatch(/id="nav-views"[^>]*>Views<\/p>/);
-    expect(viewsGroupLinks(html)).toEqual(["Dependencies /", "Kanban /kanban", "Table /table", "Activity /activity"]);
+    expect(viewsGroupLinks(html)).toEqual(["Dependencies /dependencies", "Kanban /kanban", "Table /table", "Activity /activity"]);
     expect(html).toMatch(/href="\/projects"[^>]*>.*?Projects<\/a>/);
     expect(html).toMatch(/href="\/epics"[^>]*>.*?Epics<\/a>/);
     expect(html).toMatch(/href="\/labels"[^>]*>.*?Labels<\/a>/);
   });
 
   it.each([
-    ["/", "Dependencies"],
+    ["/dependencies", "Dependencies"],
     ["/kanban", "Kanban"],
     ["/table", "Table"],
     ["/activity", "Activity"],
@@ -86,6 +86,7 @@ describe("views navigation", () => {
     ["/kanban/", "Kanban"],
     ["/projects/", "Projects"],
     ["/KANBAN", "Kanban"],
+    ["/dependencies/", "Dependencies"],
   ])("marks the entry current on %s, as on its own path", (path, name) => {
     const html = render(path);
     expect(heading(html)).toBe(name);
@@ -99,11 +100,11 @@ describe("views navigation", () => {
       expect(heading(html)).toBe("Page not found");
       expect(html).toContain(`>${path}</code>`);
       // The sidebar is there, with no entry marked as the current page.
-      expect(viewsGroupLinks(html)).toEqual(["Dependencies /", "Kanban /kanban", "Table /table", "Activity /activity"]);
+      expect(viewsGroupLinks(html)).toEqual(["Dependencies /dependencies", "Kanban /kanban", "Table /table", "Activity /activity"]);
       expect(html).toMatch(/href="\/projects"/);
       expect(activeLink(html)).toBeUndefined();
-      // A way back to the default view.
-      expect(html).toMatch(/<a [^>]*href="\/"[^>]*>Go to Dependencies<\/a>/);
+      // A way back to the Dependencies view.
+      expect(html).toMatch(/<a [^>]*href="\/dependencies"[^>]*>Go to Dependencies<\/a>/);
     },
   );
 });
@@ -204,10 +205,10 @@ describe("filter panel", () => {
   }
 
   it("offers Dim or Hide on Dependencies only, after the search and before Clear filters, with Dim the default", () => {
-    expect(unmatchedChoice(render("/?project=ACP&label=web"))).toEqual(["Dim*", "Hide"]);
+    expect(unmatchedChoice(render("/dependencies?project=ACP&label=web"))).toEqual(["Dim*", "Hide"]);
     // Shown with no filter to dim or hide by, too, so the bar doesn't jump.
-    expect(unmatchedChoice(render("/?project=ACP"))).toEqual(["Dim*", "Hide"]);
-    const html = render("/?project=ACP&label=web");
+    expect(unmatchedChoice(render("/dependencies?project=ACP"))).toEqual(["Dim*", "Hide"]);
+    const html = render("/dependencies?project=ACP&label=web");
     const at = (text: string) => html.indexOf(text);
     expect(at('aria-label="Search"')).toBeLessThan(at('role="radiogroup"'));
     expect(at('role="radiogroup"')).toBeLessThan(at("Clear filters"));
@@ -219,28 +220,28 @@ describe("filter panel", () => {
   });
 
   it("reads hide mode from the URL on Dependencies, and dim for a value that means nothing", () => {
-    expect(unmatchedChoice(render("/?project=ACP&label=web&unmatched=hide"))).toEqual(["Dim", "Hide*"]);
-    expect(unmatchedChoice(render("/?project=ACP&unmatched=bogus"))).toEqual(["Dim*", "Hide"]);
+    expect(unmatchedChoice(render("/dependencies?project=ACP&label=web&unmatched=hide"))).toEqual(["Dim", "Hide*"]);
+    expect(unmatchedChoice(render("/dependencies?project=ACP&unmatched=bogus"))).toEqual(["Dim*", "Hide"]);
   });
 
   it("carries hide mode to the other views with the filters", () => {
-    const html = render("/?ticket=ACP-7&unmatched=hide&label=web&project=ACP");
+    const html = render("/dependencies?ticket=ACP-7&unmatched=hide&label=web&project=ACP");
     expect(viewsGroupLinks(html)).toEqual([
-      "Dependencies /?project=ACP&amp;label=web&amp;unmatched=hide",
+      "Dependencies /dependencies?project=ACP&amp;label=web&amp;unmatched=hide",
       "Kanban /kanban?project=ACP&amp;label=web&amp;unmatched=hide",
       "Table /table?project=ACP&amp;label=web&amp;unmatched=hide",
       "Activity /activity?project=ACP&amp;label=web&amp;unmatched=hide",
     ]);
     // Kanban ignores it but keeps it in its links, for the way back.
-    expect(viewsGroupLinks(render("/kanban?project=ACP&unmatched=hide"))[0]).toBe("Dependencies /?project=ACP&amp;unmatched=hide");
-    expect(viewsGroupLinks(render("/?project=ACP&unmatched=bogus"))[1]).toBe("Kanban /kanban?project=ACP");
-    expect(render("/?project=ACP&unmatched=hide")).toMatch(/href="\/epics"/);
+    expect(viewsGroupLinks(render("/kanban?project=ACP&unmatched=hide"))[0]).toBe("Dependencies /dependencies?project=ACP&amp;unmatched=hide");
+    expect(viewsGroupLinks(render("/dependencies?project=ACP&unmatched=bogus"))[1]).toBe("Kanban /kanban?project=ACP");
+    expect(render("/dependencies?project=ACP&unmatched=hide")).toMatch(/href="\/epics"/);
   });
 
   it("carries the filters, and only the filters, to the other views, not to Projects, Epics or Labels", () => {
     const html = render("/kanban?ticket=ACP-7&label=web&project=ACP");
     expect(viewsGroupLinks(html)).toEqual([
-      "Dependencies /?project=ACP&amp;label=web",
+      "Dependencies /dependencies?project=ACP&amp;label=web",
       "Kanban /kanban?project=ACP&amp;label=web",
       "Table /table?project=ACP&amp;label=web",
       "Activity /activity?project=ACP&amp;label=web",

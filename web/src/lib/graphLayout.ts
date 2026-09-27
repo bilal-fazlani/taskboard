@@ -1,4 +1,4 @@
-// Layout for the dependency graph on the home page: ready work on the left,
+// Layout for the Dependencies view's graph: ready work on the left,
 // deeply blocked work on the right, arrows from a blocker to the ticket it
 // blocks. Pure functions over plain data, with no React and no DOM, in two
 // stages:

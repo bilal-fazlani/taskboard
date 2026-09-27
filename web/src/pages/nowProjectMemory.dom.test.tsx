@@ -77,7 +77,7 @@ afterEach(() => {
 });
 
 describe.each([
-  ["Dependencies", "/"],
+  ["Dependencies", "/dependencies"],
   ["Kanban", "/kanban"],
   ["Table", "/table"],
   ["Epics", "/epics"],

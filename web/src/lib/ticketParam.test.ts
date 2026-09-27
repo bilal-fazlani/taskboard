@@ -93,7 +93,7 @@ describe("findTicket", () => {
 });
 
 describe("ticketUrl", () => {
-  it("is the home view with the ticket parameter", () => {
+  it("is / with the ticket parameter", () => {
     expect(ticketUrl("http://localhost:3010", ticket())).toBe("http://localhost:3010/?ticket=ACP-25");
   });
 
