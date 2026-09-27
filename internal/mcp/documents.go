@@ -14,7 +14,7 @@ import (
 	"github.com/tcarac/taskboard/internal/weburl"
 )
 
-const documentIDDescription = "Document ID, or its name (with or without its extension: .md, .html, .png, .jpg, .gif or .webp) together with ticket, or with epic"
+const documentIDDescription = "Document ID, or its name (with or without its extension: .md, .html, .png, .jpg, .gif or .webp) together with ticket, or with epic."
 const documentDataDescription = "An image file's bytes in base64 (a data: URL prefix is fine): PNG, JPEG, GIF or WebP, at most 8 MB. " +
 	"The content must really be that format; SVG is refused. Location, camera and other metadata are removed on upload " +
 	"without re-encoding the picture. For a file on this machine, pass path instead: data puts the whole file " +
@@ -55,10 +55,8 @@ func (s *MCPServer) documentToolDefinitions() []toolDef {
 				"list_documents list documents (name, format, size, updated time, link) without content." + imageRefsHelp,
 			InputSchema: jsonSchema{
 				Type: "object",
-				Properties: documentOwnerProps(documentTicketDescription, map[string]schemaProp{
-					"id": {Type: "string", Description: documentIDDescription},
-				}),
-				Required: []string{"id"},
+				Properties: documentOwnerProps(documentTicketDescription,
+					withIDOrKeyProps(documentIDDescription, map[string]schemaProp{})),
 			},
 		},
 		{
@@ -109,16 +107,15 @@ func (s *MCPServer) documentToolDefinitions() []toolDef {
 					"data whenever an image's picture is replaced)", documentWhole),
 			InputSchema: jsonSchema{
 				Type: "object",
-				Properties: documentOwnerProps(documentTicketDescription, map[string]schemaProp{
-					"id":      {Type: "string", Description: documentIDDescription},
-					"name":    {Type: "string", Description: "New name: letters, digits, spaces, _ and - only; no extension"},
-					"content": {Type: "string", Description: "The whole new content; for a file on this machine, pass path instead"},
-					"data":    {Type: "string", Description: documentDataDescription + " Replaces an image's picture; it must be the image's format."},
-					"path": {Type: "string", Description: documentPathDescription + " Replaces a text document's content or an " +
-						"image's picture, instead of content or data; its extension must be the document's format, when it names one."},
-					"full": fullProp(documentWhole),
-				}),
-				Required: []string{"id"},
+				Properties: documentOwnerProps(documentTicketDescription,
+					withIDOrKeyProps(documentIDDescription, map[string]schemaProp{
+						"name":    {Type: "string", Description: "New name: letters, digits, spaces, _ and - only; no extension"},
+						"content": {Type: "string", Description: "The whole new content; for a file on this machine, pass path instead"},
+						"data":    {Type: "string", Description: documentDataDescription + " Replaces an image's picture; it must be the image's format."},
+						"path": {Type: "string", Description: documentPathDescription + " Replaces a text document's content or an " +
+							"image's picture, instead of content or data; its extension must be the document's format, when it names one."},
+						"full": fullProp(documentWhole),
+					})),
 			},
 		},
 		{
@@ -129,10 +126,8 @@ func (s *MCPServer) documentToolDefinitions() []toolDef {
 				"Decide before deleting whether that is what you want.",
 			InputSchema: jsonSchema{
 				Type: "object",
-				Properties: documentOwnerProps(documentTicketDescription, map[string]schemaProp{
-					"id": {Type: "string", Description: documentIDDescription},
-				}),
-				Required: []string{"id"},
+				Properties: documentOwnerProps(documentTicketDescription,
+					withIDOrKeyProps(documentIDDescription, map[string]schemaProp{})),
 			},
 		},
 	}
@@ -162,13 +157,13 @@ func (s *MCPServer) callDocumentTool(name string, args json.RawMessage) (result 
 
 	case "get_document":
 		var a struct {
-			ID string `json:"id"`
+			idOrKeyArg
 			documentOwnerArgs
 		}
 		if err := decodeArgs(args, &a); err != nil {
 			return nil, true, err
 		}
-		id, err := s.resolveDocumentRefOrError(a.ID, a.documentOwnerArgs)
+		id, err := s.resolveDocumentRefOrError(a.ref(), a.documentOwnerArgs)
 		if err != nil {
 			return nil, true, err
 		}
@@ -264,7 +259,7 @@ func (s *MCPServer) callDocumentTool(name string, args json.RawMessage) (result 
 
 	case "update_document":
 		var a struct {
-			ID string `json:"id"`
+			idOrKeyArg
 			documentOwnerArgs
 			Name    *string `json:"name"`
 			Content *string `json:"content"`
@@ -284,7 +279,7 @@ func (s *MCPServer) callDocumentTool(name string, args json.RawMessage) (result 
 		if a.Path != nil && (a.Content != nil || a.Data != nil) {
 			return nil, true, errOnePathContentOrData
 		}
-		id, err := s.resolveDocumentRefOrError(a.ID, a.documentOwnerArgs)
+		id, err := s.resolveDocumentRefOrError(a.ref(), a.documentOwnerArgs)
 		if err != nil {
 			return nil, true, err
 		}
@@ -348,13 +343,13 @@ func (s *MCPServer) callDocumentTool(name string, args json.RawMessage) (result 
 
 	case "delete_document":
 		var a struct {
-			ID string `json:"id"`
+			idOrKeyArg
 			documentOwnerArgs
 		}
 		if err := decodeArgs(args, &a); err != nil {
 			return nil, true, err
 		}
-		id, err := s.resolveDocumentRefOrError(a.ID, a.documentOwnerArgs)
+		id, err := s.resolveDocumentRefOrError(a.ref(), a.documentOwnerArgs)
 		if err != nil {
 			return nil, true, err
 		}
@@ -419,7 +414,7 @@ func (s *MCPServer) requireDocumentOwner(a documentOwnerArgs) (db.DocumentOwner,
 // only unique within its owner.
 func (s *MCPServer) resolveDocumentRefOrError(ref string, a documentOwnerArgs) (string, error) {
 	if strings.TrimSpace(ref) == "" {
-		return "", fmt.Errorf("id is required")
+		return "", fmt.Errorf("id or key is required")
 	}
 	owner, err := s.resolveDocumentOwner(a)
 	if err != nil {

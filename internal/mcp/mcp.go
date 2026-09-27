@@ -210,12 +210,12 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 
 	case "get_project":
 		var a struct {
-			ID string `json:"id"`
+			idOrKeyArg
 		}
 		if err := decodeArgs(args, &a); err != nil {
 			return nil, err
 		}
-		projectID, err := s.resolveProjectRefOrError(a.ID)
+		projectID, err := s.resolveProjectRefOrError(a.ref())
 		if err != nil {
 			return nil, err
 		}
@@ -249,14 +249,14 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 
 	case "update_project":
 		var a struct {
-			ID string `json:"id"`
+			idOrKeyArg
 			models.UpdateProjectRequest
 			fullArg
 		}
 		if err := decodeArgs(args, &a); err != nil {
 			return nil, err
 		}
-		projectID, err := s.resolveProjectRefOrError(a.ID)
+		projectID, err := s.resolveProjectRefOrError(a.ref())
 		if err != nil {
 			return nil, err
 		}
@@ -275,12 +275,12 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 
 	case "delete_project":
 		var a struct {
-			ID string `json:"id"`
+			idOrKeyArg
 		}
 		if err := decodeArgs(args, &a); err != nil {
 			return nil, err
 		}
-		projectID, err := s.resolveProjectRefOrError(a.ID)
+		projectID, err := s.resolveProjectRefOrError(a.ref())
 		if err != nil {
 			return nil, err
 		}
@@ -347,7 +347,7 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 
 	case "update_epic":
 		var a struct {
-			ID      string `json:"id"`
+			idOrKeyArg
 			Project string `json:"project"`
 			models.UpdateEpicRequest
 			fullArg
@@ -358,7 +358,7 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 		if a.Name == nil && a.Description == nil {
 			return nil, fmt.Errorf("nothing to update: provide name and/or description")
 		}
-		epicID, err := s.resolveEpicRefOrError(a.ID, a.Project)
+		epicID, err := s.resolveEpicRefOrError(a.ref(), a.Project)
 		if err != nil {
 			return nil, err
 		}
@@ -377,13 +377,13 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 
 	case "delete_epic":
 		var a struct {
-			ID      string `json:"id"`
+			idOrKeyArg
 			Project string `json:"project"`
 		}
 		if err := decodeArgs(args, &a); err != nil {
 			return nil, err
 		}
-		epicID, err := s.resolveEpicRefOrError(a.ID, a.Project)
+		epicID, err := s.resolveEpicRefOrError(a.ref(), a.Project)
 		if err != nil {
 			return nil, err
 		}
@@ -418,7 +418,7 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 
 	case "update_label":
 		var a struct {
-			ID string `json:"id"`
+			idOrKeyArg
 			models.UpdateLabelRequest
 			fullArg
 		}
@@ -428,7 +428,7 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 		if a.Name == nil && a.Color == nil {
 			return nil, fmt.Errorf("nothing to update: provide name and/or color")
 		}
-		labelID, err := s.resolveLabelRefOrError(a.ID)
+		labelID, err := s.resolveLabelRefOrError(a.ref())
 		if err != nil {
 			return nil, err
 		}
@@ -447,12 +447,12 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 
 	case "delete_label":
 		var a struct {
-			ID string `json:"id"`
+			idOrKeyArg
 		}
 		if err := decodeArgs(args, &a); err != nil {
 			return nil, err
 		}
-		labelID, err := s.resolveLabelRefOrError(a.ID)
+		labelID, err := s.resolveLabelRefOrError(a.ref())
 		if err != nil {
 			return nil, err
 		}
@@ -464,12 +464,12 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 
 	case "get_ticket":
 		var a struct {
-			ID string `json:"id"`
+			idOrKeyArg
 		}
 		if err := decodeArgs(args, &a); err != nil {
 			return nil, err
 		}
-		ticketID, err := s.resolveTicketRefOrError(a.ID)
+		ticketID, err := s.resolveTicketRefOrError(a.ref())
 		if err != nil {
 			return nil, err
 		}
@@ -501,14 +501,14 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 
 	case "update_ticket":
 		var a struct {
-			ID string `json:"id"`
+			idOrKeyArg
 			models.UpdateTicketRequest
 			fullArg
 		}
 		if err := decodeArgs(args, &a); err != nil {
 			return nil, err
 		}
-		ticketID, err := s.resolveTicketRefOrError(a.ID)
+		ticketID, err := s.resolveTicketRefOrError(a.ref())
 		if err != nil {
 			return nil, err
 		}
@@ -528,14 +528,14 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 
 	case "move_ticket":
 		var a struct {
-			ID string `json:"id"`
+			idOrKeyArg
 			models.MoveTicketRequest
 			fullArg
 		}
 		if err := decodeArgs(args, &a); err != nil {
 			return nil, err
 		}
-		ticketID, err := s.resolveTicketRefOrError(a.ID)
+		ticketID, err := s.resolveTicketRefOrError(a.ref())
 		if err != nil {
 			return nil, err
 		}
@@ -555,12 +555,12 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 
 	case "delete_ticket":
 		var a struct {
-			ID string `json:"id"`
+			idOrKeyArg
 		}
 		if err := decodeArgs(args, &a); err != nil {
 			return nil, err
 		}
-		ticketID, err := s.resolveTicketRefOrError(a.ID)
+		ticketID, err := s.resolveTicketRefOrError(a.ref())
 		if err != nil {
 			return nil, err
 		}
@@ -598,7 +598,7 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 		if err := decodeArgs(args, &a); err != nil {
 			return nil, err
 		}
-		if a.TicketID == "" || a.Title == "" {
+		if strings.TrimSpace(a.TicketID) == "" || a.Title == "" {
 			return nil, fmt.Errorf("ticketId and title are required")
 		}
 		ticketID, err := s.resolveTicketRefOrError(a.TicketID)
@@ -622,7 +622,7 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 		if err := decodeArgs(args, &a); err != nil {
 			return nil, err
 		}
-		if a.TicketID == "" || len(a.Subtasks) == 0 {
+		if strings.TrimSpace(a.TicketID) == "" || len(a.Subtasks) == 0 {
 			return nil, fmt.Errorf("ticketId and at least one subtask are required")
 		}
 		ticketID, err := s.resolveTicketRefOrError(a.TicketID)
@@ -717,6 +717,29 @@ func decodeArgs(args json.RawMessage, v any) error {
 	return nil
 }
 
+// idOrKeyArg is the identifying argument every single-item ticket, project,
+// epic, label and document tool takes: the entity's id (a ULID, or for a
+// project its id-or-prefix, for an epic or label its id-or-name), or, under
+// the alias key, the exact same value. The two names resolve identically;
+// key exists because an agent that reaches for the field name its own JSON
+// responses use for the human-readable identifier (a ticket's key, e.g.
+// ACP-117) would otherwise get a schema-validation error for guessing the
+// "wrong" name (ACP-182). Embed it in a tool's argument struct and call ref()
+// instead of reading a bare ID field.
+type idOrKeyArg struct {
+	ID  string `json:"id"`
+	Key string `json:"key"`
+}
+
+// ref returns the effective identifier: key when it is non-blank, else id,
+// both trimmed of surrounding whitespace.
+func (a idOrKeyArg) ref() string {
+	if v := strings.TrimSpace(a.Key); v != "" {
+		return v
+	}
+	return strings.TrimSpace(a.ID)
+}
+
 // resolveTicketRefOrError resolves a ticket id-or-display-key argument the
 // way get_ticket, update_ticket, move_ticket, delete_ticket, create_subtask
 // and batch_create_subtasks accept it: a ULID is a literal ticket id,
@@ -725,7 +748,7 @@ func decodeArgs(args json.RawMessage, v any) error {
 // reaching the store as an empty id.
 func (s *MCPServer) resolveTicketRefOrError(ref string) (string, error) {
 	if strings.TrimSpace(ref) == "" {
-		return "", fmt.Errorf("id is required")
+		return "", fmt.Errorf("id or key is required")
 	}
 	return s.store.ResolveTicketID(ref)
 }
@@ -736,7 +759,7 @@ func (s *MCPServer) resolveTicketRefOrError(ref string) (string, error) {
 // empty id.
 func (s *MCPServer) resolveProjectRefOrError(ref string) (string, error) {
 	if strings.TrimSpace(ref) == "" {
-		return "", fmt.Errorf("id is required")
+		return "", fmt.Errorf("id or key is required")
 	}
 	return s.store.ResolveProjectRef(ref)
 }
@@ -748,7 +771,7 @@ func (s *MCPServer) resolveProjectRefOrError(ref string) (string, error) {
 // delete, harmlessly no-op).
 func (s *MCPServer) resolveLabelRefOrError(ref string) (string, error) {
 	if strings.TrimSpace(ref) == "" {
-		return "", fmt.Errorf("id is required")
+		return "", fmt.Errorf("id or key is required")
 	}
 	labelID, err := s.store.ResolveLabelRef(ref)
 	if err != nil {
@@ -771,7 +794,7 @@ func (s *MCPServer) resolveLabelRefOrError(ref string) (string, error) {
 // also reports one, but this check runs before either is called).
 func (s *MCPServer) resolveEpicRefOrError(ref, projectRef string) (string, error) {
 	if strings.TrimSpace(ref) == "" {
-		return "", fmt.Errorf("id is required")
+		return "", fmt.Errorf("id or key is required")
 	}
 	if strings.TrimSpace(projectRef) != "" {
 		return s.store.ResolveEpicRef(projectRef, ref)
@@ -861,6 +884,10 @@ var dependencySchema = &jsonSchema{
 const surfacedFromHelp = "Ticket ID or display key of the ticket during whose work this one was found (\"surfaced during BILL-2, out of scope there\"). " +
 	"At most one per ticket. On update, omit it or pass null to leave it unchanged; pass \"\" or \"none\" to remove it."
 
+// ticketIDDescription documents get_ticket's, update_ticket's, move_ticket's
+// and delete_ticket's id/key argument.
+const ticketIDDescription = "Ticket ID or display key (e.g. BILL-2), case-insensitive."
+
 // noteParamDescription documents the note move_ticket and update_ticket take.
 const noteParamDescription = "Why the status is changing, saved with the change in the ticket's status history. " +
 	"Required when moving a ticket out of agent_review: say why it is leaving review, either that it was approved and landed, " +
@@ -874,6 +901,29 @@ const (
 	projectAgentInstructionsHelp = "Agent instructions: how agents should work on this project's tickets (for example branches, review, " +
 		"verify commands, commit style). get_project returns them; the board never acts on them."
 )
+
+// idOrKeyProps is the schema of the id/key argument every single-item
+// ticket, project, epic, label and document tool takes (see idOrKeyArg):
+// two names for the exact same argument, so a caller does not have to guess
+// which one a given tool wants — passing either resolves it the same way.
+// desc describes what the value identifies, e.g. "Ticket ID or display key
+// (e.g. BILL-2), case-insensitive".
+func idOrKeyProps(desc string) map[string]schemaProp {
+	full := desc + " id and key are the same argument, accepted under either name; when both are given, key wins."
+	return map[string]schemaProp{
+		"id":  {Type: "string", Description: full},
+		"key": {Type: "string", Description: full},
+	}
+}
+
+// withIDOrKeyProps merges idOrKeyProps(desc) into props and returns it, for a
+// tool whose schema has other properties beside id/key.
+func withIDOrKeyProps(desc string, props map[string]schemaProp) map[string]schemaProp {
+	for k, v := range idOrKeyProps(desc) {
+		props[k] = v
+	}
+	return props
+}
 
 // projectDescriptionPreviewLimit caps how many characters of a project's
 // description list_projects returns, so listing many projects stays cheap
@@ -956,8 +1006,7 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 				getProjectJournalHelp,
 			InputSchema: jsonSchema{
 				Type:       "object",
-				Properties: map[string]schemaProp{"id": {Type: "string", Description: "Project ID or prefix (case-insensitive)"}},
-				Required:   []string{"id"},
+				Properties: idOrKeyProps("Project ID or prefix (case-insensitive)."),
 			},
 		},
 		{
@@ -987,8 +1036,7 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 			Description: "Update project properties." + shortAnswerHelp(projectHolds, changedHelp, projectWhole),
 			InputSchema: jsonSchema{
 				Type: "object",
-				Properties: map[string]schemaProp{
-					"id":                {Type: "string", Description: "Project ID or prefix (case-insensitive)"},
+				Properties: withIDOrKeyProps("Project ID or prefix (case-insensitive).", map[string]schemaProp{
 					"name":              {Type: "string", Description: "Project name"},
 					"prefix":            {Type: "string", Description: "Short prefix"},
 					"description":       {Type: "string", Description: projectDescriptionHelp},
@@ -997,8 +1045,7 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 					"color":             {Type: "string", Description: "Hex color"},
 					"status":            {Type: "string", Description: "Status", Enum: []string{"active", "archived"}},
 					"full":              fullProp(projectWhole),
-				},
-				Required: []string{"id"},
+				}),
 			},
 		},
 		{
@@ -1006,8 +1053,7 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 			Description: "Delete a project and all its tickets",
 			InputSchema: jsonSchema{
 				Type:       "object",
-				Properties: map[string]schemaProp{"id": {Type: "string", Description: "Project ID or prefix (case-insensitive)"}},
-				Required:   []string{"id"},
+				Properties: idOrKeyProps("Project ID or prefix (case-insensitive)."),
 			},
 		},
 		journalToolDefs[0],
@@ -1047,14 +1093,12 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 			Description: "Update an epic's name and/or description." + shortAnswerHelp(epicHolds, changedHelp, epicWhole),
 			InputSchema: jsonSchema{
 				Type: "object",
-				Properties: map[string]schemaProp{
-					"id":          {Type: "string", Description: "Epic ID, or its name together with project"},
-					"project":     {Type: "string", Description: "Project ID or prefix (case-insensitive); required when id is a name rather than an epic id"},
+				Properties: withIDOrKeyProps("Epic ID, or its name together with project (id and key both accept either form).", map[string]schemaProp{
+					"project":     {Type: "string", Description: "Project ID or prefix (case-insensitive); required when id/key is a name rather than an epic id"},
 					"name":        {Type: "string", Description: "New name, unique within the project (case-insensitive); \"none\" is reserved"},
 					"description": {Type: "string", Description: "New description"},
 					"full":        fullProp(epicWhole),
-				},
-				Required: []string{"id"},
+				}),
 			},
 		},
 		{
@@ -1064,11 +1108,9 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 				"with it and cannot be restored; its tickets' documents stay.",
 			InputSchema: jsonSchema{
 				Type: "object",
-				Properties: map[string]schemaProp{
-					"id":      {Type: "string", Description: "Epic ID, or its name together with project"},
-					"project": {Type: "string", Description: "Project ID or prefix (case-insensitive); required when id is a name rather than an epic id"},
-				},
-				Required: []string{"id"},
+				Properties: withIDOrKeyProps("Epic ID, or its name together with project (id and key both accept either form).", map[string]schemaProp{
+					"project": {Type: "string", Description: "Project ID or prefix (case-insensitive); required when id/key is a name rather than an epic id"},
+				}),
 			},
 		},
 		// --- Labels (global, informational tags on tickets) ---
@@ -1096,32 +1138,27 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 			Name: "update_label",
 			Description: "Update a label's name and/or color; at least one of name or color must be given. Renaming " +
 				"keeps the label attached to every ticket that carries it. A name that is blank after trimming is " +
-				"rejected; a blank color is treated as not given and leaves the existing color unchanged. The id field " +
-				"accepts either the label's id or its exact name, matched case-insensitively." +
+				"rejected; a blank color is treated as not given and leaves the existing color unchanged. The id/key " +
+				"argument accepts either the label's id or its exact name, matched case-insensitively." +
 				shortAnswerHelp(labelHolds, changedHelp, labelWhole),
 			InputSchema: jsonSchema{
 				Type: "object",
-				Properties: map[string]schemaProp{
-					"id":    {Type: "string", Description: "Label id, or its exact name (case-insensitive)"},
+				Properties: withIDOrKeyProps("Label id, or its exact name (case-insensitive).", map[string]schemaProp{
 					"name":  {Type: "string", Description: "New name; a blank name is rejected"},
 					"color": {Type: "string", Description: "New hex color code; a blank value leaves the color unchanged"},
 					"full":  fullProp(labelWhole),
-				},
-				Required: []string{"id"},
+				}),
 			},
 		},
 		{
 			Name: "delete_label",
 			Description: "Delete a label, detaching it from every ticket that carries it. The response's " +
 				"detachedFromTickets field reports how many tickets it was removed from, so an accidental delete of a " +
-				"busy label is obvious. The id field accepts either the label's id or its exact name, matched " +
+				"busy label is obvious. The id/key argument accepts either the label's id or its exact name, matched " +
 				"case-insensitively.",
 			InputSchema: jsonSchema{
-				Type: "object",
-				Properties: map[string]schemaProp{
-					"id": {Type: "string", Description: "Label id, or its exact name (case-insensitive)"},
-				},
-				Required: []string{"id"},
+				Type:       "object",
+				Properties: idOrKeyProps("Label id, or its exact name (case-insensitive)."),
 			},
 		},
 		// --- Tickets (tasks within a project) ---
@@ -1162,8 +1199,7 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 				"reviewRounds counts how many times it has entered agent_review.",
 			InputSchema: jsonSchema{
 				Type:       "object",
-				Properties: map[string]schemaProp{"id": {Type: "string", Description: "Ticket ID or display key (e.g. BILL-2), case-insensitive"}},
-				Required:   []string{"id"},
+				Properties: idOrKeyProps(ticketIDDescription),
 			},
 		},
 		{
@@ -1218,8 +1254,7 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 				shortAnswerHelp(ticketHolds, changedHelp, ticketWhole),
 			InputSchema: jsonSchema{
 				Type: "object",
-				Properties: map[string]schemaProp{
-					"id":          {Type: "string", Description: "Ticket ID or display key (e.g. BILL-2), case-insensitive"},
+				Properties: withIDOrKeyProps(ticketIDDescription, map[string]schemaProp{
 					"title":       {Type: "string", Description: "Ticket title"},
 					"description": {Type: "string", Description: "Replaces the whole description. To add to it, use appendDescription instead."},
 					"status":      {Type: "string", Description: "Status", Enum: models.Statuses},
@@ -1252,8 +1287,7 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 					},
 					"delivery": deliveryProp,
 					"full":     fullProp(ticketWhole),
-				},
-				Required: []string{"id"},
+				}),
 			},
 		},
 		{
@@ -1262,13 +1296,12 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 				shortAnswerHelp(ticketHolds, changedHelp, ticketWhole),
 			InputSchema: jsonSchema{
 				Type: "object",
-				Properties: map[string]schemaProp{
-					"id":     {Type: "string", Description: "Ticket ID or display key (e.g. BILL-2), case-insensitive"},
+				Properties: withIDOrKeyProps(ticketIDDescription, map[string]schemaProp{
 					"status": {Type: "string", Description: "Target status", Enum: models.Statuses},
 					"note":   {Type: "string", Description: noteParamDescription},
 					"full":   fullProp(ticketWhole),
-				},
-				Required: []string{"id", "status"},
+				}),
+				Required: []string{"status"},
 			},
 		},
 		{
@@ -1291,8 +1324,7 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 			Description: "Delete a ticket",
 			InputSchema: jsonSchema{
 				Type:       "object",
-				Properties: map[string]schemaProp{"id": {Type: "string", Description: "Ticket ID or display key (e.g. BILL-2), case-insensitive"}},
-				Required:   []string{"id"},
+				Properties: idOrKeyProps(ticketIDDescription),
 			},
 		},
 		// --- Board ---
