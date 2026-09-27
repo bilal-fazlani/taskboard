@@ -84,12 +84,10 @@ func TestTicketReadsCarryTheHoldingAgentAndOpenRequest(t *testing.T) {
 	}
 }
 
-// A ticket in needs_user_input, which no surface offers yet, breaks no read,
-// and this records where it shows today: the ticket, the lists, its epic's
-// count and activity show it, while the board and Now leave it out, since
-// they read only the statuses the surfaces offer. The HTTP API and the MCP
-// tools that create requests (ACP-11, ACP-12) make the board and Now show
-// it; when they do, the last two checks change.
+// A ticket in needs_user_input, which no write sets but a request, breaks no
+// read and shows everywhere: the ticket, the lists (filtered on its status
+// too), its epic's count, activity, the board's needs_user_input column and
+// Now's waiting group.
 func TestReadsDoNotBreakOnATicketWaitingOnThePerson(t *testing.T) {
 	f := newClaimFixture(t)
 	epic := seedEpic(t, f.s, f.project.ID, "Agents")
@@ -125,25 +123,36 @@ func TestReadsDoNotBreakOnATicketWaitingOnThePerson(t *testing.T) {
 		t.Fatalf("ListActivity: %+v, %v; want the move to needs_user_input first", activity, err)
 	}
 
-	// Not yet on the board or Now.
+	filtered, err := f.s.ListTickets(models.TicketFilter{Statuses: []string{models.StatusNeedsUserInput}})
+	if err != nil || len(filtered) != 1 || filtered[0].ID != f.ticket.ID {
+		t.Fatalf("ListTickets filtered on needs_user_input: %+v, %v; want just the waiting ticket", filtered, err)
+	}
+
 	board, err := f.s.GetBoard(f.project.ID)
 	if err != nil {
 		t.Fatalf("GetBoard: %v", err)
 	}
 	for _, c := range board.Columns {
 		for _, tk := range c.Tickets {
-			if tk.ID == f.ticket.ID {
-				t.Errorf("the board shows the waiting ticket in %s; update this test and its comment", c.Status)
+			if tk.ID == f.ticket.ID && c.Status != models.StatusNeedsUserInput {
+				t.Errorf("the board shows the waiting ticket in %s", c.Status)
 			}
+		}
+		if c.Status == models.StatusNeedsUserInput && (len(c.Tickets) != 1 || c.Tickets[0].ID != f.ticket.ID ||
+			c.Tickets[0].OpenRequest == nil || c.Tickets[0].Agent == nil) {
+			t.Errorf("the needs_user_input column = %+v, want the waiting ticket with its agent and request", c.Tickets)
 		}
 	}
 	now, err := f.s.Now("", time.Now())
 	if err != nil {
 		t.Fatalf("Now: %v", err)
 	}
+	if len(now.Waiting) != 1 || now.Waiting[0].ID != f.ticket.ID || now.Waiting[0].Status != models.StatusNeedsUserInput {
+		t.Errorf("Now waiting = %+v, want the waiting ticket", now.Waiting)
+	}
 	for _, tk := range append(now.InProgress, now.InReview...) {
 		if tk.ID == f.ticket.ID {
-			t.Error("Now shows the waiting ticket; update this test and its comment")
+			t.Error("Now shows the waiting ticket in progress or in review")
 		}
 	}
 	// An ordinary edit of the waiting ticket keeps its status.

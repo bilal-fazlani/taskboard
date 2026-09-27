@@ -2,11 +2,13 @@ package mcp
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/tcarac/taskboard/internal/db"
 	"github.com/tcarac/taskboard/internal/models"
@@ -15,10 +17,13 @@ import (
 
 type MCPServer struct {
 	store *db.Store
+	// ctx ends when Run stops reading, so a wait still running (await_answer)
+	// stops with it.
+	ctx context.Context
 }
 
 func NewServer(store *db.Store) *MCPServer {
-	return &MCPServer{store: store}
+	return &MCPServer{store: store, ctx: context.Background()}
 }
 
 type jsonrpcRequest struct {
@@ -86,9 +91,39 @@ type imageContent struct {
 type contentResult []any
 
 func (s *MCPServer) Run() error {
-	reader := bufio.NewReader(os.Stdin)
-	writer := os.Stdout
+	return s.serve(os.Stdin, os.Stdout)
+}
 
+// serve answers the requests read from in, one per line, writing each
+// answer to out as a line of its own. Requests are answered in order, except
+// a long wait (await_answer), which runs on its own: subagents share their
+// parent's connection, so one agent waiting on the person must not hold up
+// the others' calls. Answers carry their request's id, so the client matches
+// them whatever the order. When in ends, running waits are cancelled and
+// serve returns once they have answered.
+func (s *MCPServer) serve(in io.Reader, out io.Writer) error {
+	ctx, cancel := context.WithCancel(context.Background())
+	s.ctx = ctx
+	var wg sync.WaitGroup
+	defer func() {
+		cancel()
+		wg.Wait()
+	}()
+	var mu sync.Mutex
+	write := func(resp *jsonrpcResponse) {
+		if resp == nil {
+			return
+		}
+		data, err := json.Marshal(resp)
+		if err != nil {
+			return
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		out.Write(append(data, '\n'))
+	}
+
+	reader := bufio.NewReader(in)
 	for {
 		line, err := reader.ReadBytes('\n')
 		if err != nil {
@@ -102,19 +137,28 @@ func (s *MCPServer) Run() error {
 		if err := json.Unmarshal(line, &req); err != nil {
 			continue
 		}
-
-		resp := s.handleRequest(req)
-		if resp == nil {
+		if isLongWait(req) {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				write(s.handleRequest(req))
+			}()
 			continue
 		}
-
-		data, err := json.Marshal(resp)
-		if err != nil {
-			continue
-		}
-		data = append(data, '\n')
-		writer.Write(data)
+		write(s.handleRequest(req))
 	}
+}
+
+// isLongWait reports whether req is a call to a tool that may wait a long
+// time before it answers.
+func isLongWait(req jsonrpcRequest) bool {
+	if req.Method != "tools/call" {
+		return false
+	}
+	var params struct {
+		Name string `json:"name"`
+	}
+	return json.Unmarshal(req.Params, &params) == nil && params.Name == "await_answer"
 }
 
 func (s *MCPServer) handleRequest(req jsonrpcRequest) *jsonrpcResponse {
@@ -712,6 +756,9 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 		if result, ok, err := s.callEntryTool(name, args); ok {
 			return result, err
 		}
+		if result, ok, err := s.callAgentTool(name, args); ok {
+			return result, err
+		}
 		if result, ok, err := s.callDocumentTool(name, args); ok {
 			return result, err
 		}
@@ -1254,8 +1301,8 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 				Properties: withProjectRefProps("Filter by project ID or prefix (case-insensitive); an unknown one returns no tickets rather than an error.", map[string]schemaProp{
 					"status": {
 						Type:        "array",
-						Description: "Filter by status: tickets in any of these (" + strings.Join(models.Statuses, ", ") + "), e.g. [\"todo\", \"in_progress\"]. A single status string is accepted too, including several comma-separated (\"todo,in_progress\").",
-						Items:       &jsonSchema{Type: "string", Enum: models.Statuses},
+						Description: "Filter by status: tickets in any of these (" + strings.Join(models.KnownStatuses, ", ") + "), e.g. [\"todo\", \"in_progress\"]. A single status string is accepted too, including several comma-separated (\"todo,in_progress\").",
+						Items:       &jsonSchema{Type: "string", Enum: models.KnownStatuses},
 					},
 					"priority":     {Type: "string", Description: "Filter by priority", Enum: []string{"urgent", "high", "medium", "low"}},
 					"repo":         {Type: "string", Description: "Filter to tickets attached to this repo, matched exactly"},
@@ -1410,7 +1457,7 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 		// --- Board ---
 		{
 			Name:        "get_board",
-			Description: fmt.Sprintf("Get full Kanban board grouped by status columns (%s)", strings.Join(models.Statuses, ", ")),
+			Description: fmt.Sprintf("Get full Kanban board grouped by status columns (%s)", strings.Join(models.KnownStatuses, ", ")),
 			InputSchema: jsonSchema{
 				Type:       "object",
 				Properties: projectRefProps("Filter by project ID or prefix (optional, case-insensitive); an unknown one returns no tickets rather than an error."),
@@ -1419,8 +1466,9 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 		// --- Now (what's moving right now) ---
 		{
 			Name: "get_now",
-			Description: "What's moving right now, across all projects by default: tickets in progress or in review, with " +
-				"their subtask and review progress, plus what landed in the last 24 hours with its commit shas. Checking a " +
+			Description: "What's moving right now, across all projects by default: tickets in progress, waiting on the person " +
+				"(needs_user_input) or in review, with their subtask and review progress, plus what landed in the last 24 hours " +
+				"with its commit shas. Checking a " +
 				"run's state costs one cheap call, instead of a list_tickets per status plus a get_ticket per ticket.",
 			InputSchema: jsonSchema{
 				Type:       "object",
@@ -1497,5 +1545,6 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 		},
 	}
 	defs = append(defs, entryToolDefs[:]...)
+	defs = append(defs, agentToolDefs[:]...)
 	return append(defs, s.documentToolDefinitions()...)
 }

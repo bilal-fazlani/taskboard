@@ -53,12 +53,13 @@ func (o writeOptions) checkStatusChange(from, to, note string) error {
 }
 
 // validStatus reports whether status is one of models.Statuses, the statuses
-// the surfaces offer; models.StatusNeedsUserInput is known but not among
-// them yet, so no write or filter here accepts it. It gates writes (CreateTicket,
-// UpdateTicket, MoveTicket) and a list's status filter (splitStatusFilter): a
-// row already holding some other value, from before this check existed, must
-// still be readable, so no path that reads a ticket's own stored status
-// calls it.
+// a write may set. models.StatusNeedsUserInput is not among them: only a
+// request for user input (CreateRequest) puts a ticket there, and only its
+// answer takes it out. It gates writes (CreateTicket, UpdateTicket,
+// MoveTicket): a row already holding some other value, from before this
+// check existed, must still be readable, so no path that reads a ticket's
+// own stored status calls it. A list's status filter takes every known
+// status instead (splitStatusFilter).
 func validStatus(status string) bool {
 	for _, s := range models.Statuses {
 		if status == s {
@@ -72,6 +73,10 @@ func validStatus(status string) bool {
 // models.Statuses, naming the valid values so the caller — HTTP, MCP or the
 // CLI — knows what to send instead.
 func invalidStatus(status string) error {
+	if status == models.StatusNeedsUserInput {
+		return invalidInput("a ticket cannot be moved to %s: it waits on the person only while a request for user input "+
+			"is open, and the answer moves it back; to ask the person, request user input on the ticket instead", status)
+	}
 	return invalidInput("invalid status %q: must be one of %s", status, strings.Join(models.Statuses, ", "))
 }
 

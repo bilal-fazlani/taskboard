@@ -80,7 +80,7 @@ func TestHTTPNow(t *testing.T) {
 	}
 
 	code, body := send(t, http.MethodGet, base+"/api/now?projectId=NOPE", "")
-	if code != http.StatusOK || string(body) != "{\"inProgress\":[],\"inReview\":[],\"landed\":[]}\n" {
+	if code != http.StatusOK || string(body) != "{\"inProgress\":[],\"waiting\":[],\"inReview\":[],\"landed\":[]}\n" {
 		t.Errorf("unknown project: %d %s", code, body)
 	}
 }

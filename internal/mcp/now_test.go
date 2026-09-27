@@ -188,7 +188,7 @@ func TestGetNowToolEmptyBoardIsArrays(t *testing.T) {
 	if isError {
 		t.Fatalf("get_now errored: %s", text)
 	}
-	want := `{"inProgress":[],"inReview":[],"landed":[]}`
+	want := `{"inProgress":[],"waiting":[],"inReview":[],"landed":[]}`
 	if text != want {
 		t.Errorf("get_now on an empty board = %s, want %s", text, want)
 	}

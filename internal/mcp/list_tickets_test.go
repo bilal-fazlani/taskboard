@@ -95,7 +95,7 @@ func TestListTicketsToolFilters(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), `"in-progress"`) {
 			t.Fatalf("list_tickets %v: err = %v, want it to name %q", bad, err, "in-progress")
 		}
-		for _, st := range models.Statuses {
+		for _, st := range models.KnownStatuses {
 			if !strings.Contains(err.Error(), st) {
 				t.Fatalf("list_tickets %v: err = %v, want it to name %q", bad, err, st)
 			}
@@ -116,10 +116,10 @@ func TestListTicketsToolDefinitionHasNewFilters(t *testing.T) {
 		if props["status"].Type != "array" || props["status"].Items == nil || props["status"].Items.Type != "string" {
 			t.Fatalf("list_tickets status = %+v, want an array of strings", props["status"])
 		}
-		if !reflect.DeepEqual(props["status"].Items.Enum, models.Statuses) {
-			t.Fatalf("list_tickets status items enum = %v, want %v", props["status"].Items.Enum, models.Statuses)
+		if !reflect.DeepEqual(props["status"].Items.Enum, models.KnownStatuses) {
+			t.Fatalf("list_tickets status items enum = %v, want %v", props["status"].Items.Enum, models.KnownStatuses)
 		}
-		for _, st := range models.Statuses {
+		for _, st := range models.KnownStatuses {
 			if !strings.Contains(props["status"].Description, st) {
 				t.Fatalf("list_tickets status description %q does not name %q", props["status"].Description, st)
 			}

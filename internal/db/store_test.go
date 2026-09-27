@@ -1955,18 +1955,19 @@ func TestGetBoardHasAColumnPerStatusInOrder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reading the board: %v", err)
 	}
-	if len(board.Columns) != len(models.Statuses) {
-		t.Fatalf("board has %d columns, want %d", len(board.Columns), len(models.Statuses))
+	want := []string{"todo", "in_progress", "needs_user_input", "agent_review", "done"}
+	if len(board.Columns) != len(want) {
+		t.Fatalf("board has %d columns, want %d", len(board.Columns), len(want))
 	}
-	for i, status := range models.Statuses {
+	for i, status := range want {
 		if board.Columns[i].Status != status {
 			t.Fatalf("column %d is %q, want %q", i, board.Columns[i].Status, status)
 		}
 	}
 
-	review := board.Columns[2]
+	review := board.Columns[3]
 	if review.Status != models.StatusAgentReview {
-		t.Fatalf("third column is %q, want %q", review.Status, models.StatusAgentReview)
+		t.Fatalf("fourth column is %q, want %q", review.Status, models.StatusAgentReview)
 	}
 	if len(review.Tickets) != 1 || review.Tickets[0].ID != tk.ID {
 		t.Fatalf("agent_review column holds %d tickets, want just the moved one", len(review.Tickets))

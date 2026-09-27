@@ -280,7 +280,7 @@ func TestNowLandedIsTheLastDayNewestFirstAtMostTen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(data) != `{"inProgress":[],"inReview":[],"landed":[]}` {
+	if string(data) != `{"inProgress":[],"waiting":[],"inReview":[],"landed":[]}` {
 		t.Errorf("empty board = %s", data)
 	}
 }

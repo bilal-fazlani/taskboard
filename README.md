@@ -261,7 +261,7 @@ ticket whose dependencies are unfinished can still be moved to any status.
 The reverse direction is derived, not stored. When `BILL-5` depends on `BILL-2`,
 `BILL-2` lists `BILL-5` under *blocks* automatically, and that list is read-only.
 
-#### Available MCP Tools (27)
+#### Available MCP Tools (31)
 
 | Tool                     | Description                                      |
 | ------------------------ | ------------------------------------------------ |
@@ -289,7 +289,7 @@ The reverse direction is derived, not stored. When `BILL-5` depends on `BILL-2`,
 | **Board**                |                                                  |
 | `get_board`              | Get full Kanban board grouped by status          |
 | **Now**                  |                                                  |
-| `get_now`                | What's moving now: in progress, in review, landed, compactly |
+| `get_now`                | What's moving now: in progress, waiting on the person, in review, landed, compactly |
 | **Subtasks**             |                                                  |
 | `create_subtask`         | Add a subtask to a ticket                        |
 | `batch_create_subtasks`  | Add multiple subtasks to a ticket at once        |
@@ -299,6 +299,25 @@ The reverse direction is derived, not stored. When `BILL-5` depends on `BILL-2`,
 | `write_entry`            | Record a decision, learning, hand-off, proof or review, or replace one |
 | `list_entries`           | Read a ticket's, epic's or project's entries, newest first, by page |
 | `handle_note`            | Mark one of the person's notes handled           |
+| **Agents**               |                                                  |
+| `identify_agent`         | Name your session and yourself in it; answers your `agentId` |
+| `request_user_input`     | Ask the person for an approval or an answer; answers the request's id at once |
+| `await_answer`           | Wait on your request's answer, or time out unanswered to call again |
+| `release_ticket`         | Give a ticket back with a hand-off, or finish it with proof |
+
+#### Agents and user input
+
+An agent calls `identify_agent` once when it starts, with its session (vendor,
+the vendor's session ID, resume command, machine, web link) and its role,
+model and provider, and passes the `agentId` it gets on every call that takes
+one. Subagents share their parent's MCP connection and session ID, so each
+identifies as its own agent. `request_user_input` puts the ticket in
+`needs_user_input` until the person answers; `await_answer` waits on that one
+request (50 seconds by default, at most 600) without holding up other calls
+on the connection, and keeps the session live while it waits. Only a request
+moves a ticket to `needs_user_input`, so `move_ticket` and `update_ticket`
+refuse it; `list_tickets` filters on it, `get_board` has a column for it and
+`get_now` lists its tickets under `waiting`.
 
 #### Entries and open notes
 

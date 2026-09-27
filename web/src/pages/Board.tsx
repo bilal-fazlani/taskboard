@@ -150,7 +150,10 @@ export default function Board() {
       // Every project's tickets: the project is a filter, applied below.
       const board = await api.board.get();
       if (seq !== loadSeqRef.current) return;
-      setColumns(board.columns || []);
+      // Only the columns this board draws: the API also sends a column for
+      // each status it has no column for yet (needs_user_input), whose
+      // tickets would otherwise count here without showing.
+      setColumns((board.columns || []).filter((c) => isStatus(c.status)));
     } catch {
       if (seq !== loadSeqRef.current) return;
       // A failed refetch keeps what is on screen — an open editor included —

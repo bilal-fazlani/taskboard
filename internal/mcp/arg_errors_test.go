@@ -198,6 +198,10 @@ func TestToolHandlersRejectWronglyTypedArguments(t *testing.T) {
 		{"write_entry", map[string]any{"ticket": f.ticketID, "type": "learning", "text": 1, "agentId": "a1"}},
 		{"list_entries", map[string]any{"ticket": f.ticketID, "limit": "5"}},
 		{"handle_note", map[string]any{"id": 1, "agentId": "a1"}},
+		{"identify_agent", map[string]any{"vendor": "codex", "vendorSessionId": "s", "role": 1, "model": "m", "provider": "openai"}},
+		{"release_ticket", map[string]any{"ticket": f.ticketID, "agentId": "a1", "outcome": "finish", "proof": 1}},
+		{"request_user_input", map[string]any{"ticket": f.ticketID, "agentId": "a1", "type": "question", "prompt": "?", "choices": "a"}},
+		{"await_answer", map[string]any{"request": "r", "agentId": "a1", "timeoutSeconds": "5"}},
 	}
 
 	seen := make(map[string]bool, len(tests))

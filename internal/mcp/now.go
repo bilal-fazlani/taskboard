@@ -12,10 +12,11 @@ type nowArgs struct {
 	projectRefArg
 }
 
-// nowActive is a ticket in progress or in review, as get_now answers it:
-// enough for an orchestrator to see what's moving, not the description or
-// subtask list get_ticket would cost a second call for. Its status is left
-// out: the inProgress/inReview group it is in already says it, and its
+// nowActive is a ticket in progress, waiting on the person or in review, as
+// get_now answers it: enough for an orchestrator to see what's moving, not
+// the description or subtask list get_ticket would cost a second call for.
+// Its status is left out: the inProgress, waiting or inReview group it is
+// in already says it, and its
 // project prefix is left out too: key already starts with it.
 type nowActive struct {
 	Key   string `json:"key"`
@@ -46,12 +47,12 @@ type nowLanded struct {
 	Shas []string `json:"shas,omitempty"`
 }
 
-// nowAnswer is get_now's answer: the same three groups as Store.Now and the
-// web UI's Now page, compacted to what checking a run's state needs. Its
-// lists are never nil, so an empty board answers with [] rather than null
-// (ACP-148).
+// nowAnswer is get_now's answer: the same groups as Store.Now, compacted to
+// what checking a run's state needs. Its lists are never nil, so an empty
+// board answers with [] rather than null (ACP-148).
 type nowAnswer struct {
 	InProgress []nowActive `json:"inProgress"`
+	Waiting    []nowActive `json:"waiting"`
 	InReview   []nowActive `json:"inReview"`
 	Landed     []nowLanded `json:"landed"`
 }
@@ -73,11 +74,15 @@ func (s *MCPServer) getNow(a nowArgs) (nowAnswer, error) {
 func compactNow(n *models.Now) nowAnswer {
 	out := nowAnswer{
 		InProgress: make([]nowActive, len(n.InProgress)),
+		Waiting:    make([]nowActive, len(n.Waiting)),
 		InReview:   make([]nowActive, len(n.InReview)),
 		Landed:     make([]nowLanded, len(n.Landed)),
 	}
 	for i, t := range n.InProgress {
 		out.InProgress[i] = compactNowActive(t)
+	}
+	for i, t := range n.Waiting {
+		out.Waiting[i] = compactNowActive(t)
 	}
 	for i, t := range n.InReview {
 		out.InReview[i] = compactNowActive(t)

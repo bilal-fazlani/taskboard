@@ -369,6 +369,31 @@ func TestEveryTicketCallFlagsOpenNotes(t *testing.T) {
 			t.Errorf("%s(%v) says openNotes %d, want %d", c.tool, c.args, got, want)
 		}
 	}
+	// The agent tools on a ticket, in the order an agent calls them; one note
+	// is still open.
+	if _, err := st.ClaimTicket(f.ticket.ID, f.agent); err != nil {
+		t.Fatal(err)
+	}
+	flags := func(tool string, args map[string]any) []string {
+		covered[tool] = true
+		texts := callAllText(t, f.s, tool, args)
+		if got := openNotesIn(t, texts); got != 1 {
+			t.Errorf("%s(%v) says openNotes %d, want 1", tool, args, got)
+		}
+		return texts
+	}
+	var asked struct {
+		ID string `json:"id"`
+	}
+	texts := flags("request_user_input", map[string]any{"ticket": "ACP-1", "agentId": f.agent, "type": "question", "prompt": "Port?"})
+	if err := json.Unmarshal([]byte(texts[0]), &asked); err != nil {
+		t.Fatal(err)
+	}
+	flags("await_answer", map[string]any{"request": asked.ID, "agentId": f.agent, "timeoutSeconds": 0})
+	if _, err := st.AnswerRequest(asked.ID, "3014", "Bilal"); err != nil {
+		t.Fatal(err)
+	}
+	flags("release_ticket", map[string]any{"ticket": "ACP-1", "agentId": f.agent, "outcome": "give_back", "handOff": "Stopped at the tests."})
 	// Every registered tool is either checked by a call above or is on this
 	// list of tools that are not about one existing ticket, so a new tool
 	// fails here until it is classified: one that takes a ticket, however it
@@ -381,6 +406,8 @@ func TestEveryTicketCallFlagsOpenNotes(t *testing.T) {
 		"list_tickets": true, "find_tickets_by_commit": true, "get_board": true, "get_now": true,
 		// A new ticket has no notes yet, and a deleted one is gone.
 		"create_ticket": true, "delete_ticket": true,
+		// Identifying names a session and an agent, not a ticket.
+		"identify_agent": true,
 	}
 	for _, def := range f.s.toolDefinitions() {
 		switch {

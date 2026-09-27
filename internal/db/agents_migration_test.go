@@ -3,6 +3,7 @@ package db
 import (
 	"database/sql"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -268,10 +269,10 @@ func TestTicketsCarryAnOptionalHoldingAgent(t *testing.T) {
 	}
 }
 
-// needs_user_input is known in models, but the store, which every surface
-// writes and filters through, still refuses it, and the board has no column
-// for it.
-func TestStoreDoesNotOfferNeedsUserInputYet(t *testing.T) {
+// Only a request puts a ticket in needs_user_input, so no write sets it,
+// and the refusal says how a ticket gets there; a list filters on it, and
+// the board has a column for it.
+func TestStoreWritesRefuseNeedsUserInput(t *testing.T) {
 	s := newTestStore(t)
 	p := seedProject(t, s, "Billing", "BILL")
 	tk := seedTicket(t, s, p.ID, "Invoice export")
@@ -281,19 +282,25 @@ func TestStoreDoesNotOfferNeedsUserInputYet(t *testing.T) {
 	wantRejected(t, err, "creating a ticket in needs_user_input")
 	_, err = s.MoveTicket(tk.ID, models.MoveTicketRequest{Status: status})
 	wantRejected(t, err, "moving a ticket to needs_user_input")
+	if !strings.Contains(err.Error(), "request user input") {
+		t.Errorf("moving to needs_user_input: %v; want it to say a request puts a ticket there", err)
+	}
 	_, err = s.UpdateTicket(tk.ID, models.UpdateTicketRequest{Status: &status})
 	wantRejected(t, err, "updating a ticket to needs_user_input")
-	_, err = s.ListTickets(models.TicketFilter{Statuses: []string{status}})
-	wantRejected(t, err, "filtering on needs_user_input")
+	if list, err := s.ListTickets(models.TicketFilter{Statuses: []string{status}}); err != nil || len(list) != 0 {
+		t.Fatalf("filtering on needs_user_input: %+v, %v; want no tickets and no error", list, err)
+	}
 
 	board, err := s.GetBoard(p.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
+	has := false
 	for _, c := range board.Columns {
-		if c.Status == status {
-			t.Fatal("the board has a needs_user_input column")
-		}
+		has = has || c.Status == status
+	}
+	if !has {
+		t.Fatal("the board has no needs_user_input column")
 	}
 }
 

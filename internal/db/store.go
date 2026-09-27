@@ -464,9 +464,9 @@ func (s *Store) listTickets(filter models.TicketFilter, page *ticketPage) ([]mod
 // several repeated or array values; the CLI already splits its flag itself,
 // so this is a harmless no-op for it. Blank pieces, and surrounding
 // whitespace, are dropped rather than narrowing the filter to nothing, the
-// same as before. Anything left that is not one of models.Statuses is
-// refused with invalidStatus, naming the allowed values, instead of quietly
-// matching no tickets.
+// same as before. Every status a ticket can hold is a filter, the one no
+// write sets (needs_user_input) included; anything else is refused, naming
+// the allowed values, instead of quietly matching no tickets.
 func splitStatusFilter(values []string) ([]string, error) {
 	var out []string
 	for _, v := range values {
@@ -474,8 +474,8 @@ func splitStatusFilter(values []string) ([]string, error) {
 			if part = strings.TrimSpace(part); part == "" {
 				continue
 			}
-			if !validStatus(part) {
-				return nil, invalidStatus(part)
+			if !models.IsKnownStatus(part) {
+				return nil, invalidInput("invalid status %q: must be one of %s", part, strings.Join(models.KnownStatuses, ", "))
 			}
 			out = append(out, part)
 		}
@@ -1066,8 +1066,11 @@ func (s *Store) DeleteTicket(id string) error {
 	return deleteRowOrNotFound(s.db, "tickets", liveTickets, "ticket", id)
 }
 
+// GetBoard is every ticket, or one project's, in a column per status a
+// ticket can hold (models.KnownStatuses), in board order: needs_user_input,
+// the tickets waiting on the person, follows in_progress.
 func (s *Store) GetBoard(projectID string) (*models.Board, error) {
-	statuses := models.Statuses
+	statuses := models.KnownStatuses
 	board := &models.Board{
 		Columns: make([]models.Column, len(statuses)),
 	}

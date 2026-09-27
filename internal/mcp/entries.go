@@ -270,6 +270,7 @@ func (s *MCPServer) ticketOfCall(name string, args json.RawMessage) string {
 		TicketID string `json:"ticketId"`
 		Ticket   string `json:"ticket"`
 		Epic     string `json:"epic"`
+		Request  string `json:"request"`
 	}
 	if len(args) == 0 || json.Unmarshal(args, &a) != nil {
 		return ""
@@ -286,8 +287,14 @@ func (s *MCPServer) ticketOfCall(name string, args json.RawMessage) string {
 			return ""
 		}
 		return st.TicketID
-	case "list_documents", "create_document", "write_entry", "list_entries":
+	case "list_documents", "create_document", "write_entry", "list_entries", "release_ticket", "request_user_input":
 		ref = a.Ticket
+	case "await_answer":
+		r, err := s.store.GetRequest(a.Request)
+		if err != nil || r == nil {
+			return ""
+		}
+		return r.TicketID
 	case "get_document", "update_document", "delete_document":
 		if strings.TrimSpace(a.Ticket) == "" {
 			if strings.TrimSpace(a.Epic) != "" {

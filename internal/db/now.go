@@ -18,15 +18,17 @@ const (
 	NowLandedLimit  = 10
 )
 
-// Now reads what is moving at the instant now: every ticket in progress or
-// in review, longest running first, and the tickets that landed within
-// NowLandedWindow of now. projectRef, an id or prefix, narrows all three to
-// one project; "" means every project, and a project that does not resolve
-// matches nothing, as a list filter does. It costs a fixed handful of
-// queries, whatever the number of tickets.
+// Now reads what is moving at the instant now: every ticket in progress,
+// waiting on the person (needs_user_input) or in review, longest in its
+// status first, and the tickets that landed within NowLandedWindow of now.
+// projectRef, an id or prefix, narrows every group to one project; ""
+// means every project, and a project that does not resolve matches
+// nothing, as a list filter does. It costs a fixed handful of queries,
+// whatever the number of tickets.
 func (s *Store) Now(projectRef string, now time.Time) (*models.Now, error) {
 	out := &models.Now{
 		InProgress: []models.NowTicket{},
+		Waiting:    []models.NowTicket{},
 		InReview:   []models.NowTicket{},
 		Landed:     []models.LandedTicket{},
 	}
@@ -47,9 +49,12 @@ func (s *Store) Now(projectRef string, now time.Time) (*models.Now, error) {
 		return nil, err
 	}
 	for _, t := range active {
-		if t.Status == models.StatusInProgress {
+		switch t.Status {
+		case models.StatusInProgress:
 			out.InProgress = append(out.InProgress, t)
-		} else {
+		case models.StatusNeedsUserInput:
+			out.Waiting = append(out.Waiting, t)
+		default:
 			out.InReview = append(out.InReview, t)
 		}
 	}
@@ -71,14 +76,14 @@ func inList(ids []string) (string, []any) {
 	return strings.TrimSuffix(strings.Repeat("?,", len(ids)), ","), args
 }
 
-// nowActive reads the tickets in progress or in review, with their subtask
-// progress, review rounds, time in their status and, in review, the state of
-// their review.
+// nowActive reads the tickets in progress, waiting on the person or in
+// review, with their subtask progress, review rounds, time in their status
+// and, in review, the state of their review.
 func (s *Store) nowActive(projectID string) ([]models.NowTicket, error) {
 	rows, err := s.db.Query(`SELECT t.id, COALESCE(p.prefix, ''), t.number, t.title, t.status, t.created_at
 		FROM `+liveTickets+` t LEFT JOIN `+liveProjects+` p ON p.id = t.project_id
-		WHERE t.status IN (?, ?) AND (? = '' OR t.project_id = ?)`,
-		models.StatusInProgress, models.StatusAgentReview, projectID, projectID)
+		WHERE t.status IN (?, ?, ?) AND (? = '' OR t.project_id = ?)`,
+		models.StatusInProgress, models.StatusNeedsUserInput, models.StatusAgentReview, projectID, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("loading active tickets: %w", err)
 	}
