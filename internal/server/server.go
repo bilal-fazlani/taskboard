@@ -247,6 +247,7 @@ func (s *Server) setupRoutes(webFS fs.FS) {
 		})
 
 		r.Get("/board", s.getBoard)
+		r.Get("/now", s.getNow)
 		r.Get("/events", s.handleEvents)
 		r.Get("/version", getVersion)
 	})
