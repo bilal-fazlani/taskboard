@@ -21,6 +21,7 @@ import {
 } from "../lib/epics";
 import { NO_EPIC } from "../lib/filters";
 import { readLastView } from "../lib/lastView";
+import { newTicketBlocked } from "../lib/newTicketDefaults";
 import { STATUS_COLORS, STATUS_LABELS } from "../lib/status";
 
 // The progress bar: one segment per status, as wide as its share of the
@@ -568,16 +569,28 @@ export default function Epics() {
     );
   }
 
+  // Why New epic can't open its dialog here, if it can't: the new-ticket rule
+  // (see newTicketBlocked), then the shown project's epics still loading, which
+  // the dialog checks a new name against.
+  const newEpicBlocked =
+    newTicketBlocked(filters.project, projects, false, "epics") ??
+    (shownProject && current ? null : "Loading epics…");
+
   return (
     <div className="flex h-full flex-col">
       <header className="flex h-14 shrink-0 items-center justify-between border-b border-slate-800 px-6">
         <h1 className="text-lg font-semibold text-white">Epics</h1>
+        {/* aria-disabled rather than disabled, so the reason shows on hover and
+            the button stays focusable for a screen reader to announce it. */}
         <button
           ref={newEpicRef}
           type="button"
-          disabled={!shownProject || current === null}
-          onClick={(e) => openDialog({ kind: "new" }, e.currentTarget)}
-          className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3.5 py-1.5 text-sm font-medium text-white transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+          aria-disabled={newEpicBlocked !== null || undefined}
+          title={newEpicBlocked ?? undefined}
+          onClick={(e) => {
+            if (newEpicBlocked === null) openDialog({ kind: "new" }, e.currentTarget);
+          }}
+          className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3.5 py-1.5 text-sm font-medium text-white transition-colors hover:bg-blue-500 aria-disabled:cursor-not-allowed aria-disabled:opacity-50 aria-disabled:hover:bg-blue-600"
         >
           <Plus className="h-4 w-4" />
           New epic

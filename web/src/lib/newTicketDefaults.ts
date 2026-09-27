@@ -82,11 +82,16 @@ export function newTicketDefaults(
  * attempt so far failed, which changes only the message shown while
  * `projects` is null: a load still on its way says so, one that failed says
  * that instead, and the next live refresh retries it on its own.
+ *
+ * The Epics view's New epic follows the same rule, since a new epic belongs in
+ * the view's project just as a new ticket does; `noun` names what the reason
+ * says can't be added.
  */
 export function newTicketBlocked(
   viewProject: string,
   projects: readonly PickableProject[] | null,
   failed = false,
+  noun: "tickets" | "epics" = "tickets",
 ): string | null {
   if (projects === null) return failed ? "Couldn't load projects. Retrying…" : "Loading projects…";
   const shown = namedProject(
@@ -94,7 +99,7 @@ export function newTicketBlocked(
     viewProject,
   );
   const archived = shown === null ? undefined : projects.find((p) => p.prefix === shown && isArchived(p));
-  if (archived) return `${archived.name} is archived. Unarchive it to add tickets.`;
-  if (activeProjects(projects).length === 0) return "Create a project to add tickets.";
+  if (archived) return `${archived.name} is archived. Unarchive it to add ${noun}.`;
+  if (activeProjects(projects).length === 0) return `Create a project to add ${noun}.`;
   return null;
 }

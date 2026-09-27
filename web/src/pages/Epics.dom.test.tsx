@@ -178,6 +178,66 @@ describe("Epics project selector", () => {
   });
 });
 
+describe("Epics New epic button", () => {
+  const newEpic = () => screen.getByRole("button", { name: "New epic" });
+  // Disabled as the new-ticket buttons are, with the reason as its title,
+  // which hovering shows and a screen reader announces as its description; a
+  // click opens nothing.
+  const expectDisabled = async (reason: string) => {
+    expect(newEpic().getAttribute("aria-disabled")).toBe("true");
+    expect(newEpic().getAttribute("title")).toBe(reason);
+    expect(screen.getByRole("button", { description: reason })).toBe(newEpic());
+    await act(async () => newEpic().click());
+    expect(screen.queryByRole("dialog")).toBeNull();
+  };
+
+  it("is enabled, with no reason, on an active project", async () => {
+    await mount("/epics?project=LDR");
+    expect(newEpic().getAttribute("aria-disabled")).toBeNull();
+    expect(newEpic().getAttribute("title")).toBeNull();
+    await act(async () => newEpic().click());
+    expect(screen.getByRole("dialog").textContent).toContain("New epic");
+  });
+
+  it("is disabled on an archived project the URL keeps selected, naming it and epics", async () => {
+    mockApi.projects.list.mockResolvedValue([...PROJECTS, project("OLD", "archived")]);
+    await mount("/epics?project=OLD");
+    expect(params().get("project")).toBe("OLD");
+    await expectDisabled("OLD is archived. Unarchive it to add epics.");
+  });
+
+  it("is disabled when no project is active", async () => {
+    mockApi.projects.list.mockResolvedValue([project("OLD", "archived")]);
+    await mount("/epics");
+    await expectDisabled("Create a project to add epics.");
+  });
+
+  it("is disabled when there are no projects at all", async () => {
+    mockApi.projects.list.mockResolvedValue([]);
+    await mount("/epics");
+    await expectDisabled("Create a project to add epics.");
+  });
+
+  it("waits for the projects to load, then opens the dialog", async () => {
+    let arrive!: (projects: Project[]) => void;
+    mockApi.projects.list.mockReturnValue(new Promise<Project[]>((resolve) => (arrive = resolve)));
+    await mount("/epics?project=ACP");
+    await expectDisabled("Loading projects…");
+
+    await act(async () => arrive(PROJECTS));
+    await settle();
+    expect(newEpic().getAttribute("aria-disabled")).toBeNull();
+    await act(async () => newEpic().click());
+    expect(screen.getByRole("dialog").textContent).toContain("New epic");
+  });
+
+  it("waits for the project's epics, which a new name is checked against", async () => {
+    mockApi.epics.list.mockReturnValue(new Promise<EpicList>(() => {}));
+    await mount("/epics?project=ACP");
+    await expectDisabled("Loading epics…");
+  });
+});
+
 describe("Epics sidebar link", () => {
   it("is bare, with no filters carried, and still lands on the remembered project", async () => {
     globalThis.localStorage.setItem(LAST_PROJECT_KEY, "LDR");

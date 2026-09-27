@@ -106,4 +106,13 @@ describe("newTicketBlocked", () => {
   it("waits for the projects to load", () => {
     expect(newTicketBlocked("ACP", null)).toBe("Loading projects…");
   });
+
+  it("names epics in the reason when asked for New epic", () => {
+    expect(newTicketBlocked("ACP", PROJECTS, false, "epics")).toBeNull();
+    expect(newTicketBlocked("OLD", [OLD, ...PROJECTS], false, "epics")).toBe(
+      "Aaa archived is archived. Unarchive it to add epics.",
+    );
+    expect(newTicketBlocked("", [OLD], false, "epics")).toBe("Create a project to add epics.");
+    expect(newTicketBlocked("ACP", null, false, "epics")).toBe("Loading projects…");
+  });
 });
