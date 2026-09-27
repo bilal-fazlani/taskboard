@@ -215,9 +215,23 @@ func (s *Server) setupRoutes(webFS fs.FS) {
 			r.Get("/{id}/documents", s.listTicketDocuments)
 			r.Get("/{id}/entries", s.listEntries(entryOnTicket))
 			r.Post("/{id}/entries", s.createEntry(entryOnTicket))
+			r.Post("/{id}/release", s.releaseTicket)
+			r.Post("/{id}/requests", s.createRequest)
+			r.Get("/{id}/requests", s.listTicketRequests)
 		})
 
 		r.Post("/entries/{id}/handled", s.markNoteHandled)
+
+		r.Route("/agents", func(r chi.Router) {
+			r.Get("/", s.listAgents)
+			r.Post("/", s.identifyAgent)
+			r.Get("/{id}", s.getAgent)
+		})
+
+		r.Route("/requests", func(r chi.Router) {
+			r.Post("/{id}/answer", s.answerRequest)
+			r.Get("/{id}/await", s.awaitAnswerRequest)
+		})
 
 		r.Route("/subtasks", func(r chi.Router) {
 			r.Post("/{id}/toggle", s.toggleSubtask)
@@ -397,6 +411,27 @@ func (s *Server) getConfig(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// shutdownAwareContext returns a context derived from parent that also ends
+// once the server starts shutting down (s.events.closed(), the same signal
+// that ends every /api/events stream). http.Server.Shutdown never cancels a
+// request's own context: it only stops new requests and waits up to
+// shutdownTimeout for in-flight ones to finish on their own, so a long-poll
+// handler that only watched its own request's context could hold up
+// shutdown until its own timeout, not the shorter shutdown grace period. The
+// caller must call the returned cancel func once done, to stop the
+// goroutine this starts.
+func (s *Server) shutdownAwareContext(parent context.Context) (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithCancel(parent)
+	go func() {
+		select {
+		case <-s.events.closed():
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+	return ctx, cancel
+}
+
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
@@ -407,8 +442,14 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
 }
 
-// writeStoreError maps a caller's bad input to 400 and everything else to 500.
+// writeStoreError maps a ticket held by another live session (db.ErrTicketHeld)
+// to 409, a caller's bad input to 400, and everything else to 500.
 func writeStoreError(w http.ResponseWriter, err error) {
+	var held *db.ErrTicketHeld
+	if errors.As(err, &held) {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
 	var invalid *db.ErrInvalidInput
 	if errors.As(err, &invalid) {
 		writeError(w, http.StatusBadRequest, err.Error())

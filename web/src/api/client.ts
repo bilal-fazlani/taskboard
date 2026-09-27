@@ -129,6 +129,53 @@ export interface Subtask {
   position: number;
 }
 
+/** One worker in a session: the main agent, or a subagent it launched. It
+ * lives as long as its process and is not a lasting identity. Ticket.agent's
+ * shape: no nested session (unlike EntryAgent below, which entries need
+ * eagerly to show who wrote them, and which extends this). */
+export interface Agent {
+  id: string;
+  sessionId: string;
+  role: string;
+  model: string;
+  provider: string;
+  createdAt: string;
+  lastSeenAt: string;
+  /** When any agent of this agent's session was last seen. Optional because
+   * fixtures leave it out; a real read always sets it. */
+  sessionLastSeenAt?: string;
+  /** Whether the agent's session has gone unseen past the stale threshold.
+   * Optional for the same reason. */
+  stale?: boolean;
+}
+
+/** One agent as GET /api/agents lists it, or GET /api/agents/{id} answers
+ * it: the agent with its session (EntryAgent, below), and the tickets it
+ * currently holds. */
+export interface AgentListItem extends EntryAgent {
+  heldTickets: TicketRef[];
+}
+
+/** The types of user input an agent can ask the person for. */
+export type UserInputType = "approval" | "question";
+
+/** An agent's request for user input on a ticket. A ticket has at most one
+ * unanswered request at a time. */
+export interface TicketRequest {
+  id: string;
+  ticketId: string;
+  agentId: string;
+  type: UserInputType;
+  prompt: string;
+  /** The answers offered; empty when the answer is free. */
+  choices: string[];
+  answer?: string;
+  /** Who answered: the local person today. */
+  answeredBy?: string;
+  createdAt: string;
+  answeredAt?: string;
+}
+
 export interface Ticket {
   id: string;
   projectId: string;
@@ -171,6 +218,11 @@ export interface Ticket {
    * read. Only the full ticket carries them, and each is left out at 0. */
   epicOpenNotes?: number;
   projectOpenNotes?: number;
+  /** The agent holding the ticket; left out when no agent holds it. */
+  agent?: Agent;
+  /** The request for user input the ticket waits on; left out when it has
+   * none. Only set while the ticket is needs_user_input. */
+  openRequest?: TicketRequest;
 }
 
 /** The entry types (internal/models/entry.go). The set is open: an unknown
@@ -223,21 +275,10 @@ export interface AgentSession {
   createdAt: string;
 }
 
-/** An agent that wrote an entry or handled a note, with its session. */
-export interface EntryAgent {
-  id: string;
-  sessionId: string;
-  role: string;
-  model: string;
-  /** anthropic, openai, google or other. */
-  provider: string;
-  createdAt: string;
-  lastSeenAt: string;
-  /** When any agent of its session was last seen, and whether that is past
-   * the stale threshold, as of the read. Optional because fixtures leave
-   * them out. */
-  sessionLastSeenAt?: string;
-  stale?: boolean;
+/** An agent that wrote an entry or handled a note, with its session. Its
+ * agent fields are Agent's own (declared once there); sessionLastSeenAt and
+ * stale are optional on Agent itself because fixtures leave them out. */
+export interface EntryAgent extends Agent {
   session: AgentSession;
 }
 

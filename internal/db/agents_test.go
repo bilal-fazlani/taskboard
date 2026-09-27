@@ -207,6 +207,51 @@ func TestStoreDecidesStalenessFromLastSeenAndTheSetting(t *testing.T) {
 	}
 }
 
+// ListAgents reads every agent in one query and every currently held ticket
+// in a second, grouping held tickets by agent in Go rather than querying per
+// agent (Review 1 on ACP-11). This checks the grouping itself: an agent
+// holding several tickets gets them in order, an agent holding none gets a
+// non-nil empty slice, and each agent carries its own session.
+func TestListAgentsGroupsHeldTicketsByAgent(t *testing.T) {
+	s := newTestStore(t)
+	p := seedProject(t, s, "Agent Control Plane", "ACP")
+	busy := identify(t, s, "busy", "implementer")
+	idle := identify(t, s, "idle", "implementer")
+
+	first := seedTicket(t, s, p.ID, "First")
+	second := seedTicket(t, s, p.ID, "Second")
+	mustClaim(t, s, first.ID, busy.ID)
+	mustClaim(t, s, second.ID, busy.ID)
+
+	items, err := s.ListAgents()
+	if err != nil {
+		t.Fatal(err)
+	}
+	byID := make(map[string]models.AgentListItem, len(items))
+	for _, item := range items {
+		byID[item.Agent.ID] = item
+	}
+
+	busyItem, ok := byID[busy.ID]
+	if !ok {
+		t.Fatalf("busy agent missing from %+v", items)
+	}
+	if len(busyItem.HeldTickets) != 2 || busyItem.HeldTickets[0].Key != "ACP-1" || busyItem.HeldTickets[1].Key != "ACP-2" {
+		t.Fatalf("busy agent's held tickets = %+v, want ACP-1 then ACP-2", busyItem.HeldTickets)
+	}
+	if busyItem.Session.Vendor != "claude_code" || busyItem.Session.ID != busy.SessionID {
+		t.Fatalf("busy agent's session = %+v", busyItem.Session)
+	}
+
+	idleItem, ok := byID[idle.ID]
+	if !ok {
+		t.Fatalf("idle agent missing from %+v", items)
+	}
+	if idleItem.HeldTickets == nil || len(idleItem.HeldTickets) != 0 {
+		t.Fatalf("idle agent's held tickets = %#v, want a non-nil empty slice", idleItem.HeldTickets)
+	}
+}
+
 func wantHistoryNote(t *testing.T, s *Store, ticketID, from, to, contains string) {
 	t.Helper()
 	changes, err := s.ListStatusChanges(ticketID)

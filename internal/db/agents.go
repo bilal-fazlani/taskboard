@@ -184,6 +184,131 @@ func (s *Store) GetAgent(id string) (*models.Agent, error) {
 	return &a, nil
 }
 
+// sessionSelect reads a session.
+const sessionSelect = `SELECT id, vendor, vendor_session_id, machine, resume_command, web_url, created_at FROM sessions`
+
+func scanSession(row interface{ Scan(...any) error }) (models.Session, error) {
+	var sess models.Session
+	err := row.Scan(&sess.ID, &sess.Vendor, &sess.VendorSessionID, &sess.Machine, &sess.ResumeCommand, &sess.WebURL, &sess.CreatedAt)
+	return sess, err
+}
+
+// agentWithSessionSelect reads every agent's own session fields (aliased
+// sess) first, then the agent itself (agentColumns, aliased a), one row per
+// agent, joined by session_id. agentColumns' session-wide "last seen"
+// subquery is correlated on a.session_id and so is unaffected by this join
+// to sess; it is not a "plain join" replacing that subquery, only an extra
+// one reading the session's own fields alongside it. Scan a row with
+// scanAgent(rows, &session's fields...), the way EntryAgents does.
+const agentWithSessionSelect = `SELECT sess.id, sess.vendor, sess.vendor_session_id, sess.machine, sess.resume_command, sess.web_url, sess.created_at,
+	` + agentColumns + `
+	FROM agents a JOIN sessions sess ON sess.id = a.session_id`
+
+// heldTicketsSelect reads every ticket currently held by an agent (t.agent_id
+// IS NOT NULL), with that agent's id first, so ListAgents can read every held
+// ticket in one query and group the rows by agent in Go, rather than one
+// query per agent.
+const heldTicketsSelect = `SELECT t.agent_id, t.id,
+	COALESCE(p.prefix, '') || '-' || t.number AS key, t.title, t.status
+	FROM ` + liveTickets + ` t LEFT JOIN ` + liveProjects + ` p ON t.project_id = p.id
+	WHERE t.agent_id IS NOT NULL
+	ORDER BY t.agent_id, t.number`
+
+// ListAgents returns every agent there is, most recently seen first, each
+// with its session and the tickets it currently holds. It reads in two
+// queries in all, however many agents there are: every agent joined to its
+// session, then every currently held ticket, grouped by agent here.
+func (s *Store) ListAgents() ([]models.AgentListItem, error) {
+	settings, err := s.AgentSettings()
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now()
+
+	rows, err := s.db.Query(agentWithSessionSelect + ` ORDER BY a.last_seen_at DESC`)
+	if err != nil {
+		return nil, fmt.Errorf("listing agents: %w", err)
+	}
+	items := []models.AgentListItem{}
+	for rows.Next() {
+		var sess models.Session
+		a, err := scanAgent(rows, &sess.ID, &sess.Vendor, &sess.VendorSessionID, &sess.Machine, &sess.ResumeCommand, &sess.WebURL, &sess.CreatedAt)
+		if err != nil {
+			rows.Close()
+			return nil, err
+		}
+		markStale(settings, &a, now)
+		items = append(items, models.AgentListItem{EntryAgent: models.EntryAgent{Agent: a, Session: sess}, HeldTickets: []models.TicketRef{}})
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	rows.Close()
+
+	byAgent := make(map[string]*models.AgentListItem, len(items))
+	for i := range items {
+		byAgent[items[i].Agent.ID] = &items[i]
+	}
+
+	heldRows, err := s.db.Query(heldTicketsSelect)
+	if err != nil {
+		return nil, fmt.Errorf("listing held tickets: %w", err)
+	}
+	defer heldRows.Close()
+	for heldRows.Next() {
+		var agentID string
+		var ref models.TicketRef
+		if err := heldRows.Scan(&agentID, &ref.ID, &ref.Key, &ref.Title, &ref.Status); err != nil {
+			return nil, err
+		}
+		if item, ok := byAgent[agentID]; ok {
+			item.HeldTickets = append(item.HeldTickets, ref)
+		}
+	}
+	if err := heldRows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+// GetAgentView answers one agent with its session and held tickets, or
+// (nil, nil) for an unknown one, the same shape ListAgents uses for each.
+func (s *Store) GetAgentView(id string) (*models.AgentListItem, error) {
+	a, err := s.GetAgent(id)
+	if err != nil {
+		return nil, err
+	}
+	if a == nil {
+		return nil, nil
+	}
+	item, err := s.agentListItem(*a)
+	if err != nil {
+		return nil, err
+	}
+	return &item, nil
+}
+
+// agentListItem fills in a's session and the tickets it currently holds.
+func (s *Store) agentListItem(a models.Agent) (models.AgentListItem, error) {
+	sess, err := scanSession(s.db.QueryRow(sessionSelect+` WHERE id = ?`, a.SessionID))
+	if err != nil {
+		return models.AgentListItem{}, fmt.Errorf("reading agent %s's session: %w", a.ID, err)
+	}
+	rows, err := s.db.Query(ticketRefSelect+` WHERE t.agent_id = ? ORDER BY t.number`, a.ID)
+	if err != nil {
+		return models.AgentListItem{}, fmt.Errorf("reading agent %s's held tickets: %w", a.ID, err)
+	}
+	held, err := scanTicketRefs(rows)
+	if err != nil {
+		return models.AgentListItem{}, err
+	}
+	if held == nil {
+		held = []models.TicketRef{}
+	}
+	return models.AgentListItem{EntryAgent: models.EntryAgent{Agent: a, Session: sess}, HeldTickets: held}, nil
+}
+
 // TouchAgent records that the agent was seen now. Every write an agent
 // makes touches it the same way, inside its own transaction. An unknown
 // agent is an ErrInvalidInput.
@@ -211,10 +336,11 @@ func touchAgent(q dbtx, id string, now time.Time) error {
 	return nil
 }
 
-// ErrTicketHeld is a claim refused because a live agent holds the ticket. It
-// names that agent and when it was last seen. It is also an
-// ErrInvalidInput, so a surface that knows no better reports it as the
-// caller's mistake.
+// ErrTicketHeld is a claim or release refused because another agent, outside
+// the caller's session, holds the ticket. It names that agent and, for a
+// claim, when its session was last seen. It is also an ErrInvalidInput, so a
+// surface that knows no better reports it as the caller's mistake; the HTTP
+// layer recognizes it ahead of that and answers 409 instead.
 type ErrTicketHeld struct {
 	Ticket string
 	Holder models.Agent
@@ -334,9 +460,10 @@ func (s *Store) ClaimTicket(ticketID, agentID string) (*models.Claim, error) {
 // the same transaction as the move, and the agent is cleared. It touches
 // the releasing agent.
 //
-// A release without its record is refused, naming what is missing, and so
-// is one by an agent outside the holder's session, or one while the ticket
-// waits on the person. Nothing is written when it is refused.
+// A release without its record is refused, naming what is missing, and so is
+// one while the ticket waits on the person. One by an agent outside the
+// holder's session is refused with an ErrTicketHeld. Nothing is written
+// when it is refused.
 func (s *Store) ReleaseTicket(ticketID string, req models.ReleaseTicketRequest) (*models.Ticket, error) {
 	agentID := strings.TrimSpace(req.AgentID)
 	outcome := strings.TrimSpace(req.Outcome)
@@ -396,8 +523,13 @@ func (s *Store) ReleaseTicket(ticketID string, req models.ReleaseTicketRequest) 
 			return nil, err
 		}
 		if !same {
-			return nil, invalidInput("ticket %s is held by agent %s of another session, not %s: "+
-				"only the agent holding a ticket, or its session, releases it", key, holder, agentID)
+			prev, err := scanAgent(tx.QueryRow(agentSelect+` WHERE a.id = ?`, holder))
+			if err != nil {
+				return nil, fmt.Errorf("reading the holding agent %q: %w", holder, err)
+			}
+			return nil, &ErrTicketHeld{Ticket: key, Holder: prev, msg: fmt.Sprintf(
+				"ticket %s is held by agent %s of another session, not %s: "+
+					"only the agent holding a ticket, or its session, releases it", key, holder, agentID)}
 		}
 	}
 	if open, err := openRequestOn(tx, id); err != nil {

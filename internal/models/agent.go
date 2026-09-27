@@ -53,6 +53,16 @@ type Agent struct {
 	Stale bool `json:"stale"`
 }
 
+// AgentListItem is one agent as GET /api/agents lists it, or GET
+// /api/agents/{id} answers it: the agent with its session (EntryAgent,
+// which entries already use to name their author), and the tickets it
+// currently holds (by key, title and status only, the same shape a
+// dependency link uses).
+type AgentListItem struct {
+	EntryAgent
+	HeldTickets []TicketRef `json:"heldTickets"`
+}
+
 // IdentifyAgentRequest names a session and a new agent in it. The session is
 // found by its vendor and the vendor's session ID, or created with the
 // machine, resume command and web link given here; a session found keeps the

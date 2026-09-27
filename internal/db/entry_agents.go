@@ -34,13 +34,13 @@ func (s *Store) EntryAgents(entries []models.Entry) (map[string]models.EntryAgen
 	// Each agent is read the way GetAgent reads one (scanAgent, then
 	// markStale with the install's settings), so its session's last seen and
 	// whether it is stale agree with every other read of it.
+	// agentWithSessionSelect (internal/db/agents.go) is ListAgents' own join
+	// of agents to sessions, reused here rather than repeating it.
 	settings, err := s.AgentSettings()
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.db.Query(`SELECT s.id, s.vendor, s.vendor_session_id, s.machine, s.resume_command, s.web_url, s.created_at,
-			`+agentColumns+`
-		FROM agents a JOIN sessions s ON s.id = a.session_id
+	rows, err := s.db.Query(agentWithSessionSelect+`
 		WHERE a.id IN (?`+strings.Repeat(`, ?`, len(ids)-1)+`)`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("reading entry agents: %w", err)

@@ -69,6 +69,27 @@ func openRequestOn(q dbtx, ticketID string) (*models.TicketRequest, error) {
 	return &r, nil
 }
 
+// ListRequests returns a ticket's requests for user input, newest first: its
+// whole history, answered and unanswered alike. ticketID is a resolved
+// ticket id, not a display key.
+func (s *Store) ListRequests(ticketID string) ([]models.TicketRequest, error) {
+	rows, err := s.db.Query(requestSelect+` WHERE r.ticket_id = ? AND`+liveRequest+`
+		ORDER BY r.created_at DESC, r.rowid DESC`, ticketID)
+	if err != nil {
+		return nil, fmt.Errorf("listing requests: %w", err)
+	}
+	defer rows.Close()
+	out := []models.TicketRequest{}
+	for rows.Next() {
+		req, err := scanRequest(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, req)
+	}
+	return out, rows.Err()
+}
+
 // CreateRequest records the agent asking the person for user input on a
 // ticket (an id or display key) and moves the ticket to needs_user_input,
 // whatever the type. It answers with the new request's id. The type must be
