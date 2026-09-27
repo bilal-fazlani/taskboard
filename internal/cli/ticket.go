@@ -64,7 +64,7 @@ func ticketCommands() *cobra.Command {
 		},
 	}
 	listCmd.Flags().StringVar(&projectID, "project", "", "filter by project ID or prefix (case-insensitive); an unknown one returns no tickets rather than an error")
-	listCmd.Flags().StringSliceVar(&listStatuses, "status", nil, fmt.Sprintf("filter by status (%s); comma-separated or repeated for any of several", strings.Join(models.Statuses, "|")))
+	listCmd.Flags().StringSliceVar(&listStatuses, "status", nil, fmt.Sprintf("filter by status (%s); comma-separated or repeated for any of several", strings.Join(models.KnownStatuses, "|")))
 	listCmd.Flags().StringVar(&priority, "priority", "", "filter by priority (urgent|high|medium|low)")
 	listCmd.Flags().StringVar(&listRepo, "repo", "", "filter by repo")
 	listCmd.Flags().StringVar(&listLabel, "label", "", "filter by label name")
@@ -381,7 +381,120 @@ func ticketCommands() *cobra.Command {
 	updateCmd.Flags().StringVar(&updPRURL, "pr-url", "", "the pull request's http or https url; empty value clears")
 	updateCmd.Flags().StringSliceVar(&updLandedCommits, "landed-commit", nil, "replace the landed commits, in order, each [repo@]sha; comma-separated or repeated, empty value clears")
 
-	cmd.AddCommand(listCmd, getCmd, createCmd, moveCmd, deleteCmd, updateCmd, historyCmd, findByCommitCommand(), subtaskCommands())
+	var releaseAgent, releaseStopped, releaseNext, releaseProof string
+	var releaseDone, releaseJSON bool
+	releaseCmd := &cobra.Command{
+		Use:   "release [id-or-key]",
+		Short: "Give a ticket back to todo, or finish it, freeing the agent that holds it",
+		Long: "Give the ticket back with --stopped and --next (where the work stopped and the next step), " +
+			"or finish it with --done and --proof (what was verified, how, and the result); refused without " +
+			"them, naming what is missing. --agent is the agent releasing the ticket, or another agent of " +
+			"its session.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			store, err := openStore()
+			if err != nil {
+				return err
+			}
+			// Trimmed first: a flag given as only whitespace is blank, the
+			// same as not given at all, so it is refused by name rather than
+			// silently joined into a hollow hand-off (Review 1).
+			stopped := strings.TrimSpace(releaseStopped)
+			next := strings.TrimSpace(releaseNext)
+			proof := strings.TrimSpace(releaseProof)
+
+			var req models.ReleaseTicketRequest
+			req.AgentID = releaseAgent
+			switch {
+			case releaseDone && (stopped != "" || next != ""):
+				return fmt.Errorf("--done finishes the ticket; --stopped and --next give it back, not both")
+			case releaseDone:
+				if proof == "" {
+					return fmt.Errorf("finishing a ticket needs --proof: what was verified, how, and the result")
+				}
+				req.Outcome = models.ReleaseFinish
+				req.Proof = proof
+			case proof != "":
+				return fmt.Errorf("--proof finishes the ticket: pass --done too")
+			case stopped != "" || next != "":
+				if stopped == "" {
+					return fmt.Errorf("giving a ticket back needs --stopped too: where the work stopped")
+				}
+				if next == "" {
+					return fmt.Errorf("giving a ticket back needs --next too: the next step")
+				}
+				req.Outcome = models.ReleaseGiveBack
+				req.HandOff = formatHandOff(stopped, next)
+			default:
+				return fmt.Errorf("give the ticket back with --stopped and --next, or finish it with --done and --proof")
+			}
+			t, err := store.ReleaseTicket(args[0], req)
+			if err != nil {
+				return err
+			}
+			if releaseJSON {
+				return encodeJSON(cmd.OutOrStdout(), t)
+			}
+			verb := "Gave back"
+			if req.Outcome == models.ReleaseFinish {
+				verb = "Finished"
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "%s %s: now %s\n", verb, t.DisplayKey(), t.Status)
+			return nil
+		},
+	}
+	releaseCmd.Flags().StringVar(&releaseAgent, "agent", "", "the id of the agent releasing the ticket (required)")
+	_ = releaseCmd.MarkFlagRequired("agent")
+	releaseCmd.Flags().StringVar(&releaseStopped, "stopped", "", "where the work stopped, to give the ticket back")
+	releaseCmd.Flags().StringVar(&releaseNext, "next", "", "the next step, to give the ticket back")
+	releaseCmd.Flags().BoolVar(&releaseDone, "done", false, "finish the ticket instead of giving it back")
+	releaseCmd.Flags().StringVar(&releaseProof, "proof", "", "what was verified, how, and the result, to finish the ticket")
+	releaseCmd.Flags().BoolVar(&releaseJSON, "json", false, "print the released ticket as JSON instead of readable text")
+
+	var askAgent, askType, askPrompt string
+	var askChoices []string
+	var askJSON bool
+	askCmd := &cobra.Command{
+		Use:   "ask [id-or-key]",
+		Short: "Ask the person for user input on a ticket, moving it to needs_user_input",
+		Long: "Ask the person for user input on a ticket an agent (or its session) holds; prints the new " +
+			"request's id. --type is " + strings.Join(models.UserInputTypes, " or ") + "; --choice " +
+			"(repeatable) offers the only answers the person can give, or leave it out for a free answer. " +
+			"An approval must state exactly what the agent will do on yes, since it acts only on that approval.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			store, err := openStore()
+			if err != nil {
+				return err
+			}
+			id, err := store.CreateRequest(models.CreateUserInputRequest{
+				TicketID: args[0], AgentID: askAgent, Type: askType, Prompt: askPrompt, Choices: askChoices,
+			})
+			if err != nil {
+				return err
+			}
+			if askJSON {
+				r, err := store.GetRequest(id)
+				if err != nil {
+					return err
+				}
+				return encodeJSON(cmd.OutOrStdout(), r)
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "Request %s (%s) created on %s\n", id, askType, args[0])
+			return nil
+		},
+	}
+	askCmd.Flags().StringVar(&askAgent, "agent", "", "the id of the agent asking (required)")
+	_ = askCmd.MarkFlagRequired("agent")
+	askCmd.Flags().StringVar(&askType, "type", "", "the type of user input: "+strings.Join(models.UserInputTypes, ", ")+" (required)")
+	_ = askCmd.MarkFlagRequired("type")
+	askCmd.Flags().StringVar(&askPrompt, "prompt", "", "what the person is asked (required)")
+	_ = askCmd.MarkFlagRequired("prompt")
+	askCmd.Flags().StringArrayVar(&askChoices, "choice", nil, "an answer the person can give; repeatable; leave out for a free answer")
+	askCmd.Flags().BoolVar(&askJSON, "json", false, "print the new request as JSON instead of readable text")
+
+	cmd.AddCommand(listCmd, getCmd, createCmd, moveCmd, deleteCmd, updateCmd, historyCmd, releaseCmd, askCmd,
+		findByCommitCommand(), subtaskCommands())
 	return cmd
 }
 
@@ -525,6 +638,16 @@ func formatTicketDetail(t models.Ticket) string {
 }
 
 const noteFlagUsage = "why the status changed, saved with the change in the ticket's history (optional; ignored when the status does not change)"
+
+// formatHandOff joins where the work stopped and the next step into the one
+// hand-off entry `ticket release` gives the ticket back with.
+func formatHandOff(stopped, next string) string {
+	stopped = strings.TrimSpace(stopped)
+	if last := stopped[len(stopped)-1:]; last != "." && last != "!" && last != "?" {
+		stopped += "."
+	}
+	return fmt.Sprintf("%s Next: %s", stopped, strings.TrimSpace(next))
+}
 
 // formatHistory renders a ticket's status changes, newest first, one per
 // line, with each note indented under its change. The first change, with no

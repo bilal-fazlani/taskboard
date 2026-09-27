@@ -130,6 +130,8 @@ func NewRootCmd(webFS fs.FS) *cobra.Command {
 	root.AddCommand(documentCommands())
 	root.AddCommand(entryCommands())
 	root.AddCommand(settingsCommands())
+	root.AddCommand(agentCommands())
+	root.AddCommand(requestCommands())
 
 	return root
 }

@@ -10,8 +10,9 @@ import (
 	"github.com/tcarac/taskboard/internal/db"
 )
 
-// seedCLIAgent inserts an agent in a session into the database at path:
-// nothing creates agents from the CLI yet.
+// seedCLIAgent inserts an agent in a session into the database at path
+// directly, a fixed id and role, rather than through `agent identify`
+// (agent_test.go covers that command itself).
 func seedCLIAgent(t *testing.T, path string) string {
 	t.Helper()
 	database, err := db.OpenAt(path)

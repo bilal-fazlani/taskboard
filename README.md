@@ -220,6 +220,47 @@ TASKBOARD_URL=http://localhost:8080 taskboard ticket list
 TASKBOARD_URL=https://board.example.com taskboard mcp
 ```
 
+#### Agent protocol
+
+The CLI equivalents of the agent protocol: identify as an agent, ask for and
+answer user input, and give a ticket back or finish it. There is no claim
+command — claiming a ticket is part of the one-call start. Every command
+below also takes `--json`, printing its result as JSON instead of readable
+text.
+
+```bash
+# Identify a new agent in a session (found by --vendor and --session-id, or
+# created); an agent has no name of its own, so every call makes a new one.
+# Print the agent id and pass it as --agent below.
+taskboard agent identify --vendor claude_code --session-id 3da2c294 \
+  --machine bilal-mbp --resume-command "claude --resume 3da2c294" \
+  --role orchestrator --model claude-opus-5-5 --provider anthropic
+
+taskboard agent list   # every agent: last seen, stale, and the tickets it holds
+
+# Ask the person for user input on a ticket the agent (or its session) holds;
+# prints the new request's id. A ticket has one open request at a time.
+taskboard ticket ask AUTH-1 --agent <agent-id> --type approval \
+  --prompt "Land it?" --choice yes --choice no
+
+taskboard request await <request-id> --timeout 30s   # waits on that request only
+taskboard request answer <request-id> --answer yes   # the person's own command
+
+# Give a ticket back to todo, with where the work stopped and the next step...
+taskboard ticket release AUTH-1 --agent <agent-id> \
+  --stopped "wired the approval flow" --next "add tests"
+# ...or finish it, with what was verified, how, and the result.
+taskboard ticket release AUTH-1 --agent <agent-id> --done \
+  --proof "go test ./... passes"
+```
+
+A release without its record (`--stopped` and `--next`, or `--done` and
+`--proof`) is refused, naming what is missing; so is a release by an agent
+outside the holder's session, or while the ticket waits on the person's
+answer. `ticket ask --type` accepts `approval` or `question`; an approval
+should state exactly what the agent will do on yes, since it acts only on
+that approval.
+
 ### MCP Server (for AI assistants)
 
 ```bash

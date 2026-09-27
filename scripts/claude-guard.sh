@@ -10,6 +10,8 @@
 #     it can't read there (-X "$(...)", -X "$m")
 #   - running a taskboard binary other than ~/.local/bin/taskboard without --db,
 #     including one named by a substitution ($(which taskboard) ticket list)
+#   - ~/.local/bin/taskboard request answer, any flags: only Bilal answers a
+#     request, from his own shell, never an agent posing as him
 #
 # This is string matching on the command line, and it is easy to get around: a
 # script file, eval, variables, aliases, a binary with another name, `go run .`
@@ -379,6 +381,31 @@ check_dev_binary() {
   deny "this runs a development taskboard build without --db. Pass --db ./.tmp/<name>.db and a port of 3011 or above. Only ~/.local/bin/taskboard may run without --db."
 }
 
+# check_request_answer: `request answer` records who answered as the person
+# (ACP-9's "record of who approved what"), so only Bilal may run it, from his
+# own shell, never an agent posing as him. Scoped to the installed binary,
+# the same resolution check_dev_binary uses: a dev build (any build needing
+# --db) is a throwaway board an agent already controls, so answering there is
+# no trust violation. A command-word substitution is treated conservatively,
+# the same way, since it may resolve to the installed binary.
+check_request_answer() {
+  local b0=${WORDS[0]##*/} path i
+  if [ "$b0" = taskboard ]; then
+    path=${WORDS[0]}
+    if [ "$path" = taskboard ]; then
+      path=$(command -v taskboard 2>/dev/null || true)
+    fi
+    [ "$path" = "$HOME/.local/bin/taskboard" ] || return
+  elif [ "$b0" != __SUBST__taskboard ]; then
+    return
+  fi
+  for ((i = 1; i < ${#WORDS[@]} - 1; i++)); do
+    if [ "${WORDS[i]}" = request ] && [ "${WORDS[i + 1]}" = answer ]; then
+      deny "taskboard request answer records who approved a request as the person. Only Bilal runs it, from his own shell; an agent must not answer its own request as him."
+    fi
+  done
+}
+
 # check_kill_by_name: over the simple commands of one statement, in COMMANDS.
 # Only a command whose own name is kill/pkill/killall counts as killing. lsof
 # naming port 3010 (-i :3010, -ti tcp:3010, -iTCP:3010) finds the live server.
@@ -504,6 +531,7 @@ check() {
       case "${WORDS[0]}" in '$('* | '`'*) subst_command_word ;; esac
       check_make_install
       check_dev_binary
+      check_request_answer
       case "${WORDS[0]##*/}" in
         bash | sh | zsh | dash | fish)
           [ "$depth" -lt 3 ] || continue

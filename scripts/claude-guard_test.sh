@@ -71,6 +71,10 @@ expect allow 'curl -X "$(echo POST)" localhost:3011/api/projects'
 expect allow '~/.local/bin/taskboard --help'
 expect allow '~/.local/bin/taskboard ticket list'
 expect allow "$HOME/.local/bin/taskboard mcp"
+expect allow '~/.local/bin/taskboard request await 01ABC --timeout 30s'
+expect allow '~/.local/bin/taskboard entry add --ticket BILL-1 --type note "answer this"'
+expect allow './taskboard --db ./.tmp/x.db request answer 01ABC --answer yes'
+expect allow 'go run ./cmd/taskboard --db ./.tmp/x.db request answer 01ABC --answer yes'
 expect allow 'go run ./cmd/taskboard --db ./.tmp/x.db start --port 3011'
 expect allow 'go run ./cmd/taskboard --db=./.tmp/x.db ticket list'
 expect allow 'go build -o taskboard ./cmd/taskboard && ./taskboard --help'
@@ -205,6 +209,13 @@ expect deny 'go run github.com/tcarac/taskboard/cmd/taskboard mcp'
 expect deny 'go build -o taskboard ./cmd/taskboard && ./taskboard clear --force'
 expect deny 'nohup ./taskboard start --foreground > server.log 2>&1 &'
 expect deny 'git commit -m "$(printf %s ok)" && ./taskboard ticket list'
+
+# request answer through the installed binary: only Bilal answers, as
+# himself; an agent must not record itself as the person.
+expect deny '~/.local/bin/taskboard request answer 01ABC --answer yes'
+expect deny "$HOME/.local/bin/taskboard request answer 01ABC --answer yes"
+expect deny '~/.local/bin/taskboard request answer 01ABC --answer "yes, land it"'
+expect deny '$(which taskboard) request answer 01ABC --answer yes'
 
 # A substitution as the command word: the guard can't tell what it runs, so
 # it goes by what the substitution names.
