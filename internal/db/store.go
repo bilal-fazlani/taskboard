@@ -134,6 +134,9 @@ func (s *Store) CreateProject(req models.CreateProjectRequest) (*models.Project,
 		return nil, fmt.Errorf("beginning transaction: %w", err)
 	}
 	defer tx.Rollback()
+	if err := checkPrefixNotReserved(p.Prefix); err != nil {
+		return nil, err
+	}
 	if err := checkPrefixFree(tx, p.Prefix, ""); err != nil {
 		return nil, err
 	}
@@ -188,6 +191,9 @@ func (s *Store) UpdateProject(id string, req models.UpdateProjectRequest) (*mode
 	p.UpdatedAt = time.Now().UTC()
 
 	if req.Prefix != nil {
+		if err := checkPrefixNotReserved(p.Prefix); err != nil {
+			return nil, err
+		}
 		if err := checkPrefixFree(tx, p.Prefix, p.ID); err != nil {
 			return nil, err
 		}

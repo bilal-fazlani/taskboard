@@ -114,6 +114,31 @@ func TestUpdateProjectRejectsPrefixTakenIgnoringCase(t *testing.T) {
 	}
 }
 
+// "all" names every project in the web's URLs, so no project may take it.
+func TestProjectPrefixAllIsReservedInAnyCase(t *testing.T) {
+	s := newTestStore(t)
+	bill := seedProject(t, s, "Billing", "BILL")
+
+	for _, prefix := range []string{"ALL", "all", "All", "aLl"} {
+		_, err := s.CreateProject(models.CreateProjectRequest{Name: "Everything", Prefix: prefix})
+		assertPrefixRefused(t, err, "create "+prefix, `"`+prefix+`"`, "reserved", "every project")
+
+		renamed := prefix
+		_, err = s.UpdateProject(bill.ID, models.UpdateProjectRequest{Prefix: &renamed})
+		assertPrefixRefused(t, err, "rename BILL to "+prefix, `"`+prefix+`"`, "reserved", "every project")
+	}
+
+	if got := projectPrefixes(t, s); len(got) != 1 || got[0] != "BILL" {
+		t.Fatalf("projects after the rejections = %v, want only BILL", got)
+	}
+	// Only the whole word is reserved.
+	for _, prefix := range []string{"ALLY", "BALL"} {
+		if _, err := s.CreateProject(models.CreateProjectRequest{Name: prefix, Prefix: prefix}); err != nil {
+			t.Fatalf("create %s: %v", prefix, err)
+		}
+	}
+}
+
 // The index is what holds the rule for any write that skips the store.
 func TestPrefixIndexRejectsCaseOnlyDuplicate(t *testing.T) {
 	s := newTestStore(t)

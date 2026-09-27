@@ -3,7 +3,23 @@ package db
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 )
+
+// reservedPrefix is the word the web uses for "every project": the Now page
+// names All projects as `?project=all`. A project with that prefix could
+// never be picked there, so no project may take it, in any letter case.
+const reservedPrefix = "ALL"
+
+// checkPrefixNotReserved refuses the reserved prefix in any letter case.
+// Callers run it beside checkPrefixFree, on every write that sets a prefix.
+func checkPrefixNotReserved(prefix string) error {
+	if strings.EqualFold(prefix, reservedPrefix) {
+		return invalidInput("project prefix %q is reserved: %q means every project, in any letter case; choose another prefix",
+			prefix, strings.ToLower(reservedPrefix))
+	}
+	return nil
+}
 
 // checkPrefixFree refuses a project prefix that another project already uses,
 // ignoring letter case: every prefix resolver matches case-insensitively, so

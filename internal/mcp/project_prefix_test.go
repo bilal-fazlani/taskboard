@@ -44,3 +44,35 @@ func TestProjectToolsRejectPrefixTakenIgnoringCase(t *testing.T) {
 		t.Fatalf("projects after the rejections = %v, want GLOW and BILL unchanged", prefixes)
 	}
 }
+
+func TestProjectToolsRejectPrefixAll(t *testing.T) {
+	s := newTestServer(t)
+	if _, err := s.store.CreateProject(models.CreateProjectRequest{Name: "Billing", Prefix: "BILL"}); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		tool string
+		args map[string]any
+	}{
+		{"create_project", map[string]any{"name": "Everything", "prefix": "all"}},
+		{"create_project", map[string]any{"name": "Everything", "prefix": "ALL"}},
+		{"update_project", map[string]any{"id": "BILL", "prefix": "All"}},
+	} {
+		text, isError := callToolText(t, s, tc.tool, tc.args)
+		if !isError {
+			t.Fatalf("%s %v: not flagged as an error: %s", tc.tool, tc.args, text)
+		}
+		if !strings.Contains(text, "is reserved") || !strings.Contains(text, "every project") {
+			t.Fatalf("%s %v: error %q should say the prefix is reserved and why", tc.tool, tc.args, text)
+		}
+	}
+
+	projects, err := s.store.ListProjects()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(projects) != 1 || projects[0].Prefix != "BILL" {
+		t.Fatalf("projects after the rejections = %v, want only BILL", projects)
+	}
+}
