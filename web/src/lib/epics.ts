@@ -95,8 +95,9 @@ export function progressText(progress: EpicProgress): string {
 }
 
 /**
- * The link a row opens: the given ticket view showing only the project and
- * the epic (NO_EPIC for the No epic row). No other filter is carried over.
+ * Where a row's View tasks link goes: the given ticket view showing only the
+ * project and the epic (NO_EPIC for the No epic row). No other filter is
+ * carried over.
  */
 export function epicLink(view: TicketViewPath, project: string, epic: string): string {
   return `${view}?${new URLSearchParams({ project, epic }).toString()}`;

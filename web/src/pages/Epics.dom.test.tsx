@@ -97,11 +97,19 @@ async function settleHistory() {
   });
 }
 
-async function mount(url = "/epics?project=ACP", { strict = false } = {}) {
+// `routed` shows the page only at /epics, so a link away from it leaves it.
+async function mount(url = "/epics?project=ACP", { strict = false, routed = false } = {}) {
   window.history.replaceState(null, "", url);
   const page = (
     <BrowserRouter>
-      <Epics />
+      {routed ? (
+        <Routes>
+          <Route path="/epics" element={<Epics />} />
+          <Route path="*" element={<p>Tickets</p>} />
+        </Routes>
+      ) : (
+        <Epics />
+      )}
     </BrowserRouter>
   );
   // StrictMode as main.tsx has it: in development it runs every effect's
@@ -115,6 +123,12 @@ const rowNames = (root: HTMLElement = document.body) =>
     .queryAllByTestId("epic-name")
     .map((n) => n.textContent);
 const rowOf = (name: string) => screen.getAllByTestId("epic-row").find((r) => within(r).queryByText(name))!;
+// The button an epic's row is, which opens the epic modal.
+const opener = (name: string) => rowOf(name).querySelector<HTMLButtonElement>('button[aria-haspopup="dialog"]')!;
+const openRow = (name: string) =>
+  act(async () => {
+    fireEvent.click(opener(name));
+  });
 const params = () => new URLSearchParams(window.location.search);
 
 beforeEach(() => {
@@ -303,20 +317,32 @@ describe("Epics rows", () => {
     expect(within(row).getByTestId("epic-bar").children).toHaveLength(0);
   });
 
-  it("offers Edit and Delete in the row menu, a plain disclosure", async () => {
+  it("shows only the first line of a description that runs to several", async () => {
+    serves({ epics: [epic("Notes", { todo: 1 }, null, "First line\nSecond line\n\nThird")], noEpic: progress() });
+    await mount();
+    expect(within(rowOf("Notes")).getByTestId("epic-description").textContent).toBe("First line");
+    expect(within(rowOf("Notes")).queryByText(/Second line/)).toBeNull();
+  });
+
+  it("offers only Delete in the row menu, a plain disclosure", async () => {
     await mount();
     const toggle = screen.getByRole("button", { name: "Actions for Store" });
     expect(toggle.getAttribute("aria-expanded")).toBe("false");
-    expect(within(rowOf("Store")).queryByRole("button", { name: "Edit" })).toBeNull();
+    expect(within(rowOf("Store")).queryByRole("button", { name: "Delete" })).toBeNull();
     await act(async () => {
       fireEvent.click(toggle);
     });
     expect(toggle.getAttribute("aria-expanded")).toBe("true");
     const panel = document.getElementById(toggle.getAttribute("aria-controls")!)!;
-    expect(within(panel).getAllByRole("button").map((i) => i.textContent)).toEqual(["Edit", "Delete"]);
+    // The row itself is the edit action, so the menu has no Edit.
+    expect(within(panel).getAllByRole("button").map((i) => i.textContent)).toEqual(["Delete"]);
+    expect(screen.queryByRole("button", { name: "Edit" })).toBeNull();
     // No menu roles, which would promise arrow-key behaviour.
     expect(screen.queryByRole("menu")).toBeNull();
     expect(screen.queryByRole("menuitem")).toBeNull();
+    // Opening the menu opens no epic.
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(params().has("epic")).toBe(false);
   });
 
   it("closes the row menu on Escape and puts focus back on the ⋯ button", async () => {
@@ -325,12 +351,12 @@ describe("Epics rows", () => {
     await act(async () => {
       fireEvent.click(toggle);
     });
-    const edit = within(rowOf("Store")).getByRole("button", { name: "Edit" });
-    edit.focus();
+    const del = within(rowOf("Store")).getByRole("button", { name: "Delete" });
+    del.focus();
     await act(async () => {
-      fireEvent.keyDown(edit, { key: "Escape" });
+      fireEvent.keyDown(del, { key: "Escape" });
     });
-    expect(within(rowOf("Store")).queryByRole("button", { name: "Edit" })).toBeNull();
+    expect(within(rowOf("Store")).queryByRole("button", { name: "Delete" })).toBeNull();
     expect(toggle.getAttribute("aria-expanded")).toBe("false");
     expect(document.activeElement).toBe(toggle);
   });
@@ -343,16 +369,16 @@ describe("Epics rows", () => {
     await act(async () => {
       fireEvent.click(store);
     });
-    // Moving between the panel's own buttons keeps it open.
-    const edit = within(rowOf("Store")).getByRole("button", { name: "Edit" });
+    // Moving from ⋯ into the panel keeps it open.
+    const del = within(rowOf("Store")).getByRole("button", { name: "Delete" });
     await act(async () => {
-      fireEvent.blur(store, { relatedTarget: edit });
-      edit.focus();
+      fireEvent.blur(store, { relatedTarget: del });
+      del.focus();
     });
     expect(store.getAttribute("aria-expanded")).toBe("true");
     // Tabbing on to the next row's ⋯ closes it.
     await act(async () => {
-      fireEvent.blur(edit, { relatedTarget: graph });
+      fireEvent.blur(del, { relatedTarget: graph });
       graph.focus();
     });
     expect(store.getAttribute("aria-expanded")).toBe("false");
@@ -360,7 +386,7 @@ describe("Epics rows", () => {
       fireEvent.click(graph);
     });
     expect(graph.getAttribute("aria-expanded")).toBe("true");
-    expect(screen.getAllByRole("button", { name: "Edit" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "Delete" })).toHaveLength(1);
   });
 
   it("closes an open row menu when another row's ⋯ is clicked", async () => {
@@ -376,7 +402,7 @@ describe("Epics rows", () => {
     });
     expect(store.getAttribute("aria-expanded")).toBe("false");
     expect(graph.getAttribute("aria-expanded")).toBe("true");
-    expect(screen.getAllByRole("button", { name: "Edit" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "Delete" })).toHaveLength(1);
   });
 });
 
@@ -421,6 +447,8 @@ describe("Epics order and sections", () => {
     const row = rowOf("No epic");
     expect(within(row).getByTestId("epic-count").textContent).toBe("1 / 2 done");
     expect(within(row).queryByRole("button")).toBeNull();
+    // Nothing to edit, so no document count either.
+    expect(within(row).queryByTestId("epic-documents")).toBeNull();
     cleanup();
 
     serves({ ...LIST, noEpic: progress() });
@@ -436,17 +464,80 @@ describe("Epics order and sections", () => {
 });
 
 describe("Epics row click", () => {
-  const hrefOf = (name: string) => rowOf(name).querySelector("a")!.getAttribute("href");
+  const modal = () => screen.queryByRole("dialog", { name: "Edit epic" });
 
-  it("opens Kanban by default with only the project and the epic", async () => {
-    await mount("/epics?project=ACP&status=todo&label=web");
+  it("opens the edit epic popup, naming the epic in the URL, instead of navigating", async () => {
+    await mount();
+    await openRow("Graph");
+    expect(modal()).toBeTruthy();
+    expect(window.location.pathname).toBe("/epics");
+    expect(params().get("epic")).toBe("Graph");
+    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("Graph");
+  });
+
+  it("opens it from anywhere on the row: the name, the bar, the count and the document count", async () => {
+    await mount();
+    for (const part of ["epic-name", "epic-bar", "epic-count", "epic-documents"]) {
+      await act(async () => {
+        fireEvent.click(within(rowOf("Store")).getByTestId(part));
+      });
+      expect(params().get("epic")).toBe("Store");
+      await act(async () => {
+        fireEvent.click(within(modal()!).getByRole("button", { name: "Close" }));
+      });
+      await settleHistory();
+      expect(modal()).toBeNull();
+    }
+  });
+
+  it("is a native button, so Tab reaches it and Enter or Space opens it, and focus comes back to it", async () => {
+    await mount();
+    const row = opener("Graph");
+    expect(row.tagName).toBe("BUTTON");
+    expect(row.getAttribute("type")).toBe("button");
+    expect(row.tabIndex).toBe(0);
+    // Its name starts with the epic's, so a screen reader announces the epic.
+    expect(within(rowOf("Graph")).getByRole("button", { name: /^Graph/ })).toBe(row);
+    row.focus();
+    await openRow("Graph");
+    expect(modal()).toBeTruthy();
+    await act(async () => {
+      fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+    });
+    await settleHistory();
+    expect(modal()).toBeNull();
+    expect(document.activeElement).toBe(row);
+  });
+});
+
+describe("Epics View tasks link", () => {
+  const viewTasks = (name: string) => within(rowOf(name)).getByRole("link", { name: /^View tasks/ });
+  const hrefOf = (name: string) => viewTasks(name).getAttribute("href");
+
+  it("is on every row, the only link there, named for its epic", async () => {
+    await mount();
+    for (const name of ["Graph", "Store", "Search", "Ideas", "No epic"]) {
+      expect(within(rowOf(name)).getAllByRole("link")).toEqual([viewTasks(name)]);
+      expect(viewTasks(name).textContent).toBe("View tasks →");
+    }
+    expect(viewTasks("Graph").getAttribute("aria-label")).toBe("View tasks of Graph");
+    expect(viewTasks("No epic").getAttribute("aria-label")).toBe("View tasks without an epic");
+  });
+
+  it("opens Kanban by default with only the project and the epic, and not the popup", async () => {
+    await mount("/epics?project=ACP&status=todo&label=web", { routed: true });
     expect(hrefOf("Graph")).toBe("/kanban?project=ACP&epic=Graph");
     expect(hrefOf("No epic")).toBe("/kanban?project=ACP&epic=none");
+    // It sits outside the row's button, so the click is the link's alone:
+    // no popup on the way.
+    expect(viewTasks("Graph").closest("button")).toBeNull();
     await act(async () => {
-      fireEvent.click(rowOf("Graph").querySelector("a")!);
+      fireEvent.click(viewTasks("Graph"));
     });
     expect(window.location.pathname).toBe("/kanban");
     expect(window.location.search).toBe("?project=ACP&epic=Graph");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByText("Tickets")).toBeTruthy();
   });
 
   it.each([
@@ -483,6 +574,29 @@ describe("Epics row click", () => {
     await mount();
     expect(hrefOf("M1 & M2")).toBe("/kanban?project=ACP&epic=M1+%26+M2");
   });
+
+  it("is the No epic row's only action: the row has no hover and a click on it opens nothing", async () => {
+    await mount(undefined, { routed: true });
+    const row = rowOf("No epic");
+    expect(row.className).not.toContain("hover:");
+    expect(row.querySelector("[aria-haspopup], [tabindex]")).toBeNull();
+    expect(within(row).queryByRole("button")).toBeNull();
+    await act(async () => {
+      fireEvent.click(within(row).getByTestId("epic-name"));
+      fireEvent.click(within(row).getByTestId("epic-bar"));
+    });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(window.location.pathname).toBe("/epics");
+    expect(params().has("epic")).toBe(false);
+    // An epic's row, by contrast, lights up on hover.
+    expect(rowOf("Graph").className).toContain("hover:bg-slate-800/40");
+
+    await act(async () => {
+      fireEvent.click(viewTasks("No epic"));
+    });
+    expect(window.location.pathname).toBe("/kanban");
+    expect(window.location.search).toBe("?project=ACP&epic=none");
+  });
 });
 
 describe("Epics dialog", () => {
@@ -497,12 +611,7 @@ describe("Epics dialog", () => {
       fireEvent.click(screen.getByRole("button", { name }));
     });
   const openNew = () => press("New epic");
-  async function openEdit(name: string) {
-    await press(`Actions for ${name}`);
-    await act(async () => {
-      fireEvent.click(within(rowOf(name)).getByRole("button", { name: "Edit" }));
-    });
-  }
+  const openEdit = openRow;
 
   it("creates an epic with a name and a description", async () => {
     mockApi.epics.create.mockResolvedValue(epic("Realtime"));
@@ -563,7 +672,7 @@ describe("Epics dialog", () => {
     await openEdit("Graph");
     expect(screen.getByRole("dialog").textContent).toContain("Edit epic");
     expect(nameField().value).toBe("Graph");
-    expect((screen.getByLabelText(/Description/) as HTMLInputElement).value).toBe("Dependency graph home page");
+    expect((screen.getByLabelText(/Description/) as HTMLTextAreaElement).value).toBe("Dependency graph home page");
     await type("GRAPH");
     expect(alert()).toBeNull();
     await press("Save");
@@ -661,7 +770,7 @@ describe("Epics dialog focus", () => {
     act(async () => {
       fireEvent.keyDown(document.activeElement!, { key: "Escape" });
     });
-  async function openFromMenu(name: string, action: "Edit" | "Delete") {
+  async function openFromMenu(name: string, action: "Delete") {
     const toggle = screen.getByRole("button", { name: `Actions for ${name}` });
     toggle.focus();
     await act(async () => {
@@ -671,6 +780,12 @@ describe("Epics dialog focus", () => {
       fireEvent.click(within(rowOf(name)).getByRole("button", { name: action }));
     });
     return toggle;
+  }
+  async function openFromRow(name: string) {
+    const row = opener(name);
+    row.focus();
+    await openRow(name);
+    return row;
   }
 
   it("focuses the name field on opening under StrictMode, and gives focus back on close", async () => {
@@ -685,12 +800,12 @@ describe("Epics dialog focus", () => {
     await escape();
     expect(document.activeElement).toBe(newEpic);
 
-    const toggle = await openFromMenu("Store", "Edit");
+    const row = await openFromRow("Store");
     await settle();
     expect(document.activeElement).toBe(screen.getByLabelText("Name"));
     await escape();
     await settleHistory();
-    expect(document.activeElement).toBe(toggle);
+    expect(document.activeElement).toBe(row);
 
     await openFromMenu("Store", "Delete");
     await settle();
@@ -722,24 +837,24 @@ describe("Epics dialog focus", () => {
     expect(document.activeElement).toBe(newEpic);
   });
 
-  it("gives focus back to the row's ⋯ when Edit closes, by Cancel or by saving", async () => {
+  it("gives focus back to the row when the edit popup closes, by Cancel or by saving", async () => {
     mockApi.epics.update.mockResolvedValue(STORE);
     await mount();
-    let toggle = await openFromMenu("Store", "Edit");
+    const row = await openFromRow("Store");
     expect(screen.getByRole("dialog")).toBeTruthy();
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     });
     await settleHistory();
-    expect(document.activeElement).toBe(toggle);
+    expect(document.activeElement).toBe(row);
 
-    toggle = await openFromMenu("Store", "Edit");
+    await openFromRow("Store");
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Save" }));
     });
     await settleHistory();
     expect(screen.queryByRole("dialog")).toBeNull();
-    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Actions for Store" }));
+    expect(document.activeElement).toBe(opener("Store"));
   });
 
   it("keeps Tab inside the delete confirmation, and Escape gives focus back to ⋯", async () => {
@@ -804,26 +919,39 @@ describe("Epics modal", () => {
     id: "d1", epicId: "e-Graph", name: "Rollout plan", format: "markdown", size: 7, revision: 1, createdAt: "", updatedAt: "",
   };
 
-  it("shows each epic's document count on a paperclip beside the row's link", async () => {
+  it("shows each epic's document count as plain text, not a control of its own", async () => {
     serves(withDocs("Graph", 2));
     await mount();
-    const paperclip = within(rowOf("Graph")).getByRole("button", { name: "Documents of Graph (2)" });
-    expect(paperclip.textContent).toBe("2");
-    expect(paperclip.closest("a")).toBeNull();
-    expect(within(rowOf("Store")).getByRole("button", { name: "Documents of Store (0)" })).toBeTruthy();
+    const count = within(rowOf("Graph")).getByTestId("epic-documents");
+    expect(count.textContent).toBe("2 documents");
+    expect(count.getAttribute("title")).toBe("2 documents");
+    expect(count.tagName).toBe("SPAN");
+    expect(count.getAttribute("role")).toBeNull();
+    expect(count.getAttribute("tabindex")).toBeNull();
+    expect(count.closest("a")).toBeNull();
+    // The row's only controls are the row itself, View tasks and ⋯.
+    expect(within(rowOf("Graph")).getAllByRole("button")).toEqual([
+      opener("Graph"),
+      screen.getByRole("button", { name: "Actions for Graph" }),
+    ]);
+    expect(screen.queryByRole("button", { name: /Documents of/ })).toBeNull();
+    expect(within(rowOf("Store")).getByTestId("epic-documents").textContent).toBe("0 documents");
+    serves(withDocs("Store", 1));
+    await act(async () => {
+      live.refresh.at(-1)!();
+    });
+    await settle();
+    expect(within(rowOf("Store")).getByTestId("epic-documents").getAttribute("title")).toBe("1 document");
     // The No epic row has none.
-    const noEpicRow = rowOf("No epic");
-    expect(within(noEpicRow).queryByRole("button", { name: /Documents of/ })).toBeNull();
+    expect(within(rowOf("No epic")).queryByTestId("epic-documents")).toBeNull();
   });
 
-  it("opens the epic modal from the row's paperclip, with the epic in the URL, and Back closes it", async () => {
+  it("opens the epic modal from the row, with the epic in the URL, and Back closes it", async () => {
     serves(withDocs("Graph", 2));
     await mount();
-    const paperclip = screen.getByRole("button", { name: "Documents of Graph (2)" });
-    paperclip.focus();
-    await act(async () => {
-      fireEvent.click(paperclip);
-    });
+    const row = opener("Graph");
+    row.focus();
+    await openRow("Graph");
     expect(modal()).toBeTruthy();
     expect(params().get("epic")).toBe("Graph");
     expect(mockApi.documents.list).toHaveBeenCalledWith({ epicId: "e-Graph" });
@@ -834,7 +962,7 @@ describe("Epics modal", () => {
     await settleHistory();
     expect(modal()).toBeNull();
     expect(params().has("epic")).toBe(false);
-    expect(document.activeElement).toBe(paperclip);
+    expect(document.activeElement).toBe(row);
 
     await act(async () => {
       window.history.forward();
@@ -874,9 +1002,7 @@ describe("Epics modal", () => {
     mockApi.documents.list.mockResolvedValue([plan]);
     mockApi.documents.get.mockResolvedValue({ ...plan, content: "# Steps" });
     await mount();
-    await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Documents of Graph (0)" }));
-    });
+    await openRow("Graph");
     await act(async () => {
       fireEvent.click(await screen.findByRole("button", { name: "Rollout plan.md" }));
     });
@@ -929,9 +1055,7 @@ describe("Epics modal", () => {
   it("saves a rename, closes, and the row shows the new name", async () => {
     mockApi.epics.update.mockResolvedValue({ ...GRAPH, name: "Graph view" });
     await mount();
-    await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Documents of Graph (0)" }));
-    });
+    await openRow("Graph");
     serves({ ...LIST, epics: LIST.epics.map((e) => (e === GRAPH ? { ...e, name: "Graph view" } : e)) });
     await act(async () => {
       fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Graph view" } });

@@ -92,12 +92,15 @@ export default function EpicForm({
         <label htmlFor={descriptionId} className="mb-1.5 block text-xs font-medium text-slate-400">
           Description <span className="font-normal text-slate-600">(optional)</span>
         </label>
-        <input
+        {/* Plain text, about six lines tall and resizable; the Epics row shows
+            its first line. */}
+        <textarea
           id={descriptionId}
+          rows={6}
           value={description}
           onChange={(e) => setDescription(e.target.value)}
-          placeholder="One line about what it groups"
-          className={`${FIELD} border-slate-700 focus:ring-blue-500`}
+          placeholder="What this epic groups"
+          className={`${FIELD} block resize-y border-slate-700 focus:ring-blue-500`}
         />
       </div>
       <div className="flex justify-end gap-3 pt-2">

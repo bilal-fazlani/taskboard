@@ -64,12 +64,29 @@ describe("EpicModal", () => {
     expect(document.activeElement).toBe(within(modal()).getByLabelText("Name"));
     expect(await screen.findByRole("button", { name: "Rollout plan.md" })).toBeTruthy();
     expect(mockApi.documents.list).toHaveBeenCalledWith({ epicId: "e1" });
-    expect((within(modal()).getByLabelText(/Description/) as HTMLInputElement).value).toBe("Go live");
+    expect((within(modal()).getByLabelText(/Description/) as HTMLTextAreaElement).value).toBe("Go live");
 
     fireEvent.change(within(modal()).getByLabelText("Name"), { target: { value: "Go live" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(onSaved).toHaveBeenCalledWith(expect.objectContaining({ name: "Go live" })));
     expect(mockApi.epics.update).toHaveBeenCalledWith("e1", { name: "Go live", description: "Go live" });
+  });
+
+  it("gives the description a plain-text box six lines tall that the user can resize, keeping line breaks", async () => {
+    mockApi.documents.list.mockResolvedValue([]);
+    mockApi.epics.update.mockResolvedValue(launch);
+    const { onSaved } = setup();
+    const description = within(modal()).getByLabelText(/Description/) as HTMLTextAreaElement;
+    expect(description.tagName).toBe("TEXTAREA");
+    expect(description.rows).toBe(6);
+    expect(description.className).toContain("resize-y");
+    fireEvent.change(description, { target: { value: "Go live.\n\nThen watch the numbers.\n" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    expect(mockApi.epics.update).toHaveBeenCalledWith("e1", {
+      name: "Launch",
+      description: "Go live.\n\nThen watch the numbers.",
+    });
   });
 
   it("closes on Escape, on × and on Cancel", async () => {

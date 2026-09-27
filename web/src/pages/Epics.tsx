@@ -26,6 +26,7 @@ import { STATUS_COLORS, STATUS_LABELS } from "../lib/status";
 
 // The progress bar: one segment per status, as wide as its share of the
 // tickets, in the status colours. An epic with no tickets has an empty bar.
+// Spans, as it sits inside the row's button.
 function ProgressBar({ progress }: { progress: EpicProgress }) {
   const segments = barSegments(progress);
   const label =
@@ -33,35 +34,34 @@ function ProgressBar({ progress }: { progress: EpicProgress }) {
       ? "No tickets"
       : segments.map((s) => `${s.count} ${STATUS_LABELS[s.status].toLowerCase()}`).join(", ");
   return (
-    <div
+    <span
       role="img"
       aria-label={label}
       data-testid="epic-bar"
       className="flex h-1.5 w-full overflow-hidden rounded-full bg-slate-800"
     >
       {segments.map((s) => (
-        <div
+        <span
           key={s.status}
           data-status={s.status}
           className={STATUS_COLORS[s.status]}
           style={{ width: `${s.percent}%` }}
         />
       ))}
-    </div>
+    </span>
   );
 }
 
 // The ⋯ menu on an epic's row: a disclosure, the ⋯ button showing or hiding
-// two plain buttons. A click outside, focus moving outside, or Escape hides
-// them, and Escape puts focus back on ⋯. Each action is handed ⋯ so a dialog it opens can give
-// focus back to it.
+// its one plain button, Delete (the row itself opens the epic to edit). A
+// click outside, focus moving outside, or Escape hides it, and Escape puts
+// focus back on ⋯. Delete is handed ⋯ so the dialog it opens can give focus
+// back to it.
 function RowMenu({
   name,
-  onEdit,
   onDelete,
 }: {
   name: string;
-  onEdit: (opener: HTMLElement | null) => void;
   onDelete: (opener: HTMLElement | null) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -122,13 +122,6 @@ function RowMenu({
         >
           <button
             type="button"
-            onClick={pick(onEdit)}
-            className="block w-full px-3 py-1.5 text-left text-sm text-slate-300 hover:bg-slate-800 focus:bg-slate-800 focus:outline-none"
-          >
-            Edit
-          </button>
-          <button
-            type="button"
             onClick={pick(onDelete)}
             className="block w-full px-3 py-1.5 text-left text-sm text-red-400 hover:bg-slate-800 focus:bg-slate-800 focus:outline-none"
           >
@@ -140,16 +133,35 @@ function RowMenu({
   );
 }
 
-// One row: an epic, or the project's tickets without one. The row opens the
-// tickets it counts; the documents button and the menu, when there are any,
-// sit outside that link.
+// How many documents an epic has, as plain text: the row itself opens them.
+function DocumentCount({ count }: { count: number }) {
+  const noun = count === 1 ? "document" : "documents";
+  return (
+    <span
+      data-testid="epic-documents"
+      title={`${count} ${noun}`}
+      className={`inline-flex items-center gap-1 text-xs tabular-nums ${count > 0 ? "text-slate-400" : "text-slate-600"}`}
+    >
+      <Paperclip aria-hidden="true" className="h-3 w-3" />
+      {count}
+      <span className="sr-only"> {noun}</span>
+    </span>
+  );
+}
+
+// One row: an epic, or the project's tickets without one. An epic's row is a
+// button that opens the epic modal (onOpen, handed the row so focus can go
+// back to it); the No epic row has nothing to edit, so it opens nothing and
+// shows no hover. Beside it, outside the button, View tasks opens the tickets
+// the row counts, and the menu, when there is one.
 function Row({
   name,
   description,
   progress,
   href,
   noEpic,
-  documents,
+  documentCount,
+  onOpen,
   menu,
 }: {
   name: string;
@@ -157,39 +169,72 @@ function Row({
   progress: EpicProgress;
   href: string;
   noEpic?: boolean;
-  documents?: React.ReactNode;
+  /** The epic's documents; none for the No epic row. */
+  documentCount?: number;
+  onOpen?: (opener: HTMLElement) => void;
   menu?: React.ReactNode;
 }) {
   const active = noEpic ? 0 : activeCount(progress);
   const Icon = noEpic ? CircleDashed : Layers;
-  return (
-    <li data-testid="epic-row" className="flex items-center gap-2 pr-3 hover:bg-slate-800/40">
-      <Link to={href} className="flex min-w-0 flex-1 items-center gap-4 py-3 pl-4">
-        <Icon className={`h-4 w-4 shrink-0 ${noEpic ? "text-slate-600" : "text-slate-500"}`} />
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <span
-              data-testid="epic-name"
-              className={`truncate text-sm font-medium ${noEpic ? "text-slate-400" : "text-slate-200"}`}
-            >
-              {name}
+  // A description may run to several lines; the row shows the first.
+  const summary = description?.split(/\r?\n/, 1)[0].trim();
+  const body = (
+    <>
+      <Icon aria-hidden="true" className={`h-4 w-4 shrink-0 ${noEpic ? "text-slate-600" : "text-slate-500"}`} />
+      <span className="block min-w-0 flex-1">
+        <span className="flex items-center gap-2">
+          <span
+            data-testid="epic-name"
+            className={`truncate text-sm font-medium ${noEpic ? "text-slate-400" : "text-slate-200"}`}
+          >
+            {name}
+          </span>
+          {active > 0 && (
+            <span className="shrink-0 rounded bg-blue-500/10 px-1.5 py-0.5 text-[11px] font-medium text-blue-400">
+              {active} active
             </span>
-            {active > 0 && (
-              <span className="shrink-0 rounded bg-blue-500/10 px-1.5 py-0.5 text-[11px] font-medium text-blue-400">
-                {active} active
-              </span>
-            )}
-          </div>
-          {description && <p className="mt-0.5 truncate text-xs text-slate-500">{description}</p>}
-        </div>
-        <div className="w-40 shrink-0 sm:w-56">
-          <ProgressBar progress={progress} />
-        </div>
-        <span data-testid="epic-count" className="w-24 shrink-0 text-right text-xs tabular-nums text-slate-500">
-          {progressText(progress)}
+          )}
         </span>
+        {summary && (
+          <span data-testid="epic-description" className="mt-0.5 block truncate text-xs text-slate-500">
+            {summary}
+          </span>
+        )}
+      </span>
+      <span className="block w-40 shrink-0 sm:w-56">
+        <ProgressBar progress={progress} />
+      </span>
+      <span data-testid="epic-count" className="w-24 shrink-0 text-right text-xs tabular-nums text-slate-500">
+        {progressText(progress)}
+      </span>
+      <span className="w-10 shrink-0">{documentCount !== undefined && <DocumentCount count={documentCount} />}</span>
+    </>
+  );
+  const layout = "flex min-w-0 flex-1 items-center gap-4 py-3 pl-4 text-left";
+  return (
+    <li
+      data-testid="epic-row"
+      className={`flex items-center gap-3 pr-3 ${onOpen ? "transition-colors hover:bg-slate-800/40" : ""}`}
+    >
+      {onOpen ? (
+        <button
+          type="button"
+          aria-haspopup="dialog"
+          onClick={(e) => onOpen(e.currentTarget)}
+          className={`${layout} cursor-pointer rounded-md focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500`}
+        >
+          {body}
+        </button>
+      ) : (
+        <div className={layout}>{body}</div>
+      )}
+      <Link
+        to={href}
+        aria-label={noEpic ? "View tasks without an epic" : `View tasks of ${name}`}
+        className="shrink-0 whitespace-nowrap rounded text-xs text-blue-400 transition-colors hover:text-blue-300 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+      >
+        View tasks <span aria-hidden="true">→</span>
       </Link>
-      {documents}
       <div className="w-6 shrink-0">{menu}</div>
     </li>
   );
@@ -358,9 +403,9 @@ type Editing = { kind: "new" } | { kind: "delete"; epic: Epic } | null;
 
 /**
  * The Epics view: the selected project's epics, each with its progress, the
- * busy ones first. A row opens its tickets in the ticket view used last; its
- * paperclip, and its menu's Edit, open the epic modal, which the URL names
- * (`epic=<name>`, see useEpicParam).
+ * busy ones first. A row opens the epic modal, which the URL names
+ * (`epic=<name>`, see useEpicParam); its View tasks link opens its tickets in
+ * the ticket view used last.
  */
 export default function Epics() {
   const filterState = useFilters();
@@ -499,27 +544,9 @@ export default function Epics() {
       description={epic.description}
       progress={epic}
       href={link(epic.name)}
-      documents={
-        <button
-          type="button"
-          aria-label={`Documents of ${epic.name} (${epic.documentCount ?? 0})`}
-          title="Documents"
-          onClick={(e) => openEpic(epic, e.currentTarget)}
-          className={`inline-flex shrink-0 items-center gap-1 rounded-md border border-slate-800 px-1.5 py-0.5 text-xs tabular-nums transition-colors hover:bg-slate-800 hover:text-slate-200 ${
-            (epic.documentCount ?? 0) > 0 ? "text-slate-300" : "text-slate-600"
-          }`}
-        >
-          <Paperclip aria-hidden="true" className="h-3 w-3" />
-          {epic.documentCount ?? 0}
-        </button>
-      }
-      menu={
-        <RowMenu
-          name={epic.name}
-          onEdit={(opener) => openEpic(epic, opener)}
-          onDelete={(opener) => openDialog({ kind: "delete", epic }, opener)}
-        />
-      }
+      documentCount={epic.documentCount ?? 0}
+      onOpen={(opener) => openEpic(epic, opener)}
+      menu={<RowMenu name={epic.name} onDelete={(opener) => openDialog({ kind: "delete", epic }, opener)} />}
     />
   );
 
