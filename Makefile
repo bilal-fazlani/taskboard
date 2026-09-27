@@ -1,4 +1,4 @@
-.PHONY: build dev dev-frontend frontend clean install test test-install test-guard test-web
+.PHONY: build dev dev-frontend frontend clean install test test-install test-guard test-writeback test-web
 
 BUILD_DIR := cmd/taskboard
 BINARY := taskboard
@@ -70,7 +70,7 @@ install: frontend
 dev-frontend:
 	cd web && TASKBOARD_API_PORT=$(DEV_PORT) npm run dev
 
-test: test-guard test-web
+test: test-guard test-writeback test-web
 	go test ./...
 
 # Runs scripts/install.sh end to end in a sandboxed HOME with the same marked
@@ -82,6 +82,10 @@ test-install: frontend
 # Feeds sample commands to the Claude Code PreToolUse hook and checks allow/deny.
 test-guard:
 	bash scripts/claude-guard_test.sh
+
+# Feeds sample hook input to the write-back reminder hook (PreCompact, SessionStart, Stop).
+test-writeback:
+	bash scripts/claude-writeback-reminder_test.sh
 
 # Runs the web unit tests once with vitest. Needs no frontend build or server.
 test-web:
