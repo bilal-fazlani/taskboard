@@ -62,4 +62,12 @@ describe("overlay params", () => {
     expect(withoutOverlays("/table", new URLSearchParams("epic=M1&ticket=ACP-7")).toString()).toBe("epic=M1");
     expect(withoutOverlays("/epics", new URLSearchParams("project=ACP&epic=M1&doc=a.md")).toString()).toBe("project=ACP");
   });
+
+  it("counts project as an overlay only on the Projects page, where it is the dialog", () => {
+    expect(hasOverlay("/projects", new URLSearchParams("project=ACP"))).toBe(true);
+    expect(withoutOverlays("/projects", new URLSearchParams("project=ACP")).toString()).toBe("");
+    for (const path of ["/kanban", "/table", "/epics"]) {
+      expect(hasOverlay(path, new URLSearchParams("project=ACP"))).toBe(false);
+    }
+  });
 });

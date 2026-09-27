@@ -1,6 +1,7 @@
 // Overlays are what opens on top of a view and lives in its query string: the
-// ticket editor (`ticket`), a document (`doc`) and, in the Epics view, the
-// epic modal (`epic`). In the ticket views `epic` is the epic filter instead,
+// ticket editor (`ticket`), a document (`doc`), in the Epics view the epic
+// modal (`epic`), and on the Projects page a project's dialog (`project`).
+// In the ticket views `epic` is the epic filter instead,
 // which stays when an overlay closes.
 // Each overlay the user opens is its own browser history entry, so Back and
 // Forward step through them. How many such entries sit on top of the view the
@@ -17,10 +18,14 @@
 
 const OVERLAY_PARAMS: readonly string[] = ["ticket", "doc"];
 const EPICS_OVERLAY_PARAMS: readonly string[] = [...OVERLAY_PARAMS, "epic"];
+// On the Projects page `project` names the project whose dialog is open.
+const PROJECTS_OVERLAY_PARAMS: readonly string[] = ["project"];
 
 /** The query parameters that are overlays on the page at `pathname`. */
 export function overlayParams(pathname: string): readonly string[] {
-  return pathname === "/epics" ? EPICS_OVERLAY_PARAMS : OVERLAY_PARAMS;
+  if (pathname === "/epics") return EPICS_OVERLAY_PARAMS;
+  if (pathname === "/projects") return PROJECTS_OVERLAY_PARAMS;
+  return OVERLAY_PARAMS;
 }
 
 export interface OverlayState {

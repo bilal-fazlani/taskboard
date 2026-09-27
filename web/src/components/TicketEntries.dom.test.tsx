@@ -359,8 +359,13 @@ describe("the ticket page's entries", () => {
     await waitFor(() => expect(epic.textContent).toContain("Epic Agents: 15 decisions, 2 open notes"));
     const project = screen.getByTestId("entry-context-project");
     expect(project.textContent).toContain("Project ACP: 42 decisions, 6 learnings, 1 open note");
-    expect(within(epic).getByRole("link", { name: "open" }).getAttribute("href")).toBe("/epics?project=ACP&epic=Agents");
-    expect(within(project).getByRole("link", { name: "open" }).getAttribute("href")).toBe("/projects?project=ACP");
+    // Each opens its dialog straight on the entries.
+    expect(within(epic).getByRole("link", { name: "open" }).getAttribute("href")).toBe(
+      "/epics?project=ACP&epic=Agents#entries",
+    );
+    expect(within(project).getByRole("link", { name: "open" }).getAttribute("href")).toBe(
+      "/projects?project=ACP#entries",
+    );
   });
 
   it("offers no note box or Challenge on a deleted ticket", async () => {

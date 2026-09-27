@@ -5,6 +5,7 @@ import type { MouseEvent } from "react";
 import { Link } from "react-router-dom";
 import type { EntryContext } from "../hooks/useEntryContext";
 import { countsPhrase } from "../lib/entries";
+import { ENTRIES_HASH } from "../hooks/useScrollToEntries";
 
 /**
  * The box. `onNavigate`, when given, is called instead of following a link
@@ -21,8 +22,12 @@ export default function EntryContextBox({
   project: { prefix: string; name?: string };
   onNavigate?: (to: string) => void;
 }) {
-  const epicTo = epic ? `/epics?${new URLSearchParams({ project: project.prefix, epic: epic.name }).toString()}` : "";
-  const projectTo = `/projects?${new URLSearchParams({ project: project.prefix }).toString()}`;
+  // Each opens its dialog (the epic's on the Epics page, the project's on the
+  // Projects page) scrolled to the entries.
+  const epicTo = epic
+    ? `/epics?${new URLSearchParams({ project: project.prefix, epic: epic.name }).toString()}${ENTRIES_HASH}`
+    : "";
+  const projectTo = `/projects?${new URLSearchParams({ project: project.prefix }).toString()}${ENTRIES_HASH}`;
   const follow = (to: string) => (e: MouseEvent<HTMLAnchorElement>) => {
     if (!onNavigate || e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
     e.preventDefault();

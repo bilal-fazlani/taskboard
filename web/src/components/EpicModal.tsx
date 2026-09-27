@@ -8,13 +8,15 @@ import { documentWindowKey } from "../lib/documents";
 import DocumentModal from "./DocumentModal";
 import DocumentsSection from "./DocumentsSection";
 import EpicForm from "./EpicForm";
+import LevelEntries from "./LevelEntries";
 
 const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 // An epic: its name and description, saved with Save, which closes the
 // modal as the Edit epic dialog did (and, as there, typing in those two
-// fields is dropped without asking), and its documents, which act at once,
+// fields is dropped without asking), its entries (notes, decisions and
+// learnings, where a note or a challenge is left at once), and its documents, which act at once,
 // as they do in the ticket editor. A document opens over it, its name in the
 // URL beside the epic's.
 //
@@ -50,6 +52,8 @@ export default function EpicModal({
   const { documents, failed, reload } = useOwnerDocuments(owner);
   const docParam = useDocParam(documents, "epic");
   useEscape(onClose);
+  // The scrolling body, which a link to the epic's entries scrolls to them.
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   // Focus moves into the modal on open (the name field takes it, being
   // autofocused), and the page gives it back to the opener once closed.
@@ -122,7 +126,7 @@ export default function EpicModal({
             <X className="h-5 w-5" />
           </button>
         </header>
-        <div className="min-h-0 flex-1 space-y-6 overflow-y-auto p-5">
+        <div ref={scrollRef} className="min-h-0 flex-1 space-y-6 overflow-y-auto p-5">
           <EpicForm
             epic={epic}
             epics={epics}
@@ -131,6 +135,8 @@ export default function EpicModal({
               await onSaved(await api.epics.update(epic.id, data));
             }}
           />
+          {/* The epic's entries, read here once rather than on every ticket. */}
+          <LevelEntries owner={owner} scrollParent={scrollRef} />
           <DocumentsSection
             owner={owner}
             ownerNoun="epic"

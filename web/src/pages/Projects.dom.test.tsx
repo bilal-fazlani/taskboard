@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { Project } from "../api/client";
 
 // The Projects page with the API mocked: the card marker for agent
-// instructions, the trash button and its confirm dialog, and the form's
-// Description / Agent instructions tabs.
+// instructions, the trash button and its confirm dialog, the form's
+// Description / Agent instructions tabs, the entries column, and ?project=.
 
 const mockApi = vi.hoisted(() => ({
   projects: {
@@ -14,13 +14,13 @@ const mockApi = vi.hoisted(() => ({
     create: vi.fn(),
     update: vi.fn(),
     delete: vi.fn(),
-    journal: vi.fn(),
-    appendJournal: vi.fn(),
   },
+  entries: { list: vi.fn(), createNote: vi.fn() },
 }));
 vi.mock("../api/client", () => ({ api: mockApi }));
 vi.mock("../hooks/useLiveRefresh", () => ({ useLiveRefresh: () => {} }));
 
+import { BrowserRouter } from "react-router-dom";
 import Projects from "./Projects";
 
 // No icon by default: the API leaves an empty one out of the JSON
@@ -114,7 +114,7 @@ function showLess(card: HTMLElement) {
 }
 
 async function renderPage() {
-  render(<Projects />);
+  render(<Projects />, { wrapper: BrowserRouter });
   await screen.findByText("ACP project");
 }
 
@@ -149,11 +149,13 @@ beforeEach(() => {
   );
   mockApi.projects.create.mockResolvedValue(project("NEW"));
   mockApi.projects.update.mockResolvedValue(WITH);
-  mockApi.projects.journal.mockResolvedValue({ entries: [], total: 0, hasMore: false });
+  mockApi.entries.list.mockResolvedValue({ entries: [], total: 0, hasMore: false, agents: {} });
+  window.history.replaceState(null, "", "/projects");
 });
 
 afterEach(() => {
   cleanup();
+  window.history.replaceState(null, "", "/");
   vi.clearAllMocks();
   delete (globalThis as unknown as { ResizeObserver?: unknown }).ResizeObserver;
   // Uncovers jsdom's own getters on Element.prototype again.
@@ -186,7 +188,7 @@ describe("project cards", () => {
 
   it("shows a project's icon before its name", async () => {
     mockApi.projects.list.mockResolvedValue([project("ICON", { name: "Iconic", icon: "🧭" })]);
-    render(<Projects />);
+    render(<Projects />, { wrapper: BrowserRouter });
     await screen.findByText("Iconic");
     expect(screen.getByTestId("project-icon").textContent).toBe("🧭");
   });
@@ -374,7 +376,7 @@ describe("a project card's Show more", () => {
 
   async function renderCards() {
     mockApi.projects.list.mockResolvedValue([SHORT, FITS, LONG]);
-    render(<Projects />);
+    render(<Projects />, { wrapper: BrowserRouter });
     await screen.findByText("LONG project");
     relayout();
   }
@@ -651,42 +653,76 @@ describe("the Description / Agent instructions tabs", () => {
   });
 });
 
-describe("the project's journal on the form", () => {
-  it("sits beside the form on a wide screen and under it on a narrow one", async () => {
-    mockApi.projects.journal.mockResolvedValue({
-      entries: [{ id: "e1", projectId: WITH.id, author: "orchestrator", text: "Run started.", createdAt: "2026-09-26T10:00:00Z" }],
+describe("the project's entries on the form", () => {
+  it("sit beside the form on a wide screen and under it on a narrow one", async () => {
+    mockApi.entries.list.mockResolvedValue({
+      entries: [
+        { id: "e1", projectId: WITH.id, type: "decision", text: "Run started.", authorName: "bilal", createdAt: "2026-09-26T10:00:00Z" },
+      ],
       total: 1,
       hasMore: false,
+      agents: {},
     });
     await renderPage();
     const form = await openEdit("ACP project");
-    expect(mockApi.projects.journal).toHaveBeenCalledWith(WITH.id);
-    const column = await screen.findByTestId("project-journal-column");
-    expect(within(column).getByText("Run started.")).toBeTruthy();
+    const column = await screen.findByTestId("project-entries-column");
+    await within(column).findByText("Run started.");
+    expect(mockApi.entries.list.mock.calls[0][0]).toEqual({ projectId: WITH.id });
 
     // jsdom applies no media queries, so this checks the layout's contract:
-    // the journal follows the form in the dialog's body, which stacks them
+    // the entries follow the form in the dialog's body, which stacks them
     // (and scrolls as a whole) until the lg breakpoint, where it becomes two
     // columns that each scroll on their own.
     const body = screen.getByTestId("project-dialog-body");
     expect([...body.children]).toEqual([form, column]);
     expect(body.className).toContain("overflow-y-auto");
     expect(body.className).toContain("lg:grid");
-    expect(body.className).toContain("lg:grid-cols-[minmax(0,1fr)_26rem]");
+    expect(body.className).toContain("lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]");
     expect(body.className).toContain("lg:overflow-hidden");
     expect(form.className).toContain("lg:overflow-y-auto");
+    expect(column.className).toContain("lg:overflow-y-auto");
     expect(column.className).toContain("border-t");
     expect(column.className).toContain("lg:border-l");
-    // The journal's own controls are not part of the form: Append never saves it.
-    expect(within(form).queryByRole("button", { name: "Append" })).toBeNull();
+    // The note box is not part of the form: leaving a note never saves it.
+    expect(within(form).queryByRole("button", { name: "Leave note" })).toBeNull();
+    // The journal's free-text author and text box went with it.
+    expect(screen.queryByRole("textbox", { name: "Author" })).toBeNull();
+    expect(screen.queryByText("Journal")).toBeNull();
   });
 
-  it("is not on the form for a new project", async () => {
+  it("are not on the form for a new project", async () => {
     await renderPage();
     fireEvent.click(screen.getByRole("button", { name: /New Project/ }));
     expect(screen.getByRole("form", { name: "New Project" })).toBeTruthy();
-    expect(screen.queryByTestId("project-journal-column")).toBeNull();
+    expect(screen.queryByTestId("project-entries-column")).toBeNull();
     expect(screen.getByTestId("project-dialog-body").className).not.toContain("lg:grid");
-    expect(mockApi.projects.journal).not.toHaveBeenCalled();
+    expect(mockApi.entries.list).not.toHaveBeenCalled();
+  });
+});
+
+describe("the project in the URL", () => {
+  it("opens the project that ?project= names, by prefix in any case", async () => {
+    window.history.replaceState(null, "", "/projects?project=acp");
+    await renderPage();
+    expect(await screen.findByRole("form", { name: "Edit Project" })).toBeTruthy();
+    expect((screen.getByPlaceholderText("My Project") as HTMLInputElement).value).toBe("ACP project");
+  });
+
+  it("names the project a card opens, and drops it on close", async () => {
+    await renderPage();
+    await openEdit("HOME project");
+    expect(new URLSearchParams(window.location.search).get("project")).toBe("HOME");
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    });
+    await waitFor(() => expect(screen.queryByRole("form", { name: "Edit Project" })).toBeNull());
+    expect(new URLSearchParams(window.location.search).get("project")).toBeNull();
+  });
+
+  it("drops a ?project= that names no project", async () => {
+    window.history.replaceState(null, "", "/projects?project=NOPE");
+    await renderPage();
+    await waitFor(() => expect(window.location.search).toBe(""));
+    expect(screen.queryByRole("form", { name: "Edit Project" })).toBeNull();
   });
 });

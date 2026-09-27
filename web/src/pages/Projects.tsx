@@ -1,11 +1,17 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { Plus, Trash2, X, FolderKanban, ChevronDown, ChevronUp, Bot } from "lucide-react";
 import Markdown from "react-markdown";
+import { useSearchParams } from "react-router-dom";
 import { api, type Project } from "../api/client";
 import { useLiveRefresh } from "../hooks/useLiveRefresh";
+import { useOverlayHistory } from "../hooks/useOverlayHistory";
+import { latestSearchParams } from "../lib/latestSearch";
 import ProjectTextFields from "../components/ProjectTextFields";
-import ProjectJournal from "../components/ProjectJournal";
+import LevelEntries from "../components/LevelEntries";
 import DeleteProjectConfirm from "../components/DeleteProjectConfirm";
+
+/** The query parameter naming the project whose dialog is open, by prefix or id. */
+const PROJECT_PARAM = "project";
 
 const DEFAULT_COLORS = [
   "#3b82f6",
@@ -29,6 +35,9 @@ function ProjectModal({
 }) {
   const isEdit = !!project;
   const titleId = useId();
+  // Opened from a link to the project's entries, the narrow layout's body
+  // scrolls to them; the wide one shows them beside the form already.
+  const bodyRef = useRef<HTMLDivElement>(null);
   const [name, setName] = useState(project?.name || "");
   const [prefix, setPrefix] = useState(project?.prefix || "");
   const [description, setDescription] = useState(project?.description || "");
@@ -83,7 +92,7 @@ function ProjectModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      {/* Editing a project adds its journal: a column beside the form on a
+      {/* Editing a project adds its entries: a column beside the form on a
           wide screen, where each scrolls on its own, and under the form on a
           narrow one, where the whole dialog scrolls. */}
       <div
@@ -107,9 +116,10 @@ function ProjectModal({
         </div>
 
         <div
+          ref={bodyRef}
           data-testid="project-dialog-body"
           className={`min-h-0 flex-1 overflow-y-auto ${
-            isEdit ? "lg:grid lg:grid-cols-[minmax(0,1fr)_26rem] lg:overflow-hidden" : ""
+            isEdit ? "lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)] lg:overflow-hidden" : ""
           }`}
         >
           <form
@@ -208,10 +218,10 @@ function ProjectModal({
           </form>
           {project && (
             <div
-              data-testid="project-journal-column"
-              className="flex flex-col border-t border-slate-800 px-6 pt-5 pb-6 lg:min-h-0 lg:border-t-0 lg:border-l lg:pt-0"
+              data-testid="project-entries-column"
+              className="border-t border-slate-800 px-6 pt-5 pb-6 lg:min-h-0 lg:overflow-y-auto lg:border-t-0 lg:border-l lg:pt-0"
             >
-              <ProjectJournal projectId={project.id} />
+              <LevelEntries owner={{ projectId: project.id }} scrollParent={bodyRef} />
             </div>
           )}
         </div>
@@ -278,11 +288,61 @@ function ProjectDescription({
   );
 }
 
+/** The project a `?project=` names: by prefix, in any letter case, or by id. */
+function findProject(projects: readonly Project[], ref: string): Project | undefined {
+  const upper = ref.toUpperCase();
+  return projects.find((p) => p.prefix.toUpperCase() === upper) ?? projects.find((p) => p.id === ref);
+}
+
 export default function Projects() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [showCreate, setShowCreate] = useState(false);
-  const [editProject, setEditProject] = useState<Project | null>(null);
   const [loading, setLoading] = useState(true);
+  // Whether the last read of the list succeeded: a failed one empties the
+  // list, which must not read as the open project being gone.
+  const [listed, setListed] = useState(false);
+
+  // The open project's dialog lives in the URL (?project=ACP, by prefix or
+  // id), so a link opens it and Back closes it.
+  const [params] = useSearchParams();
+  const overlays = useOverlayHistory();
+  const ref = params.get(PROJECT_PARAM) ?? "";
+  const found = ref ? findProject(projects, ref) : undefined;
+  // The project the URL last found, with the parameter that found it. It is
+  // followed by id, so a prefix renamed elsewhere keeps the dialog (and what
+  // was typed in it) open, and it stays on screen while a read fails.
+  const [held, setHeld] = useState<{ ref: string; project: Project } | null>(null);
+  const heldHere = held && held.ref === ref ? held.project : null;
+  const byId = !found && heldHere ? projects.find((p) => p.id === heldHere.id) : undefined;
+  const current = found ?? byId ?? null;
+  if (current && (heldHere !== current || held?.ref !== ref)) setHeld({ ref, project: current });
+  if (!ref && held) setHeld(null);
+  const editProject = current ?? (!listed ? heldHere : null);
+
+  // A renamed prefix: the URL names the new one.
+  const renamedTo = byId?.prefix;
+  useEffect(() => {
+    if (!renamedTo) return;
+    const next = latestSearchParams(params);
+    next.set(PROJECT_PARAM, renamedTo);
+    overlays.replace(next);
+  }, [renamedTo, params, overlays]);
+
+  // Only a list read that succeeded and lacks the project (a bad link, or
+  // deleted) drops the parameter.
+  const missing = ref !== "" && !loading && listed && current === null;
+  useEffect(() => {
+    if (!missing) return;
+    const next = latestSearchParams(params);
+    next.delete(PROJECT_PARAM);
+    overlays.replace(next);
+  }, [missing, params, overlays]);
+  const openProject = (project: Project) => {
+    const next = latestSearchParams(params);
+    next.set(PROJECT_PARAM, project.prefix);
+    overlays.push(next);
+  };
+  const closeProject = () => overlays.closeAll();
   const [expandedDescs, setExpandedDescs] = useState<Set<string>>(new Set());
 
   const toggleDesc = (id: string) => {
@@ -298,8 +358,10 @@ export default function Projects() {
     try {
       const data = await api.projects.list();
       setProjects(data || []);
+      setListed(true);
     } catch {
       setProjects([]);
+      setListed(false);
     }
     setLoading(false);
   }, []);
@@ -321,7 +383,7 @@ export default function Projects() {
   const handleUpdate = async (data: Partial<Project>) => {
     if (!editProject) return;
     await api.projects.update(editProject.id, data);
-    setEditProject(null);
+    closeProject();
     load();
   };
 
@@ -368,7 +430,7 @@ export default function Projects() {
             {projects.map((project) => (
               <div
                 key={project.id}
-                onClick={() => setEditProject(project)}
+                onClick={() => openProject(project)}
                 className="relative bg-slate-900 border border-slate-700/50 hover:border-slate-600 rounded-xl p-5 transition-colors cursor-pointer"
               >
                 <div
@@ -444,8 +506,9 @@ export default function Projects() {
 
       {editProject && (
         <ProjectModal
+          key={editProject.id}
           project={editProject}
-          onClose={() => setEditProject(null)}
+          onClose={closeProject}
           onSave={handleUpdate}
         />
       )}
