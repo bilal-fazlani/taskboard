@@ -758,10 +758,11 @@ func TestListEpicsToolReturnsProgressAndNoEpicSummary(t *testing.T) {
 		t.Fatal("list_epics: expected an error for an unknown project")
 	}
 
-	// A missing projectId names the field, not the generic "id".
+	// A missing projectId/project names both accepted argument names, not
+	// the generic "id".
 	_, err = s.callTool("list_epics", mustJSON(t, map[string]any{}))
-	if err == nil || err.Error() != "projectId is required" {
-		t.Fatalf("list_epics with no projectId: err = %v, want \"projectId is required\"", err)
+	if err == nil || err.Error() != "projectId or project is required" {
+		t.Fatalf("list_epics with no projectId: err = %v, want \"projectId or project is required\"", err)
 	}
 }
 

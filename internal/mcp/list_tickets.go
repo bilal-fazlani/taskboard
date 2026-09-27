@@ -13,7 +13,7 @@ import (
 // listTicketsArgs is list_tickets's arguments. Status takes one status or
 // several; the filters combine as an AND, the same as models.TicketFilter.
 type listTicketsArgs struct {
-	ProjectID    string     `json:"projectId"`
+	projectRefArg
 	Status       statusList `json:"status"`
 	Priority     string     `json:"priority"`
 	Repo         string     `json:"repo"`
@@ -79,7 +79,7 @@ func (s *MCPServer) listTickets(a listTicketsArgs) (any, error) {
 // filter is the store filter these arguments ask for.
 func (a listTicketsArgs) filter() models.TicketFilter {
 	return models.TicketFilter{
-		ProjectID:    a.ProjectID,
+		ProjectID:    a.projectRef(),
 		Statuses:     a.Status,
 		Priority:     a.Priority,
 		Repo:         a.Repo,

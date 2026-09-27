@@ -21,15 +21,14 @@ const documentDataDescription = "An image file's bytes in base64 (a data: URL pr
 	"through your context."
 const documentTicketDescription = "Ticket ID or display key (e.g. BILL-2), case-insensitive; the owner to look a name up in"
 const documentEpicDescription = "Epic ID, or its name together with project; instead of ticket"
-const documentProjectDescription = "Project ID or prefix (case-insensitive); required when epic is a name"
+const documentProjectDescription = "Project ID or prefix (case-insensitive); required when epic is a name."
 
 // documentOwnerProps are the owner arguments every document tool takes:
 // ticket, or epic (with project when it is a name).
 func documentOwnerProps(ticketDescription string, props map[string]schemaProp) map[string]schemaProp {
 	props["ticket"] = schemaProp{Type: "string", Description: ticketDescription}
 	props["epic"] = schemaProp{Type: "string", Description: documentEpicDescription}
-	props["project"] = schemaProp{Type: "string", Description: documentProjectDescription}
-	return props
+	return withProjectRefProps(documentProjectDescription, props)
 }
 
 func (s *MCPServer) documentToolDefinitions() []toolDef {
@@ -373,9 +372,9 @@ var errOnePathContentOrData = fmt.Errorf("pass one of content, data or path, not
 // documentOwnerArgs are the arguments that name a document's owner: ticket
 // (id or display key), or epic (id, or name together with project).
 type documentOwnerArgs struct {
-	Ticket  string `json:"ticket"`
-	Epic    string `json:"epic"`
-	Project string `json:"project"`
+	Ticket string `json:"ticket"`
+	Epic   string `json:"epic"`
+	projectRefArg
 }
 
 // resolveDocumentOwner resolves the owner arguments. Naming both a ticket and
@@ -390,7 +389,7 @@ func (s *MCPServer) resolveDocumentOwner(a documentOwnerArgs) (db.DocumentOwner,
 		id, err := s.store.ResolveTicketID(ticket)
 		return db.DocumentOwner{TicketID: id}, err
 	case epic != "":
-		id, err := s.resolveEpicRefOrError(epic, a.Project)
+		id, err := s.resolveEpicRefOrError(epic, a.projectRef())
 		return db.DocumentOwner{EpicID: id}, err
 	}
 	return db.DocumentOwner{}, nil

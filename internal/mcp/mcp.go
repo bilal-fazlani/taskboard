@@ -309,15 +309,15 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 
 	case "list_epics":
 		var a struct {
-			ProjectID string `json:"projectId"`
+			projectRefArg
 		}
 		if err := decodeArgs(args, &a); err != nil {
 			return nil, err
 		}
-		if strings.TrimSpace(a.ProjectID) == "" {
-			return nil, fmt.Errorf("projectId is required")
+		if strings.TrimSpace(a.projectRef()) == "" {
+			return nil, fmt.Errorf("projectId or project is required")
 		}
-		projectID, err := s.store.ResolveProjectRef(a.ProjectID)
+		projectID, err := s.store.ResolveProjectRef(a.projectRef())
 		if err != nil {
 			return nil, err
 		}
@@ -339,6 +339,9 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 		if err := decodeArgs(args, &a); err != nil {
 			return nil, err
 		}
+		if err := applyProjectAlias(args, &a.ProjectID); err != nil {
+			return nil, err
+		}
 		e, err := s.store.CreateEpic(a.CreateEpicRequest)
 		if err != nil {
 			return nil, err
@@ -348,7 +351,7 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 	case "update_epic":
 		var a struct {
 			idOrKeyArg
-			Project string `json:"project"`
+			projectRefArg
 			models.UpdateEpicRequest
 			fullArg
 		}
@@ -358,7 +361,7 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 		if a.Name == nil && a.Description == nil {
 			return nil, fmt.Errorf("nothing to update: provide name and/or description")
 		}
-		epicID, err := s.resolveEpicRefOrError(a.ref(), a.Project)
+		epicID, err := s.resolveEpicRefOrError(a.ref(), a.projectRef())
 		if err != nil {
 			return nil, err
 		}
@@ -378,12 +381,12 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 	case "delete_epic":
 		var a struct {
 			idOrKeyArg
-			Project string `json:"project"`
+			projectRefArg
 		}
 		if err := decodeArgs(args, &a); err != nil {
 			return nil, err
 		}
-		epicID, err := s.resolveEpicRefOrError(a.ref(), a.Project)
+		epicID, err := s.resolveEpicRefOrError(a.ref(), a.projectRef())
 		if err != nil {
 			return nil, err
 		}
@@ -493,6 +496,9 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 		if err := decodeArgs(args, &a); err != nil {
 			return nil, err
 		}
+		if err := applyProjectAlias(args, &a.ProjectID); err != nil {
+			return nil, err
+		}
 		t, err := s.store.CreateTicket(a.CreateTicketRequest)
 		if err != nil {
 			return nil, err
@@ -582,12 +588,12 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 
 	case "get_board":
 		var a struct {
-			ProjectID string `json:"projectId"`
+			projectRefArg
 		}
 		if err := decodeArgs(args, &a); err != nil {
 			return nil, err
 		}
-		return s.store.GetBoard(a.ProjectID)
+		return s.store.GetBoard(a.projectRef())
 
 	case "create_subtask":
 		var a struct {
@@ -738,6 +744,50 @@ func (a idOrKeyArg) ref() string {
 		return v
 	}
 	return strings.TrimSpace(a.ID)
+}
+
+// projectRefArg is the project-scoping argument every project-scoped tool
+// takes: a project id or prefix under projectId, the name every ticket,
+// epic and journal entry's own JSON already carries that value under, or,
+// under the alias project, the exact same value (ACP-184: update_epic,
+// delete_epic and the document tools named it project while every other
+// project-scoped tool named it projectId, so an agent had to guess which
+// name a given tool wanted). The two names resolve identically. Embed it in
+// a tool's argument struct and call projectRef() instead of reading a bare
+// field; a tool whose argument struct already embeds a models.Create*Request
+// with its own projectId field instead calls applyProjectAlias.
+type projectRefArg struct {
+	ProjectID string `json:"projectId"`
+	Project   string `json:"project"`
+}
+
+// projectRef returns the effective project reference: projectId when it is
+// non-blank, else project, both trimmed of surrounding whitespace.
+func (a projectRefArg) projectRef() string {
+	if v := strings.TrimSpace(a.ProjectID); v != "" {
+		return v
+	}
+	return strings.TrimSpace(a.Project)
+}
+
+// applyProjectAlias fills *projectID in from args's project property when
+// projectID is still blank, for a tool (create_epic, create_ticket) whose
+// argument struct embeds a models.Create*Request and so already decoded
+// projectId straight into that field: projectRefArg cannot also be embedded
+// there without a conflicting duplicate "projectId" JSON tag, so the project
+// alias is applied as a second, narrower decode instead.
+func applyProjectAlias(args json.RawMessage, projectID *string) error {
+	if strings.TrimSpace(*projectID) != "" {
+		return nil
+	}
+	var alt struct {
+		Project string `json:"project"`
+	}
+	if err := decodeArgs(args, &alt); err != nil {
+		return err
+	}
+	*projectID = alt.Project
+	return nil
 }
 
 // resolveTicketRefOrError resolves a ticket id-or-display-key argument the
@@ -925,6 +975,28 @@ func withIDOrKeyProps(desc string, props map[string]schemaProp) map[string]schem
 	return props
 }
 
+// projectRefProps is the schema of the project-reference argument every
+// project-scoped tool takes (see projectRefArg): two names for the exact
+// same argument, so a caller does not have to guess which one a given tool
+// wants — passing either resolves it the same way. desc describes what the
+// value identifies, e.g. "Project ID or prefix (case-insensitive)."
+func projectRefProps(desc string) map[string]schemaProp {
+	full := desc + " projectId and project are the same argument, accepted under either name; when both are given, projectId wins."
+	return map[string]schemaProp{
+		"projectId": {Type: "string", Description: full},
+		"project":   {Type: "string", Description: full},
+	}
+}
+
+// withProjectRefProps merges projectRefProps(desc) into props and returns it,
+// for a tool whose schema has other properties beside projectId/project.
+func withProjectRefProps(desc string, props map[string]schemaProp) map[string]schemaProp {
+	for k, v := range projectRefProps(desc) {
+		props[k] = v
+	}
+	return props
+}
+
 // projectDescriptionPreviewLimit caps how many characters of a project's
 // description list_projects returns, so listing many projects stays cheap
 // even when a description runs long. get_project always returns the full text.
@@ -1067,8 +1139,7 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 				"project-scoped grouping — each ticket belongs to at most one epic, optionally.",
 			InputSchema: jsonSchema{
 				Type:       "object",
-				Properties: map[string]schemaProp{"projectId": {Type: "string", Description: "Project ID or prefix (case-insensitive)"}},
-				Required:   []string{"projectId"},
+				Properties: projectRefProps("Project ID or prefix (case-insensitive)."),
 			},
 		},
 		{
@@ -1079,13 +1150,12 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 				shortAnswerHelp(epicHolds, "created: true", epicWhole),
 			InputSchema: jsonSchema{
 				Type: "object",
-				Properties: map[string]schemaProp{
-					"projectId":   {Type: "string", Description: "Project ID or prefix (case-insensitive)"},
+				Properties: withProjectRefProps("Project ID or prefix (case-insensitive).", map[string]schemaProp{
 					"name":        {Type: "string", Description: "Epic name, unique within the project (case-insensitive); \"none\" is reserved"},
 					"description": {Type: "string", Description: "Epic description"},
 					"full":        fullProp(epicWhole),
-				},
-				Required: []string{"projectId", "name"},
+				}),
+				Required: []string{"name"},
 			},
 		},
 		{
@@ -1093,12 +1163,12 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 			Description: "Update an epic's name and/or description." + shortAnswerHelp(epicHolds, changedHelp, epicWhole),
 			InputSchema: jsonSchema{
 				Type: "object",
-				Properties: withIDOrKeyProps("Epic ID, or its name together with project (id and key both accept either form).", map[string]schemaProp{
-					"project":     {Type: "string", Description: "Project ID or prefix (case-insensitive); required when id/key is a name rather than an epic id"},
-					"name":        {Type: "string", Description: "New name, unique within the project (case-insensitive); \"none\" is reserved"},
-					"description": {Type: "string", Description: "New description"},
-					"full":        fullProp(epicWhole),
-				}),
+				Properties: withProjectRefProps("Project ID or prefix (case-insensitive); required when id/key is a name rather than an epic id.",
+					withIDOrKeyProps("Epic ID, or its name together with project (id and key both accept either form).", map[string]schemaProp{
+						"name":        {Type: "string", Description: "New name, unique within the project (case-insensitive); \"none\" is reserved"},
+						"description": {Type: "string", Description: "New description"},
+						"full":        fullProp(epicWhole),
+					})),
 			},
 		},
 		{
@@ -1108,9 +1178,8 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 				"with it and cannot be restored; its tickets' documents stay.",
 			InputSchema: jsonSchema{
 				Type: "object",
-				Properties: withIDOrKeyProps("Epic ID, or its name together with project (id and key both accept either form).", map[string]schemaProp{
-					"project": {Type: "string", Description: "Project ID or prefix (case-insensitive); required when id/key is a name rather than an epic id"},
-				}),
+				Properties: withProjectRefProps("Project ID or prefix (case-insensitive); required when id/key is a name rather than an epic id.",
+					withIDOrKeyProps("Epic ID, or its name together with project (id and key both accept either form).", map[string]schemaProp{})),
 			},
 		},
 		// --- Labels (global, informational tags on tickets) ---
@@ -1169,8 +1238,7 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 				"Every filter given must match. " + listTicketsFormHelp,
 			InputSchema: jsonSchema{
 				Type: "object",
-				Properties: map[string]schemaProp{
-					"projectId": {Type: "string", Description: "Filter by project ID or prefix (case-insensitive); an unknown one returns no tickets rather than an error"},
+				Properties: withProjectRefProps("Filter by project ID or prefix (case-insensitive); an unknown one returns no tickets rather than an error.", map[string]schemaProp{
 					"status": {
 						Type:        "array",
 						Description: "Filter by status: tickets in any of these (" + strings.Join(models.Statuses, ", ") + "), e.g. [\"todo\", \"in_progress\"]. A single status string is accepted too, including several comma-separated (\"todo,in_progress\").",
@@ -1179,13 +1247,13 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 					"priority":     {Type: "string", Description: "Filter by priority", Enum: []string{"urgent", "high", "medium", "low"}},
 					"repo":         {Type: "string", Description: "Filter to tickets attached to this repo, matched exactly"},
 					"label":        {Type: "string", Description: "Filter by label name, case-insensitive"},
-					"epic":         {Type: "string", Description: "Filter by epic name (case-insensitive) or id, or \"none\" for tickets without an epic. Without projectId, a name matches that epic in every project, and \"none\" spans every project's tickets without an epic too — pass projectId to scope the filter to one project."},
+					"epic":         {Type: "string", Description: "Filter by epic name (case-insensitive) or id, or \"none\" for tickets without an epic. Without projectId/project, a name matches that epic in every project, and \"none\" spans every project's tickets without an epic too — pass projectId or project to scope the filter to one project."},
 					"ready":        {Type: "boolean", Description: "Only tickets ready to start: status todo, with every ticket they depend on done (a todo ticket with no dependencies is ready). Combined with status like any filter, so a status list without todo returns nothing."},
 					"excludeLabel": {Type: "string", Description: "Leave out tickets carrying this label name, case-insensitive (e.g. \"hold\")"},
 					"summary":      {Type: "boolean", Description: listTicketsSummaryHelp},
 					"limit":        {Type: "integer", Description: listTicketsLimitHelp},
 					"offset":       {Type: "integer", Description: listTicketsOffsetHelp},
-				},
+				}),
 			},
 		},
 		{
@@ -1213,8 +1281,7 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 				shortAnswerHelp(ticketHolds, "created: true", ticketWhole),
 			InputSchema: jsonSchema{
 				Type: "object",
-				Properties: map[string]schemaProp{
-					"projectId":   {Type: "string", Description: "Project ID or prefix (case-insensitive)"},
+				Properties: withProjectRefProps("Project ID or prefix (case-insensitive).", map[string]schemaProp{
 					"title":       {Type: "string", Description: "Ticket title"},
 					"description": {Type: "string", Description: "Rich text description"},
 					"status":      {Type: "string", Description: "Initial status", Enum: models.Statuses},
@@ -1241,8 +1308,8 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 						Description: surfacedFromHelp,
 					},
 					"full": fullProp(ticketWhole),
-				},
-				Required: []string{"projectId", "title"},
+				}),
+				Required: []string{"title"},
 			},
 		},
 		{
@@ -1332,10 +1399,8 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 			Name:        "get_board",
 			Description: fmt.Sprintf("Get full Kanban board grouped by status columns (%s)", strings.Join(models.Statuses, ", ")),
 			InputSchema: jsonSchema{
-				Type: "object",
-				Properties: map[string]schemaProp{
-					"projectId": {Type: "string", Description: "Filter by project ID or prefix (optional, case-insensitive); an unknown one returns no tickets rather than an error"},
-				},
+				Type:       "object",
+				Properties: projectRefProps("Filter by project ID or prefix (optional, case-insensitive); an unknown one returns no tickets rather than an error."),
 			},
 		},
 		// --- Subtasks (steps within a ticket) ---

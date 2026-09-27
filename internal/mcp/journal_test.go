@@ -64,11 +64,11 @@ func TestProjectJournalToolErrors(t *testing.T) {
 		args map[string]any
 		want string
 	}{
-		{"append_project_journal", map[string]any{"author": "a", "text": "t"}, "projectId is required"},
+		{"append_project_journal", map[string]any{"author": "a", "text": "t"}, "projectId or project is required"},
 		{"append_project_journal", map[string]any{"projectId": "NOPE", "author": "a", "text": "t"}, "project not found"},
 		{"append_project_journal", map[string]any{"projectId": "BILL", "text": "t"}, "author is required"},
 		{"append_project_journal", map[string]any{"projectId": "BILL", "author": "a", "text": " "}, "text is required"},
-		{"list_project_journal", map[string]any{}, "projectId is required"},
+		{"list_project_journal", map[string]any{}, "projectId or project is required"},
 		{"list_project_journal", map[string]any{"projectId": "BILL", "limit": 0}, "limit must be between 1 and 100"},
 		{"list_project_journal", map[string]any{"projectId": "BILL", "before": "nope"}, "is not an entry"},
 	}

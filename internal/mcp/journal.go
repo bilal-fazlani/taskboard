@@ -11,16 +11,16 @@ import (
 
 // appendJournalArgs is append_project_journal's arguments.
 type appendJournalArgs struct {
-	ProjectID string `json:"projectId"`
-	Author    string `json:"author"`
-	Text      string `json:"text"`
+	projectRefArg
+	Author string `json:"author"`
+	Text   string `json:"text"`
 }
 
 // listJournalArgs is list_project_journal's arguments.
 type listJournalArgs struct {
-	ProjectID string `json:"projectId"`
-	Before    string `json:"before"`
-	Limit     *int   `json:"limit"`
+	projectRefArg
+	Before string `json:"before"`
+	Limit  *int   `json:"limit"`
 }
 
 // getProjectJournalHelp is what get_project's description says about the
@@ -39,13 +39,12 @@ var journalToolDefs = [2]toolDef{
 			"Answers with the new entry: {id, projectId, author, text, createdAt}.",
 		InputSchema: jsonSchema{
 			Type: "object",
-			Properties: map[string]schemaProp{
-				"projectId": {Type: "string", Description: "Project ID or prefix (case-insensitive)"},
+			Properties: withProjectRefProps("Project ID or prefix (case-insensitive).", map[string]schemaProp{
 				"author": {Type: "string", Description: "Who writes the entry, as a name, for example your role in the run " +
 					"(\"orchestrator\", \"reviewer\") or the person's name. At most " + strconv.Itoa(db.JournalAuthorMaxLength) + " characters."},
 				"text": {Type: "string", Description: "The entry, in Markdown."},
-			},
-			Required: []string{"projectId", "author", "text"},
+			}),
+			Required: []string{"author", "text"},
 		},
 	},
 	{
@@ -54,27 +53,26 @@ var journalToolDefs = [2]toolDef{
 			"get_project already carries the latest entries; when hasMore is true, call again with before set to nextBefore for older ones.",
 		InputSchema: jsonSchema{
 			Type: "object",
-			Properties: map[string]schemaProp{
-				"projectId": {Type: "string", Description: "Project ID or prefix (case-insensitive)"},
-				"before":    {Type: "string", Description: "Start after this entry: the previous page's nextBefore. Leave it out to start with the newest entry."},
+			Properties: withProjectRefProps("Project ID or prefix (case-insensitive).", map[string]schemaProp{
+				"before": {Type: "string", Description: "Start after this entry: the previous page's nextBefore. Leave it out to start with the newest entry."},
 				"limit": {Type: "integer", Description: "Page size: at most this many entries (1 to " + strconv.Itoa(db.JournalMaxLimit) +
 					", default " + strconv.Itoa(db.JournalDefaultLimit) + ")."},
-			},
-			Required: []string{"projectId"},
+			}),
 		},
 	},
 }
 
-// resolveJournalProject resolves a journal tool's projectId, which must be given.
+// resolveJournalProject resolves a journal tool's projectId/project, which
+// must be given under one of the two names.
 func (s *MCPServer) resolveJournalProject(ref string) (string, error) {
 	if strings.TrimSpace(ref) == "" {
-		return "", errors.New("projectId is required")
+		return "", errors.New("projectId or project is required")
 	}
 	return s.store.ResolveProjectRef(ref)
 }
 
 func (s *MCPServer) appendProjectJournal(a appendJournalArgs) (*models.JournalEntry, error) {
-	projectID, err := s.resolveJournalProject(a.ProjectID)
+	projectID, err := s.resolveJournalProject(a.projectRef())
 	if err != nil {
 		return nil, err
 	}
@@ -82,7 +80,7 @@ func (s *MCPServer) appendProjectJournal(a appendJournalArgs) (*models.JournalEn
 }
 
 func (s *MCPServer) listProjectJournal(a listJournalArgs) (models.JournalPage, error) {
-	projectID, err := s.resolveJournalProject(a.ProjectID)
+	projectID, err := s.resolveJournalProject(a.projectRef())
 	if err != nil {
 		return models.JournalPage{}, err
 	}
