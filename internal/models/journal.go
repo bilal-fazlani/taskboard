@@ -2,13 +2,15 @@ package models
 
 import "time"
 
-// JournalEntry is one entry in a project's journal. Entries are appended and
-// never rewritten or removed; deleting their project hides them with it.
+// JournalEntry is one entry in a project's journal: one of the project's
+// current entries (Entry), in the journal's older shape, kept until the
+// journal's surfaces move to entries. Entries are never rewritten or removed;
+// deleting their project hides them with it.
 type JournalEntry struct {
 	ID        string `json:"id"`
 	ProjectID string `json:"projectId"`
-	// Author is the name the writer gave, free text: there are no agent
-	// identities yet, so it refers to nothing else on the board.
+	// Author is the name the writer gave, free text, or for an entry an
+	// agent wrote, the agent's role.
 	Author    string    `json:"author"`
 	Text      string    `json:"text"`
 	CreatedAt time.Time `json:"createdAt"`

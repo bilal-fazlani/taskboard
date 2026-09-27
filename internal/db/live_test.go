@@ -12,8 +12,8 @@ import (
 )
 
 // rawReadAllowed names the functions that may read projects, tickets, epics,
-// documents or subtasks straight from the table, deleted projects' rows
-// included, and why. Everything else goes through the live sources in
+// documents, subtasks or entries straight from the table, deleted projects'
+// rows included, and why. Everything else goes through the live sources in
 // live.go.
 var rawReadAllowed = map[string]string{
 	"checkPrefixFree":    "a deleted project keeps its prefix, so a new one must not take it",
@@ -23,11 +23,11 @@ var rawReadAllowed = map[string]string{
 // rawRead matches a read of one of the tables live.go covers: FROM or JOIN
 // with the table's name. A DELETE FROM is a write and is not matched; writes
 // are not checked here (see live.go).
-var rawRead = regexp.MustCompile(`(?i)(DELETE\s+)?\b(FROM|JOIN)\s+(projects|tickets|epics|documents|subtasks)\b`)
+var rawRead = regexp.MustCompile(`(?i)(DELETE\s+)?\b(FROM|JOIN)\s+(projects|tickets|epics|documents|subtasks|entries)\b`)
 
 // TestReadsGoThroughLiveSources keeps a new query from forgetting that a
 // deleted project is gone: every SQL string in the package that reads
-// projects, tickets, epics, documents or subtasks must take them from
+// projects, tickets, epics, documents, subtasks or entries must take them from
 // live.go's sources, unless its function is in rawReadAllowed.
 func TestReadsGoThroughLiveSources(t *testing.T) {
 	fset := token.NewFileSet()

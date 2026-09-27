@@ -7,11 +7,12 @@ package db
 // nothing restores it.
 //
 // The sources below are that one rule, written once. A read of projects,
-// tickets, epics, documents or subtasks takes its rows from them rather than
-// from the table, so it cannot forget the rule. Every source is a subquery
-// with the table's own columns, used in place of the table name:
+// tickets, epics, documents, subtasks or entries takes its rows from them
+// rather than from the table, so it cannot forget the rule. Every source is a
+// subquery with the table's own columns (entries' adds its rowid), used in
+// place of the table name:
 // `FROM ` + liveTickets + ` t`. TestReadsGoThroughLiveSources fails a new
-// FROM or JOIN of one of these five tables that does not go through them and
+// FROM or JOIN of one of these six tables that does not go through them and
 // is not on its short list of reads that must see archived rows.
 //
 // Writes are not checked by that test. Each one finds its row through these
@@ -45,4 +46,9 @@ const (
 	liveDocuments = `(SELECT * FROM documents WHERE ticket_id IN (` + liveTicketIDs + `)
 		OR epic_id IN (` + liveEpicIDs + `))`
 	liveSubtasks = `(SELECT * FROM subtasks WHERE ticket_id IN (` + liveTicketIDs + `))`
+	// An entry belongs to a project, an epic or a ticket, so it is live when
+	// its owner is. It carries rowid too, which orders entries written within
+	// the same instant and which a subquery otherwise hides.
+	liveEntries = `(SELECT rowid AS rowid, * FROM entries WHERE project_id IN (` + liveProjectIDs + `)
+		OR epic_id IN (` + liveEpicIDs + `) OR ticket_id IN (` + liveTicketIDs + `))`
 )

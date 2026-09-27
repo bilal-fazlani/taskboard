@@ -1,7 +1,6 @@
 package db
 
 import (
-	"database/sql"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -106,9 +105,9 @@ func TestJournalEntriesAreAppendOnly(t *testing.T) {
 	e := appendEntry(t, s, p.ID, "Bilal", "original")
 	appendEntry(t, s, other.ID, "Bilal", "elsewhere")
 
-	_, err := s.db.Exec(`UPDATE project_journal_entries SET text = 'rewritten' WHERE id = ?`, e.ID)
-	if err == nil || !strings.Contains(err.Error(), "append-only") {
-		t.Fatalf("UPDATE of an entry: error = %v, want it refused as append-only", err)
+	_, err := s.db.Exec(`UPDATE entries SET text = 'rewritten' WHERE id = ?`, e.ID)
+	if err == nil || !strings.Contains(err.Error(), "never edited") {
+		t.Fatalf("UPDATE of an entry: error = %v, want it refused as never edited", err)
 	}
 	page, err := s.ListJournal(p.ID, "", JournalDefaultLimit)
 	if err != nil {
@@ -122,7 +121,7 @@ func TestJournalEntriesAreAppendOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	var left int
-	if err := s.db.QueryRow(`SELECT COUNT(*) FROM project_journal_entries WHERE project_id = ?`, p.ID).Scan(&left); err != nil {
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM entries WHERE project_id = ?`, p.ID).Scan(&left); err != nil {
 		t.Fatal(err)
 	}
 	if left != 1 {
@@ -155,7 +154,7 @@ func TestListJournalOrdersNewestFirst(t *testing.T) {
 	same := stamp(time.Now().Add(time.Second))
 	for _, text := range []string{"tied, written first", "tied, written second"} {
 		if _, err := s.db.Exec(
-			`INSERT INTO project_journal_entries (id, project_id, author, text, created_at) VALUES (?, ?, 'c', ?, ?)`,
+			`INSERT INTO entries (id, project_id, type, author_name, source, text, created_at) VALUES (?, ?, 'decision', 'c', 'person', ?, ?)`,
 			newID(), p.ID, text, same,
 		); err != nil {
 			t.Fatal(err)
@@ -188,7 +187,7 @@ func TestListJournalPages(t *testing.T) {
 	same := stamp(time.Now().Add(time.Second))
 	for _, text := range []string{"e5", "e6"} {
 		if _, err := s.db.Exec(
-			`INSERT INTO project_journal_entries (id, project_id, author, text, created_at) VALUES (?, ?, 'a', ?, ?)`,
+			`INSERT INTO entries (id, project_id, type, author_name, source, text, created_at) VALUES (?, ?, 'decision', 'a', 'person', ?, ?)`,
 			newID(), p.ID, text, same,
 		); err != nil {
 			t.Fatal(err)
@@ -206,7 +205,7 @@ func TestListJournalPages(t *testing.T) {
 	// at the top, and must not shift or repeat what the later pages hold.
 	later := stamp(time.Now().Add(2 * time.Second))
 	if _, err := s.db.Exec(
-		`INSERT INTO project_journal_entries (id, project_id, author, text, created_at) VALUES (?, ?, 'a', 'e7', ?)`,
+		`INSERT INTO entries (id, project_id, type, author_name, source, text, created_at) VALUES (?, ?, 'decision', 'a', 'person', 'e7', ?)`,
 		newID(), p.ID, later,
 	); err != nil {
 		t.Fatal(err)
@@ -292,9 +291,9 @@ func TestListJournalEmptyAndBadInput(t *testing.T) {
 }
 
 // A fresh database runs every migration in order, the journal's (016) after
-// the ticket delivery one (015), and ends up with the journal table and its
-// append-only trigger. A database already migrated through 015 gets the
-// journal the next time it opens.
+// the ticket delivery one (015), and ends up with the journal's entries in
+// project entries (019) and the journal table gone. A database already
+// migrated through 015 gets there the next time it opens.
 func TestMigrationsCreateJournalAfterTicketDelivery(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "fresh.db")
 	database, err := OpenAt(path)
@@ -327,39 +326,18 @@ func TestMigrationsCreateJournalAfterTicketDelivery(t *testing.T) {
 	if delivery < 0 || journal != delivery+1 {
 		t.Fatalf("migrations applied %v: want 016_project_journal.sql right after 015_ticket_delivery.sql", applied)
 	}
-	assertJournalSchema(t, database)
-
-	// Roll the file back to how 015 left it, then open it again.
-	for _, stmt := range []string{
-		`DROP TABLE project_journal_entries`,
-		`DELETE FROM schema_migrations WHERE version = '016_project_journal.sql'`,
-	} {
-		if _, err := database.Exec(stmt); err != nil {
-			t.Fatal(err)
-		}
-	}
+	assertEntriesSchema(t, database)
 	database.Close()
-	reopened, err := OpenAt(path)
+
+	// A file as 015 left it.
+	legacyPath := filepath.Join(t.TempDir(), "legacy.db")
+	if err := openLegacyDB(t, legacyPath, "016_project_journal.sql").Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := OpenAt(legacyPath)
 	if err != nil {
 		t.Fatalf("reopening a database migrated through 015: %v", err)
 	}
 	defer reopened.Close()
-	assertJournalSchema(t, reopened)
-}
-
-func assertJournalSchema(t *testing.T, database *sql.DB) {
-	t.Helper()
-	for _, obj := range []struct{ kind, name string }{
-		{"table", "project_journal_entries"},
-		{"index", "idx_project_journal_entries_project"},
-		{"trigger", "project_journal_entries_append_only"},
-	} {
-		var n int
-		if err := database.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = ? AND name = ?`, obj.kind, obj.name).Scan(&n); err != nil {
-			t.Fatal(err)
-		}
-		if n != 1 {
-			t.Fatalf("%s %s missing after migrating", obj.kind, obj.name)
-		}
-	}
+	assertEntriesSchema(t, reopened)
 }

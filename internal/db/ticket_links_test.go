@@ -151,7 +151,7 @@ func TestFreshDatabaseMigratesDeliveryJournalThenTypedLinks(t *testing.T) {
 		`SELECT ticket_id, source_id FROM ticket_surfaced_from`,
 		`SELECT ticket_id, branch, worktree, pr_url FROM ticket_delivery`,
 		`SELECT ticket_id, repo, sha, position FROM ticket_landed_commits`,
-		`SELECT COUNT(*) FROM project_journal_entries`,
+		`SELECT COUNT(*) FROM entries`,
 	} {
 		if _, err := s.db.Exec(q); err != nil {
 			t.Fatalf("%s: %v", q, err)

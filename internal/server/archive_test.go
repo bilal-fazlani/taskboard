@@ -165,7 +165,7 @@ func TestDeletedProjectIsGoneFromTheAPI(t *testing.T) {
 		"SELECT COUNT(*) FROM epics",
 		"SELECT COUNT(*) FROM documents",
 		"SELECT COUNT(*) FROM subtasks",
-		"SELECT COUNT(*) FROM project_journal_entries",
+		"SELECT COUNT(*) FROM entries",
 		"SELECT COUNT(*) FROM ticket_dependencies",
 	} {
 		var n int

@@ -90,7 +90,7 @@ func seedArchive(t *testing.T, s *Store) archiveFixture {
 var archiveTables = []string{
 	"projects", "tickets", "epics", "documents", "document_images", "document_search", "subtasks",
 	"labels", "ticket_labels", "ticket_repos", "ticket_dependencies", "ticket_surfaced_from",
-	"ticket_status_changes", "ticket_delivery", "ticket_landed_commits", "project_journal_entries",
+	"ticket_status_changes", "ticket_delivery", "ticket_landed_commits", "entries",
 }
 
 // rowCounts counts the rows of every table in archiveTables.
