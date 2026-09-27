@@ -52,8 +52,9 @@ func (o writeOptions) checkStatusChange(from, to, note string) error {
 	return nil
 }
 
-// validStatus reports whether status is one of models.Statuses, the single
-// source of truth for the status set. It gates writes (CreateTicket,
+// validStatus reports whether status is one of models.Statuses, the statuses
+// the surfaces offer; models.StatusNeedsUserInput is known but not among
+// them yet, so no write or filter here accepts it. It gates writes (CreateTicket,
 // UpdateTicket, MoveTicket) and a list's status filter (splitStatusFilter): a
 // row already holding some other value, from before this check existed, must
 // still be readable, so no path that reads a ticket's own stored status
