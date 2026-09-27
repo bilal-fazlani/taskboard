@@ -13,6 +13,8 @@
 // Values are kept as written: dropping ones that no longer name a project,
 // epic or label is a separate concern (see staleFilters.ts).
 
+import { namesAllProjects } from "./nowProject";
+
 export interface Filters {
   project: string;
   /** Epics of the project by name, or NO_EPIC for tickets without one. */
@@ -201,14 +203,19 @@ export function withUnmatched(params: URLSearchParams, mode: UnmatchedMode): URL
  * Just the filter part of a query string, as `?…` or "" when there is none,
  * for links to another view. Hide mode goes along with the filters, so it's
  * still set on coming back to Dependencies. Other parameters stay behind with
- * the view they belong to.
+ * the view they belong to. Now's `project=all` ("All projects", see
+ * nowProject.ts) stays behind too: the views always show one project, so they
+ * open on their own default instead.
  */
 export function filterSearch(search: string): string {
   const params = new URLSearchParams(search);
   const kept = new URLSearchParams();
   for (const key of FILTER_KEYS) {
     const values = isMultiFilter(key) ? distinct(params.getAll(key)) : [params.get(key) ?? ""];
-    for (const value of values) if (value) kept.append(key, value);
+    for (const value of values) {
+      if (!value || (key === "project" && namesAllProjects(value))) continue;
+      kept.append(key, value);
+    }
   }
   if (parseUnmatched(params) === "hide") kept.set(UNMATCHED_PARAM, "hide");
   const qs = kept.toString();

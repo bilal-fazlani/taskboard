@@ -161,7 +161,8 @@ describe("a ticket's link at /", () => {
 
 describe("the home page at /", () => {
   it.each([
-    ["/", ""],
+    // Now names what it shows: with nothing remembered, every project.
+    ["/", "?project=all"],
     ["/?project=ACP", "?project=ACP"],
     ["/?project=ACP&status=todo", "?project=ACP&status=todo"],
   ])("goes on to Now from %s, keeping its query", async (url, search) => {

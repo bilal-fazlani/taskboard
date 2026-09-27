@@ -9,10 +9,12 @@ import { memoryStorage } from "../test/memoryStorage";
 
 // Now's remembered project and the views' last project are two memories: a
 // pick on Dependencies, Kanban, Table, Epics or Activity moves the views'
-// one and leaves Now's alone. Each page runs in the app's routes with the
-// API mocked; Now.dom.test.tsx has the other direction.
+// one and leaves Now's alone, and Now's `project=all` never reaches a view.
+// Each page runs in the app's routes with the API mocked; Now.dom.test.tsx
+// has the other direction.
 
 const mockApi = vi.hoisted(() => ({
+  now: { get: vi.fn() },
   tickets: { list: vi.fn(), get: vi.fn() },
   projects: { list: vi.fn(), activity: vi.fn() },
   labels: { list: vi.fn() },
@@ -67,6 +69,7 @@ beforeEach(() => {
   mockApi.board.get.mockResolvedValue(EMPTY_BOARD);
   mockApi.documents.search.mockResolvedValue({ ticketIds: [] });
   mockApi.documents.list.mockResolvedValue([]);
+  mockApi.now.get.mockResolvedValue({ inProgress: [], inReview: [], landed: [] });
 });
 
 afterEach(() => {
@@ -101,5 +104,47 @@ describe.each([
     expect(urlProject()).toBe("LDR");
     expect(globalThis.localStorage.getItem(LAST_PROJECT_KEY)).toBe("LDR");
     expect(globalThis.localStorage.getItem(NOW_PROJECT_KEY)).toBe("IAGML");
+  });
+});
+
+describe.each([
+  ["Dependencies", "/dependencies"],
+  ["Kanban", "/kanban"],
+  ["Table", "/table"],
+  ["Epics", "/epics"],
+  ["Activity", "/activity"],
+])("the sidebar's %s link from Now on All projects", (name, path) => {
+  it.each([
+    ["the views' last project", "LDR", "LDR"],
+    ["the first project by name, with none remembered", null, "ACP"],
+  ])("opens on %s, and never remembers all", async (_what, last, shown) => {
+    const storage = memoryStorage({ [NOW_PROJECT_KEY]: "", ...(last ? { [LAST_PROJECT_KEY]: last } : {}) });
+    const writes: string[] = [];
+    const setItem = storage.setItem;
+    storage.setItem = (key, value) => {
+      if (key === LAST_PROJECT_KEY) writes.push(value);
+      setItem(key, value);
+    };
+    vi.stubGlobal("localStorage", storage);
+    window.history.replaceState(null, "", "/now?project=all&label=web");
+    render(
+      <BrowserRouter>
+        <AppRoutes />
+      </BrowserRouter>,
+    );
+    await settle();
+    expect(urlProject()).toBe("all");
+
+    const link = screen.getByRole("link", { name });
+    expect(new URL(link.getAttribute("href") ?? "", "http://localhost").searchParams.get("project")).toBeNull();
+    await act(async () => {
+      fireEvent.click(link);
+    });
+    await settle();
+    expect(window.location.pathname).toBe(path);
+    expect(urlProject()).toBe(shown);
+    expect(writes.map((w) => w.toLowerCase())).not.toContain("all");
+    expect(storage.getItem(LAST_PROJECT_KEY)?.toLowerCase()).not.toBe("all");
+    expect(storage.getItem(NOW_PROJECT_KEY)).toBe("");
   });
 });

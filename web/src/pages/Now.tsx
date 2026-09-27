@@ -13,25 +13,33 @@ import {
   shortSha,
   withinLandedWindow,
 } from "../lib/now";
-import { readNowProject, rememberNowProject, restoredNowProject } from "../lib/nowProject";
+import {
+  ALL_PROJECTS,
+  namesAllProjects,
+  readNowProject,
+  rememberNowProject,
+  restoredNowProject,
+} from "../lib/nowProject";
 import { AGENT_REVIEW_STATUS, IN_PROGRESS_STATUS, STATUS_LABELS, STATUS_STYLES } from "../lib/status";
 
 // The Now page: what is moving right now, and what just landed, across every
-// project unless the dropdown narrows it to one. The project lives in the URL
-// (`project`, a prefix) like the views' filter, and Now remembers its own
-// pick, apart from the views' last project (see nowProject.ts): a URL without
-// a project gets the pick last made here back, "All projects" included. A
-// remembered project deleted since, like nothing remembered,
-// gives "All projects". A URL naming a project wins and is remembered. It is
-// the present only; the history of status changes is the Activity feed's.
+// project unless the dropdown narrows it to one. Every Now URL names what it
+// shows (`project`: a prefix, or `all` for "All projects"), so Back and
+// Forward return to what each entry showed. Now remembers the last project a
+// URL named, apart from the views' last project (see nowProject.ts). A URL
+// without a project only means "open on the remembered pick", and is
+// replaced by one naming it: the remembered project, or `all` when that was
+// All, nothing was remembered, the project was deleted since, the projects
+// failed to load, or storage can't be read. It is the present only; the
+// history of status changes is the Activity feed's.
 
-/** The `project` parameter, or "" for every project. */
+/** The `project` parameter: a prefix, or ALL_PROJECTS for every project. */
 const PROJECT_PARAM = "project";
 
 /**
  * One arrival at the page, a location: the pick remembered then, and whether
  * it has been checked against the projects yet. Once checked, `pick` is the
- * project to restore into the URL, or "" for "All projects".
+ * `project` to write into a URL without one: a prefix, or ALL_PROJECTS.
  */
 interface Arrival {
   key: string;
@@ -41,16 +49,18 @@ interface Arrival {
 
 /**
  * Reads the remembered pick for an arrival at `project` (the URL's, "" for
- * none). Storage is read here only, once per location, so a pick another tab
- * saves never moves a page already open; the sidebar's Now link is a new
- * location, and restores. It is checked at once when the projects are in
- * hand, or have failed to load; else when they first answer.
+ * none; a URL naming one restores nothing). Storage is read here only, once
+ * per location, so a pick another tab saves never moves a page already open;
+ * the sidebar's Now link is a new location, and restores. It is checked at
+ * once when the projects are in hand, or have failed to load; else when they
+ * first answer.
  */
 function arrive(key: string, project: string, projects: readonly Project[] | null, projectsFailed: boolean): Arrival {
-  const remembered = project === "" ? readNowProject() : "";
-  if (remembered === "") return { key, pick: "", checked: true };
+  if (project !== "") return { key, pick: "", checked: true };
+  const remembered = readNowProject();
+  if (remembered === "") return { key, pick: ALL_PROJECTS, checked: true };
   if (projects !== null) return { key, pick: restoredNowProject(projects, remembered), checked: true };
-  if (projectsFailed) return { key, pick: "", checked: true };
+  if (projectsFailed) return { key, pick: ALL_PROJECTS, checked: true };
   return { key, pick: remembered, checked: false };
 }
 
@@ -181,6 +191,7 @@ function LandedRow({ ticket, now }: { ticket: LandedTicket; now: number }) {
 export default function Now() {
   const [params, setParams] = useSearchParams();
   const project = params.get(PROJECT_PARAM) ?? "";
+  const all = namesAllProjects(project);
   const [data, setData] = useState<NowData | null>(null);
   const [failed, setFailed] = useState(false);
   const [projects, setProjects] = useState<Project[] | null>(null);
@@ -190,12 +201,12 @@ export default function Now() {
   // project picked before never overwrites the one picked now.
   const latest = useRef(0);
 
-  // A URL without a project gets the remembered pick back once the projects
-  // have loaded and show it still exists; until then nothing loads, so
-  // the page never shows every project on its way to one. A remembered
-  // project deleted since, or projects that fail to load, leave
-  // "All projects". The pick is read once per arrival (see arrive), so a
-  // redraw or a live refresh never moves a page already open.
+  // A URL without a project is replaced by one naming the remembered pick,
+  // once the projects have loaded and show it still exists; until then
+  // nothing loads, so the page never shows every project on its way to one.
+  // A remembered project deleted since, or projects that fail to load, give
+  // `all`. The pick is read once per arrival (see arrive), so a redraw or a
+  // live refresh never moves a page already open.
   const { key: locationKey } = useLocation();
   const [arrival, setArrival] = useState(() => arrive(locationKey, project, null, false));
   let current = arrival;
@@ -204,7 +215,7 @@ export default function Now() {
     setArrival(current);
   }
   const restore = project === "" && current.checked ? current.pick : "";
-  const holding = project === "" && current.pick !== "";
+  const holding = project === "";
 
   useEffect(() => {
     if (!restore) return;
@@ -218,15 +229,15 @@ export default function Now() {
     );
   }, [restore, setParams]);
 
-  // A project the URL names wins, and is what Now shows next time.
+  // What the URL names, All projects included, is what Now shows next time.
   useEffect(() => {
-    if (project) rememberNowProject(project);
-  }, [project]);
+    if (project) rememberNowProject(all ? "" : project);
+  }, [project, all]);
 
   const load = useCallback(() => {
     if (holding) return;
     const request = ++latest.current;
-    api.now.get(project || undefined).then(
+    api.now.get(all ? undefined : project).then(
       (next) => {
         if (request !== latest.current) return;
         setData(next);
@@ -235,7 +246,7 @@ export default function Now() {
       // A failed refetch keeps what is on screen; the next change retries.
       () => request === latest.current && setFailed(true),
     );
-  }, [project, holding]);
+  }, [project, all, holding]);
 
   // A failed load keeps "All projects" and whatever the URL names. The first
   // answer after an arrival settles its remembered pick, once.
@@ -248,7 +259,7 @@ export default function Now() {
       },
       () => {
         setProjectsFailed(true);
-        setArrival((a) => (a.checked ? a : { ...a, pick: "", checked: true }));
+        setArrival((a) => (a.checked ? a : { ...a, pick: ALL_PROJECTS, checked: true }));
       },
     );
   }, []);
@@ -268,30 +279,29 @@ export default function Now() {
   });
 
   // Projects by name, plus the one the URL names when it is unknown, so the
-  // dropdown always shows what the page is narrowed to.
+  // dropdown always shows what the page is narrowed to. `all` is "All
+  // projects", never an extra entry.
   const options = useMemo(() => {
     const list = (projects ? projectsByName(projects) : []).map((p) => ({
       value: p.prefix,
       label: projectIconAndName(p),
     }));
-    if (project && !list.some((o) => o.value.toLowerCase() === project.toLowerCase())) {
+    if (project && !all && !list.some((o) => o.value.toLowerCase() === project.toLowerCase())) {
       list.push({ value: project, label: project });
     }
     return list;
-  }, [projects, project]);
+  }, [projects, project, all]);
   const selected = options.find((o) => o.value.toLowerCase() === project.toLowerCase())?.value ?? "";
 
   // An idle board fetches nothing new, so each tick drops what has turned a
   // day old since the last fetch.
   const landed = useMemo(() => (data ? withinLandedWindow(data.landed, now) : []), [data, now]);
 
-  // "All projects" leaves the URL without a project, so it is remembered
-  // here rather than by the effect above.
+  // A pick is a new entry naming what it shows, "All projects" as `all`; the
+  // effect above remembers it.
   const pick = (value: string) => {
-    rememberNowProject(value);
     const next = new URLSearchParams(params);
-    if (value) next.set(PROJECT_PARAM, value);
-    else next.delete(PROJECT_PARAM);
+    next.set(PROJECT_PARAM, value || ALL_PROJECTS);
     setParams(next);
   };
 

@@ -325,6 +325,15 @@ describe("URL state", () => {
     expect(filterSearch("?status=todo&ticket=ACP-7&status=done&label=&status=todo")).toBe("?status=todo&status=done");
   });
 
+  it("leaves Now's project=all behind, in any letter case, and keeps the other filters", () => {
+    expect(filterSearch("?project=all")).toBe("");
+    expect(filterSearch("?project=ALL&label=web")).toBe("?label=web");
+    expect(filterSearch("?project=All&unmatched=hide")).toBe("?unmatched=hide");
+    // Only the project is Now's; a label or search of "all" is a filter like any other.
+    expect(filterSearch("?label=all&q=all")).toBe("?label=all&q=all");
+    expect(filterSearch("?project=ALLY")).toBe("?project=ALLY");
+  });
+
   it("carries hide mode to another view, and nothing for dim or a value that means nothing", () => {
     expect(filterSearch("?unmatched=hide&ticket=ACP-7&label=web&project=ACP")).toBe(
       "?project=ACP&label=web&unmatched=hide",

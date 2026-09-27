@@ -226,6 +226,7 @@ describe("Now page", () => {
 
   it("shows every project by default, with a chip on each card, and narrows to one from the dropdown", async () => {
     await mount();
+    expect(params().get("project")).toBe("all");
     expect(mockApi.now.get).toHaveBeenLastCalledWith(undefined);
     const select = screen.getByLabelText("Project") as HTMLSelectElement;
     expect(select.value).toBe("");
@@ -244,8 +245,20 @@ describe("Now page", () => {
 
     fireEvent.change(screen.getByLabelText("Project"), { target: { value: "" } });
     await settle();
-    expect(params().get("project")).toBeNull();
+    expect(params().get("project")).toBe("all");
     expect(mockApi.now.get).toHaveBeenLastCalledWith(undefined);
+  });
+
+  it.each(["all", "ALL", "All"])("reads ?project=%s as All projects, never as a project", async (value) => {
+    globalThis.localStorage.setItem(NOW_PROJECT_KEY, "IAGML");
+    await mount(`/now?project=${value}`);
+    expect(params().get("project")).toBe(value);
+    expect(mockApi.now.get.mock.calls).toEqual([[undefined]]);
+    const select = screen.getByLabelText("Project") as HTMLSelectElement;
+    expect(select.value).toBe("");
+    expect([...select.options].map((o) => o.textContent)).toEqual(["All projects", "Control plane", "Leaderboard", "Scoring"]);
+    // It is remembered like any project a URL names.
+    expect(globalThis.localStorage.getItem(NOW_PROJECT_KEY)).toBe("");
   });
 
   it("reads the project from the URL", async () => {
@@ -352,11 +365,54 @@ describe("Now's remembered project", () => {
     expect(params().get("project")).toBe("ACP");
 
     await pickProject("");
+    expect(params().get("project")).toBe("all");
     expect(remembered()).toBe("");
     await reopen();
-    expect(params().get("project")).toBeNull();
+    expect(params().get("project")).toBe("all");
     expect(select().value).toBe("");
     expect(mockApi.now.get).toHaveBeenLastCalledWith(undefined);
+  });
+
+  it("replaces a URL without a project, so no history entry is left without one", async () => {
+    remember("IAGML");
+    window.history.replaceState(null, "", "/elsewhere");
+    const entries = window.history.length;
+    await mount("/now");
+    expect(params().get("project")).toBe("IAGML");
+    expect(window.history.length).toBe(entries);
+
+    cleanup();
+    remember("");
+    await mount("/now");
+    expect(params().get("project")).toBe("all");
+    expect(window.history.length).toBe(entries);
+  });
+
+  it("shows and saves All on Back to an All entry after picking a project", async () => {
+    await mount("/now");
+    expect(params().get("project")).toBe("all");
+    await pickProject("ACP");
+    expect(params().get("project")).toBe("ACP");
+    expect(remembered()).toBe("ACP");
+
+    await act(async () => {
+      window.history.back();
+      await vi.waitFor(() => expect(params().get("project")).toBe("all"));
+    });
+    await settle();
+    expect(params().get("project")).toBe("all");
+    expect(select().value).toBe("");
+    expect(mockApi.now.get).toHaveBeenLastCalledWith(undefined);
+    expect(remembered()).toBe("");
+
+    // And Forward returns to the project.
+    await act(async () => {
+      window.history.forward();
+      await vi.waitFor(() => expect(params().get("project")).toBe("ACP"));
+    });
+    await settle();
+    expect(select().value).toBe("ACP");
+    expect(remembered()).toBe("ACP");
   });
 
   it("lets a URL naming a project win, and remembers it", async () => {
@@ -382,7 +438,7 @@ describe("Now's remembered project", () => {
       for (const refresh of live.refresh) refresh();
     });
     await settle();
-    expect(params().get("project")).toBeNull();
+    expect(params().get("project")).toBe("all");
     expect(select().value).toBe("");
     expect(mockApi.now.get.mock.calls.length).toBeGreaterThan(1);
     expect(mockApi.now.get.mock.calls.every(([project]) => project === undefined)).toBe(true);
@@ -392,19 +448,19 @@ describe("Now's remembered project", () => {
     remember("IAGML");
     mockApi.projects.list.mockRejectedValue(new Error("down"));
     await mount("/now");
-    expect(params().get("project")).toBeNull();
+    expect(params().get("project")).toBe("all");
     mockApi.projects.list.mockResolvedValue(PROJECTS);
     await act(async () => {
       for (const refresh of live.refresh) refresh();
     });
     await settle();
-    expect(params().get("project")).toBeNull();
+    expect(params().get("project")).toBe("all");
     expect(mockApi.now.get).toHaveBeenLastCalledWith(undefined);
   });
 
-  it("shows every project with nothing remembered", async () => {
+  it("shows every project, as all, with nothing remembered", async () => {
     await mount("/now");
-    expect(params().get("project")).toBeNull();
+    expect(params().get("project")).toBe("all");
     expect(select().value).toBe("");
     expect(mockApi.now.get.mock.calls).toEqual([[undefined]]);
   });
@@ -412,19 +468,19 @@ describe("Now's remembered project", () => {
   it.each([
     ["archived", "OLD"],
     ["deleted", "GONE"],
-  ])("falls back to All projects when the remembered project is %s", async (_why, prefix) => {
+  ])("falls back to all when the remembered project is %s", async (_why, prefix) => {
     remember(prefix);
     await mount("/now");
-    expect(params().get("project")).toBeNull();
+    expect(params().get("project")).toBe("all");
     expect(select().value).toBe("");
     expect(mockApi.now.get.mock.calls).toEqual([[undefined]]);
   });
 
-  it("falls back to All projects when the projects can't be loaded to check the remembered one", async () => {
+  it("falls back to all when the projects can't be loaded to check the remembered one", async () => {
     remember("IAGML");
     mockApi.projects.list.mockRejectedValue(new Error("down"));
     await mount("/now");
-    expect(params().get("project")).toBeNull();
+    expect(params().get("project")).toBe("all");
     expect(mockApi.now.get).toHaveBeenLastCalledWith(undefined);
     expect(cards("In Progress")).toHaveLength(3);
   });
@@ -439,7 +495,7 @@ describe("Now's remembered project", () => {
       },
     });
     await mount("/now");
-    expect(params().get("project")).toBeNull();
+    expect(params().get("project")).toBe("all");
     await pickProject("ACP");
     expect(params().get("project")).toBe("ACP");
     expect(mockApi.now.get).toHaveBeenLastCalledWith("ACP");

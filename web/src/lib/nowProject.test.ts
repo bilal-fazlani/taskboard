@@ -1,6 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { LAST_PROJECT_KEY } from "./defaultProject";
-import { NOW_PROJECT_KEY, readNowProject, rememberNowProject, restoredNowProject } from "./nowProject";
+import {
+  ALL_PROJECTS,
+  NOW_PROJECT_KEY,
+  namesAllProjects,
+  readNowProject,
+  rememberNowProject,
+  restoredNowProject,
+} from "./nowProject";
 import { memoryStorage } from "../test/memoryStorage";
 
 afterEach(() => vi.unstubAllGlobals());
@@ -69,12 +76,20 @@ describe("restoredNowProject", () => {
     expect(restoredNowProject(PROJECTS, "ldr")).toBe("LDR");
   });
 
-  it("falls back to every project when the remembered one is deleted", () => {
-    expect(restoredNowProject(PROJECTS, "GONE")).toBe("");
+  it("falls back to every project, as all, when the remembered one is deleted", () => {
+    expect(restoredNowProject(PROJECTS, "GONE")).toBe(ALL_PROJECTS);
   });
 
-  it("is every project with nothing remembered", () => {
-    expect(restoredNowProject(PROJECTS, "")).toBe("");
-    expect(restoredNowProject([], "ACP")).toBe("");
+  it("is every project, as all, with All or nothing remembered", () => {
+    expect(ALL_PROJECTS).toBe("all");
+    expect(restoredNowProject(PROJECTS, "")).toBe(ALL_PROJECTS);
+    expect(restoredNowProject([], "ACP")).toBe(ALL_PROJECTS);
+  });
+});
+
+describe("namesAllProjects", () => {
+  it("matches all in any letter case, and nothing else", () => {
+    for (const value of ["all", "ALL", "All", "aLl"]) expect(namesAllProjects(value)).toBe(true);
+    for (const value of ["", "ACP", "ally", "ball", " all"]) expect(namesAllProjects(value)).toBe(false);
   });
 });
