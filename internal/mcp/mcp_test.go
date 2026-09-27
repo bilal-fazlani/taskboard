@@ -277,7 +277,7 @@ func TestTicketToolsIncludeTheTicketURL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get_ticket: %v", err)
 	}
-	if url := got.(*models.Ticket).URL; url != want {
+	if url := got.(fullTicket).URL; url != want {
 		t.Fatalf("get_ticket URL = %q, want %q", url, want)
 	}
 
@@ -532,7 +532,7 @@ func TestTicketToolsAcceptDisplayKeysAndProjectPrefix(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get_ticket bill-1: %v", err)
 	}
-	if got.(*models.Ticket).ID != ticket.ID {
+	if got.(fullTicket).ID != ticket.ID {
 		t.Fatalf("get_ticket by key resolved to a different ticket")
 	}
 
@@ -991,7 +991,7 @@ func TestTicketToolsTakeAndReportEpic(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get_ticket: %v", err)
 	}
-	if e := got.(*models.Ticket).Epic; e == nil || e.Name != "Invoicing" {
+	if e := got.(fullTicket).Epic; e == nil || e.Name != "Invoicing" {
 		t.Fatalf("get_ticket epic = %+v, want Invoicing", e)
 	}
 

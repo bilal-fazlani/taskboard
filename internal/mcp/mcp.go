@@ -168,6 +168,8 @@ func (s *MCPServer) handleToolCall(req jsonrpcRequest) *jsonrpcResponse {
 		return &jsonrpcResponse{JSONRPC: "2.0", ID: req.ID, Error: &rpcError{Code: -32602, Message: "invalid params"}}
 	}
 
+	// Read before the call, since a delete leaves nothing to read after it.
+	ticketID := s.ticketOfCall(params.Name, params.Arguments)
 	result, err := s.callTool(params.Name, params.Arguments)
 	if err != nil {
 		return &jsonrpcResponse{
@@ -179,8 +181,12 @@ func (s *MCPServer) handleToolCall(req jsonrpcRequest) *jsonrpcResponse {
 			},
 		}
 	}
+	openNotes := s.openNotesOn(ticketID)
 
 	if content, ok := result.(contentResult); ok {
+		if openNotes > 0 {
+			content = append(content, openNotesContent(openNotes))
+		}
 		return &jsonrpcResponse{JSONRPC: "2.0", ID: req.ID, Result: map[string]any{"content": content}}
 	}
 	data, _ := json.Marshal(result)
@@ -188,7 +194,7 @@ func (s *MCPServer) handleToolCall(req jsonrpcRequest) *jsonrpcResponse {
 		JSONRPC: "2.0",
 		ID:      req.ID,
 		Result: map[string]any{
-			"content": []textContent{{Type: "text", Text: string(data)}},
+			"content": withOpenNotes(data, openNotes),
 		},
 	}
 }
@@ -480,7 +486,15 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 		if t.History, err = s.store.ListStatusChanges(ticketID); err != nil {
 			return nil, err
 		}
-		return weburl.Fill(t), nil
+		entries, err := s.store.TicketEntries(t)
+		if err != nil {
+			return nil, err
+		}
+		if entries.Entries != nil {
+			page := bareEntries(*entries.Entries)
+			entries.Entries = &page
+		}
+		return fullTicket{Ticket: weburl.Fill(t), TicketEntries: entries}, nil
 
 	case "create_ticket":
 		var a struct {
@@ -695,6 +709,9 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 		return s.subtaskAnswer(st, c, a.Full)
 
 	default:
+		if result, ok, err := s.callEntryTool(name, args); ok {
+			return result, err
+		}
 		if result, ok, err := s.callDocumentTool(name, args); ok {
 			return result, err
 		}
@@ -1260,7 +1277,7 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 				"its documents (name, format, size, updated time and a link; read one with get_document), " +
 				"its delivery (branch, worktree, prUrl and landedCommits, each commit a sha with its repo; left out when none is set), " +
 				"and its status history (newest first, each change with its note; the first entry, with an empty fromStatus, is its creation). " +
-				"reviewRounds counts how many times it has entered agent_review.",
+				"reviewRounds counts how many times it has entered agent_review." + getTicketEntriesHelp,
 			InputSchema: jsonSchema{
 				Type:       "object",
 				Properties: idOrKeyProps(ticketIDDescription),
@@ -1479,5 +1496,6 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 			},
 		},
 	}
+	defs = append(defs, entryToolDefs[:]...)
 	return append(defs, s.documentToolDefinitions()...)
 }

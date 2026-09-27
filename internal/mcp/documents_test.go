@@ -33,7 +33,7 @@ func TestGetTicketToolListsDocuments(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	full := got.(*models.Ticket)
+	full := got.(fullTicket).Ticket
 	if full.DocumentCount != 1 || len(full.Documents) != 1 ||
 		full.Documents[0].URL != "http://board.test/?ticket=DOC-1&doc=Plan.md" {
 		t.Fatalf("get_ticket documents = %d %+v", full.DocumentCount, full.Documents)

@@ -47,7 +47,7 @@ func TestSingleItemToolsAcceptKeyAlias(t *testing.T) {
 		if err != nil {
 			t.Fatalf("get_ticket by key: %v", err)
 		}
-		if got := result.(*models.Ticket).ID; got != ticket.ID {
+		if got := result.(fullTicket).ID; got != ticket.ID {
 			t.Fatalf("get_ticket by key returned id %q, want %q", got, ticket.ID)
 		}
 	})
@@ -282,7 +282,7 @@ func TestKeyWinsOverID(t *testing.T) {
 		if err != nil {
 			t.Fatalf("get_ticket with id and key: %v", err)
 		}
-		got := result.(*models.Ticket)
+		got := result.(fullTicket)
 		if got.ID != keyTicket.ID {
 			t.Fatalf("get_ticket with id=%s key=%s returned id %q, want key's ticket %q",
 				idTicket.ID, keyTicket.DisplayKey(), got.ID, keyTicket.ID)

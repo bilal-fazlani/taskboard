@@ -184,3 +184,17 @@ type EntryPage struct {
 	HasMore    bool   `json:"hasMore"`
 	NextBefore string `json:"nextBefore,omitempty"`
 }
+
+// TicketEntries is what a read of one ticket carries about entries, beside
+// the ticket: the first page of its own current entries, how many of its
+// notes are open, and how many notes are open on its epic and on its
+// project, counted but not read. Every read of a ticket pays for these, so
+// each is left out when there are none. It is kept apart from Ticket so
+// that lists of tickets never pay for it.
+type TicketEntries struct {
+	// Entries is nil when the ticket has no current entries.
+	Entries          *EntryPage `json:"entries,omitempty"`
+	OpenNotes        int        `json:"openNotes,omitempty"`
+	EpicOpenNotes    int        `json:"epicOpenNotes,omitempty"`
+	ProjectOpenNotes int        `json:"projectOpenNotes,omitempty"`
+}

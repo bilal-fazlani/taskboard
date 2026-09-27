@@ -301,6 +301,17 @@ func (s *Store) GetDocument(id string) (*models.Document, error) {
 	return &models.Document{DocumentMeta: meta, Content: content}, nil
 }
 
+// DocumentTicketID returns the ticket a document belongs to, without reading
+// its content: "" for an epic's document or an unknown one.
+func (s *Store) DocumentTicketID(id string) (string, error) {
+	var ticketID sql.NullString
+	err := s.db.QueryRow("SELECT ticket_id FROM "+liveDocuments+" WHERE id = ?", strings.TrimSpace(id)).Scan(&ticketID)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	return ticketID.String, err
+}
+
 // ResolveDocumentRef finds one of an owner's documents by id, or by name
 // ignoring case, with or without its format's extension ("Plan", "plan.md";
 // a JPEG answers to .jpeg as well as .jpg). A name with the wrong extension

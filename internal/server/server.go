@@ -198,6 +198,8 @@ func (s *Server) setupRoutes(webFS fs.FS) {
 			r.Delete("/{id}", s.deleteProject)
 			r.Get("/{id}/journal", s.listJournal)
 			r.Post("/{id}/journal", s.appendJournalEntry)
+			r.Get("/{id}/entries", s.listEntries(entryOnProject))
+			r.Post("/{id}/entries", s.createEntry(entryOnProject))
 			r.Get("/{id}/activity", s.listActivity)
 		})
 
@@ -211,7 +213,11 @@ func (s *Server) setupRoutes(webFS fs.FS) {
 			r.Delete("/{id}", s.deleteTicket)
 			r.Post("/{id}/subtasks", s.addSubtask)
 			r.Get("/{id}/documents", s.listTicketDocuments)
+			r.Get("/{id}/entries", s.listEntries(entryOnTicket))
+			r.Post("/{id}/entries", s.createEntry(entryOnTicket))
 		})
+
+		r.Post("/entries/{id}/handled", s.markNoteHandled)
 
 		r.Route("/subtasks", func(r chi.Router) {
 			r.Post("/{id}/toggle", s.toggleSubtask)
@@ -230,6 +236,8 @@ func (s *Server) setupRoutes(webFS fs.FS) {
 			r.Post("/", s.createEpic)
 			r.Get("/{id}", s.getEpic)
 			r.Get("/{id}/documents", s.listEpicDocuments)
+			r.Get("/{id}/entries", s.listEntries(entryOnEpic))
+			r.Post("/{id}/entries", s.createEntry(entryOnEpic))
 			r.Put("/{id}", s.updateEpic)
 			r.Delete("/{id}", s.deleteEpic)
 		})
@@ -531,7 +539,12 @@ func (s *Server) getTicket(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "ticket not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, t)
+	entries, err := s.store.TicketEntries(t)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, ticketWithEntries{Ticket: t, TicketEntries: entries})
 }
 
 // ticketJSONError is the message for a ticket body that didn't decode: a

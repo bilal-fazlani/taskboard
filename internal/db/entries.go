@@ -376,6 +376,52 @@ func (s *Store) MarkNoteHandled(noteID, agentID string) (*models.Entry, error) {
 	return s.GetEntry(noteID)
 }
 
+// openNote is models.Entry.Open in SQL, over an entry e joined to the entry r
+// that replaced it the way entrySelect joins them: a note that is neither
+// handled nor replaced. TestOpenNoteCountAgreesWithEntryOpen holds the two to
+// the same rule.
+const openNote = `e.type = '` + models.EntryNote + `' AND e.handled_at IS NULL AND r.id IS NULL`
+
+// CountOpenNotes counts the open notes (models.Entry.Open) on one project,
+// epic or ticket, given by id. An unknown owner, or one in a deleted project,
+// has none.
+func (s *Store) CountOpenNotes(owner models.EntryOwner) (int, error) {
+	col, id := ownerColumn(owner)
+	var n int
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM `+liveEntries+` e LEFT JOIN `+liveEntries+` r ON r.replaces_id = e.id
+		WHERE e.`+col+` = ? AND `+openNote, id).Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("counting open notes: %w", err)
+	}
+	return n, nil
+}
+
+// TicketEntries reads what a read of the ticket carries about entries
+// (models.TicketEntries): its newest EntryDefaultLimit current entries (no
+// page when it has none), its open notes counted, and the open notes on its
+// epic, when it has one, and its project.
+func (s *Store) TicketEntries(t *models.Ticket) (models.TicketEntries, error) {
+	var out models.TicketEntries
+	ticket := models.EntryOwner{TicketID: t.ID}
+	page, err := s.listEntries(ticket, models.EntryFilter{}, "", EntryDefaultLimit, "")
+	if err != nil {
+		return out, err
+	}
+	if page.Total > 0 {
+		out.Entries = &page
+	}
+	if out.OpenNotes, err = s.CountOpenNotes(ticket); err != nil {
+		return out, err
+	}
+	if t.Epic != nil {
+		if out.EpicOpenNotes, err = s.CountOpenNotes(models.EntryOwner{EpicID: t.Epic.ID}); err != nil {
+			return out, err
+		}
+	}
+	out.ProjectOpenNotes, err = s.CountOpenNotes(models.EntryOwner{ProjectID: t.ProjectID})
+	return out, err
+}
+
 // ListEntries returns one page of one owner's entries, newest first: up to
 // limit entries (1 to EntryMaxLimit), starting with the newest when before
 // is empty, or else with the newest entry older than the entry before

@@ -129,7 +129,9 @@ A ticket's `delivery` says where its work lives and where it landed: `branch`, `
 
 Deleting a project (`DELETE /api/projects/{id}`, MCP `delete_project`, CLI `project delete`) archives it: the project and its tickets, epics, documents and journal disappear from every read and every tool, a write to any of them is not found, and links into it (`dependsOn`, `blocks`, `surfacedFrom`, `surfaced`) are left out and no longer hold a ticket back from `ready`. Nothing is removed from the database and nothing restores it. Its prefix stays taken, so an old key never names a different ticket. A project's `status` is always `active`: `PUT /api/projects/{id}` (MCP `update_project`) refuses any other with a 400, and `GET /api/projects` (MCP `list_projects`) has no status filter.
 
-Each project has a journal: dated entries, each with its author, that are appended and never edited or deleted (deleting the project hides them with it). It is the place for running notes and run reports, which would otherwise grow the description that every read carries. `POST /api/projects/{id}/journal` with `{"author": "...", "text": "..."}` appends one; `author` is free text, the name of whoever writes it. `GET /api/projects/{id}/journal` reads them newest first, one page at a time, as `{entries, total, hasMore, nextBefore}`: `?limit=` sets the page size (1 to 100, default 20) and `?before=` takes the previous page's `nextBefore` to read older entries. `GET /api/projects/{id}` carries the latest five as `journal`, in the same shape. The MCP tools are `append_project_journal` and `list_project_journal` (`get_project` carries the latest five too), and the CLI's are `project journal append` and `project journal list`.
+Each project has a journal: dated entries, each with its author, that are appended and never edited or deleted (deleting the project hides them with it). It is the place for running notes and run reports, which would otherwise grow the description that every read carries. `POST /api/projects/{id}/journal` with `{"author": "...", "text": "..."}` appends one; `author` is free text, the name of whoever writes it. `GET /api/projects/{id}/journal` reads them newest first, one page at a time, as `{entries, total, hasMore, nextBefore}`: `?limit=` sets the page size (1 to 100, default 20) and `?before=` takes the previous page's `nextBefore` to read older entries. `GET /api/projects/{id}` carries the latest five as `journal`, in the same shape. The MCP tools are `append_project_journal` and `list_project_journal` (`get_project` carries the latest five too), and the CLI's are `project journal append` and `project journal list`. The journal is superseded by project entries (below), which already hold its rows; its routes, tools and commands will be removed once the taskboard skill writes entries.
+
+Entries are short typed records of why the work is as it is, on a project, an epic or a ticket: `decision` (with its `source`, `agent` or `person`), `learning`, `note` (the person's instruction, open until an agent marks it handled; `about` points it at an entry to challenge it), and on a ticket only `hand_off`, `proof` and `review` (with `verdict`, `findings` by severity and `reportDocument`). Each names its author: an agent (`agentId`) or the person (`authorName`). Entries are never edited: a new entry of the same type names the one it `replaces`, which is kept but left out of reads. `POST /api/projects/{id}/entries`, `/api/epics/{id}/entries` or `/api/tickets/{id}/entries` writes one (a project by id or prefix, a ticket by id or key), and `GET` on the same route reads them newest first as `{entries, total, hasMore, nextBefore}`: current ones only unless `?includeReplaced=true`, `?type=` for some types (repeat or comma-separate), `?limit=` (1 to 100, default 20) and `?before=` for older pages. `POST /api/entries/{id}/handled` with `{"agentId": "..."}` marks a note handled. `GET /api/tickets/{id}` carries a page of the ticket's 20 newest current entries as `entries`, `openNotes`, and `epicOpenNotes` and `projectOpenNotes`, counted but not read; each is left out when there are none. The MCP tools are `write_entry`, `list_entries` and `handle_note`, and the CLI's are `entry add`, `entry list` and `entry handle`.
 
 `GET /api/tickets` filters by `projectId`, `status`, `priority`, `repo`, `label` and `epic`, plus `ready=true` (todo tickets whose dependencies are all done) and `excludeLabel` (leave out tickets with that label, e.g. `hold`). Repeat `status` for several, e.g. `?status=todo&status=in_progress`, or comma-separate them in one value, e.g. `?status=todo,in_progress`, the same as the CLI's `--status`. A status outside `todo`, `in_progress`, `agent_review` or `done` is a 400 naming the allowed values. Every filter given must match, so `ready=true` with statuses that leave out `todo` returns nothing. The CLI's `ticket list` and the MCP `list_tickets` tool take the same filters.
 
@@ -141,6 +143,13 @@ taskboard project create "Billing" --prefix BILL --description "Invoicing and pa
 taskboard project list
 taskboard project journal append BILL "Run finished: 3 tickets landed." --author orchestrator
 taskboard project journal list BILL   # newest first; --limit and --before page through older entries
+
+taskboard entry add --ticket AUTH-1 --type learning --agent <agent-id> "The test DB needs foreign keys on."
+taskboard entry add --epic Login --project AUTH --type decision --source person "Sessions over JWTs: revocation matters."
+taskboard entry add --project AUTH --type note "Keep the login page free of tracking."   # yours, as your user name (or --author)
+taskboard entry add --ticket AUTH-1 --type learning --agent <agent-id> --replaces <entry-id> "..."  # corrects an entry
+taskboard entry list --ticket AUTH-1                  # current entries, newest first; --type, --all, --limit, --before
+taskboard entry handle <note-id> --agent <agent-id>   # the agent acted on the note
 
 taskboard ticket create --project <ID> --title "Implement login" --priority high
 taskboard ticket list --project <ID> --status todo
@@ -252,7 +261,7 @@ ticket whose dependencies are unfinished can still be moved to any status.
 The reverse direction is derived, not stored. When `BILL-5` depends on `BILL-2`,
 `BILL-2` lists `BILL-5` under *blocks* automatically, and that list is read-only.
 
-#### Available MCP Tools (23)
+#### Available MCP Tools (27)
 
 | Tool                     | Description                                      |
 | ------------------------ | ------------------------------------------------ |
@@ -262,8 +271,8 @@ The reverse direction is derived, not stored. When `BILL-5` depends on `BILL-2`,
 | `create_project`         | Create a new project (use for epics/initiatives) |
 | `update_project`         | Update project properties                        |
 | `delete_project`         | Delete a project: it and everything in it vanish |
-| `append_project_journal` | Append a dated entry to a project's journal      |
-| `list_project_journal`   | Read a project's journal, newest first, by page  |
+| `append_project_journal` | Append to a project's journal (superseded by `write_entry`) |
+| `list_project_journal`   | Read a project's journal (superseded by `list_entries`)     |
 | **Labels**               |                                                  |
 | `list_labels`            | List all labels with ticket counts               |
 | `create_label`           | Create a label with a name and color             |
@@ -286,6 +295,22 @@ The reverse direction is derived, not stored. When `BILL-5` depends on `BILL-2`,
 | `batch_create_subtasks`  | Add multiple subtasks to a ticket at once        |
 | `toggle_subtask`         | Set subtask completion (or toggle it)            |
 | `delete_subtask`         | Remove a subtask from a ticket                   |
+| **Entries**              |                                                  |
+| `write_entry`            | Record a decision, learning, hand-off, proof or review, or replace one |
+| `list_entries`           | Read a ticket's, epic's or project's entries, newest first, by page |
+| `handle_note`            | Mark one of the person's notes handled           |
+
+#### Entries and open notes
+
+`write_entry` and `handle_note` take `agentId`, the agent writing: every
+entry names its agent, and only the person writes notes. `get_ticket` carries
+a page of the ticket's 20 newest current entries and counts the open notes on
+it, its epic and its project, leaving out each when there are none. Every
+other call on a ticket that has open notes carries `openNotes`, their count,
+so the agent working on it learns of a new note on its next call: a field of
+the answer, or its own item after an answer that is a list or an image. An
+open note can be older than the 20 newest entries; `list_entries` with
+`types: ["note"]` reads them all.
 
 #### Status notes
 

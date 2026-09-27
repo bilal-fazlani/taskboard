@@ -3,8 +3,6 @@ package cli
 import (
 	"fmt"
 	"io"
-	"os"
-	"os/user"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -36,7 +34,7 @@ func journalCommands() *cobra.Command {
 				text = string(data)
 			}
 			if strings.TrimSpace(author) == "" {
-				author = defaultJournalAuthor()
+				author = defaultAuthor()
 			}
 			store, err := openStore()
 			if err != nil {
@@ -87,15 +85,6 @@ func journalCommands() *cobra.Command {
 
 	cmd.AddCommand(appendCmd, listCmd)
 	return cmd
-}
-
-// defaultJournalAuthor is the author of an entry appended without --author:
-// the name of the user running the command.
-func defaultJournalAuthor() string {
-	if u, err := user.Current(); err == nil && u.Username != "" {
-		return u.Username
-	}
-	return os.Getenv("USER")
 }
 
 // formatJournal renders one page of a journal, each entry's time and author

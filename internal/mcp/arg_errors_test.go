@@ -111,6 +111,10 @@ func (f *argErrorFixture) snapshot(t *testing.T) string {
 	if err != nil {
 		t.Fatalf("ListDocuments: %v", err)
 	}
+	entries, err := s.store.ListEntries(models.EntryOwner{TicketID: f.ticketID}, models.EntryFilter{IncludeReplaced: true}, "", db.EntryMaxLimit)
+	if err != nil {
+		t.Fatalf("ListEntries: %v", err)
+	}
 	docs := make([]*models.Document, len(docMetas))
 	for i, meta := range docMetas {
 		d, err := s.store.GetDocument(meta.ID)
@@ -130,7 +134,8 @@ func (f *argErrorFixture) snapshot(t *testing.T) string {
 		History   []models.StatusChange
 		Documents []*models.Document
 		Journal   models.JournalPage
-	}{projects, project, tickets, labels, epics, ticket, history, docs, journal}
+		Entries   models.EntryPage
+	}{projects, project, tickets, labels, epics, ticket, history, docs, journal, entries}
 
 	data, err := json.Marshal(blob)
 	if err != nil {
@@ -190,6 +195,9 @@ func TestToolHandlersRejectWronglyTypedArguments(t *testing.T) {
 		{"create_document", map[string]any{"ticket": f.ticketID, "name": 1}},
 		{"update_document", map[string]any{"id": f.documentID, "name": 1}},
 		{"delete_document", map[string]any{"id": 1}},
+		{"write_entry", map[string]any{"ticket": f.ticketID, "type": "learning", "text": 1, "agentId": "a1"}},
+		{"list_entries", map[string]any{"ticket": f.ticketID, "limit": "5"}},
+		{"handle_note", map[string]any{"id": 1, "agentId": "a1"}},
 	}
 
 	seen := make(map[string]bool, len(tests))
