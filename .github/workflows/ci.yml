@@ -36,8 +36,10 @@ jobs:
           mkdir -p cmd/taskboard/web/dist
           cp -r web/dist/* cmd/taskboard/web/dist/
 
+      # -tags frontend embeds the web UI copied above, and fails the build if it
+      # is missing. Go vet and tests need neither.
       - name: Build binary
-        run: go build -o taskboard ./cmd/taskboard
+        run: go build -tags frontend -o taskboard ./cmd/taskboard
 
       - name: Verify binary
         run: ./taskboard --help

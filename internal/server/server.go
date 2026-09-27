@@ -29,6 +29,7 @@ type Server struct {
 	events        *broadcaster
 	keepAlive     time.Duration
 	watchInterval time.Duration
+	noWebUI       bool
 }
 
 // Option configures a Server.
@@ -52,6 +53,7 @@ func New(store *db.Store, webFS fs.FS, opts ...Option) *Server {
 		events:        newBroadcaster(),
 		keepAlive:     DefaultKeepAlive,
 		watchInterval: db.DefaultWatchInterval,
+		noWebUI:       webFS == nil,
 	}
 	for _, opt := range opts {
 		opt(s)
@@ -80,6 +82,9 @@ func (s *Server) ListenAndServe(ctx context.Context, port int, dbPath string) er
 	}
 	return s.serve(ctx, ln, dbPath, func() {
 		fmt.Printf("Taskboard running at http://localhost:%d\n", port)
+		if s.noWebUI {
+			fmt.Println(noWebUIBanner)
+		}
 	})
 }
 
@@ -253,7 +258,9 @@ func (s *Server) setupRoutes(webFS fs.FS) {
 		r.Get("/version", getVersion)
 	})
 
-	if webFS != nil {
+	if webFS == nil {
+		r.Get("/*", serveNoWebUI)
+	} else {
 		fileServer := http.FileServer(http.FS(webFS))
 		r.Get("/*", func(w http.ResponseWriter, r *http.Request) {
 			if _, err := fs.Stat(webFS, r.URL.Path[1:]); err != nil {
@@ -272,6 +279,26 @@ func (s *Server) setupRoutes(webFS fs.FS) {
 	}
 
 	s.router = r
+}
+
+// A binary built without -tags frontend (go build, go run, go test on a
+// checkout where the web app was never built) has no web UI. It says so, on
+// start and at every web path, rather than serving a blank page.
+const noWebUIBanner = "This build has no web UI: it was built without -tags frontend. The API, CLI and MCP server work; make build gives a binary with the web UI."
+
+const noWebUIPage = `<!doctype html>
+<html><head><meta charset="utf-8"><title>Taskboard: no web UI</title></head>
+<body style="font-family: system-ui, sans-serif; max-width: 40rem; margin: 4rem auto; padding: 0 1rem; line-height: 1.5">
+<h1>No web UI in this build</h1>
+<p>This taskboard binary was built without its web UI (without <code>-tags frontend</code>). The API, CLI and MCP server work as usual.</p>
+<p>For the web UI, run <code>make build</code>, or <code>make frontend</code> and then build with <code>go build -tags frontend ./cmd/taskboard</code>. While working on the web app, <code>make dev-frontend</code> serves it with hot reload.</p>
+</body></html>
+`
+
+func serveNoWebUI(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusNotFound)
+	fmt.Fprint(w, noWebUIPage)
 }
 
 // isFilePath reports whether urlPath names a file of the web build rather

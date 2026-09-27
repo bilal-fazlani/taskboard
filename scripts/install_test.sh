@@ -123,6 +123,9 @@ if [ -n "$new_server" ] && [ "$new_server" != "$old_server" ]; then
   api_version=$(curl -fsS "http://localhost:$PORT/api/version" || true)
   case "$api_version" in *"\"commit\":\"$want_commit\""*'"dev":false'*) pass "new server reports its build: $api_version" ;;
     *) fail "GET /api/version says $api_version, want the commit $want_commit and dev false" ;; esac
+  # make install embeds the real web build (-tags frontend), not the no-web-UI page.
+  curl -fsS -o "$S/index.html" "http://localhost:$PORT/" && grep -q '<div id="root">' "$S/index.html" \
+    && pass "serves the embedded web UI" || fail "GET / does not serve the web UI's index.html"
 else
   fail "port and data checks skipped: no new server"
 fi

@@ -65,6 +65,8 @@ Requires Go 1.24+ and Node.js 22+.
 
 `make build`, `go build` and `go install` produce a development build: it never opens the default database, so every command needs `--db`, and `start` defaults to port 3011. The examples below, which rely on the default database and port 3010, assume a release binary or `make install`, which builds the marked binary, installs it to `~/.local/bin` and restarts the server.
 
+`make build` embeds the web UI: it builds the web app and compiles with `-tags frontend`, which fails if the web build is missing. A plain `go build` or `go install` leaves the web UI out and says so, on start and in the browser; the API, CLI and MCP server work the same.
+
 ## Usage
 
 ### Web UI
@@ -417,6 +419,7 @@ taskboard --db /tmp/test.db clear -f
 ```bash
 # Run backend on :3011 against a throwaway database at ./.tmp/dev.db
 # (never the live board on :3010). Override with DEV_PORT=... / DEV_DB=...
+# It embeds the web UI, so run `make frontend` once first.
 make dev
 
 # Run frontend dev server (proxies API to the make dev backend)
@@ -425,9 +428,14 @@ make dev-frontend
 # Build everything
 make build
 
+# Vet and test the Go code; needs no web build
+go vet ./... && go test ./...
+
 # Clean
 make clean
 ```
+
+The web UI is embedded only when Go builds with `-tags frontend`, as every Makefile build and the release workflow do; that compile fails if `make frontend` has not put the web build in `cmd/taskboard/web/dist`. Without the tag, `go vet`, `go test`, `go build` and `go run` work on a fresh checkout, and the binary they make says it has no web UI.
 
 `make dev-frontend` proxies `/api`, including `/api/events`, straight through to the `make dev` backend with no buffering, so the SSE stream above works the same as it does from the built binary.
 

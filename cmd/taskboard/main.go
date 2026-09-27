@@ -1,19 +1,9 @@
 package main
 
-import (
-	"embed"
-	"io/fs"
+import "github.com/tcarac/taskboard/internal/cli"
 
-	"github.com/tcarac/taskboard/internal/cli"
-)
-
-//go:embed web/dist
-var webEmbed embed.FS
-
+// webFS is the embedded web UI with -tags frontend (web_embed.go) and nil
+// without it (web_none.go).
 func main() {
-	webFS, err := fs.Sub(webEmbed, "web/dist")
-	if err != nil {
-		webFS = nil
-	}
-	cli.Execute(webFS)
+	cli.Execute(webFS())
 }

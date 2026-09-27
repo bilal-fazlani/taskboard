@@ -28,19 +28,25 @@ LIVE_LDFLAGS := -X github.com/tcarac/taskboard/internal/livebuild.Mark=true $(BU
 LIVE_DIR := .tmp/live
 LIVE_BINARY := $(LIVE_DIR)/taskboard
 
+# The web UI is embedded only with -tags frontend (cmd/taskboard/web_embed.go),
+# and then the compile fails if `make frontend` has not put it in place. Plain
+# go vet, go test, go build and go run leave it out, so they work on a fresh
+# checkout; such a binary says it has no web UI.
+FRONTEND_TAGS := -tags frontend
+
 define build-live
 	@mkdir -p $(LIVE_DIR)
-	go build -ldflags '$(LIVE_LDFLAGS)' -o $(LIVE_BINARY) ./$(BUILD_DIR)
+	go build $(FRONTEND_TAGS) -ldflags '$(LIVE_LDFLAGS)' -o $(LIVE_BINARY) ./$(BUILD_DIR)
 endef
 
 build: frontend
-	go build -ldflags '$(BUILDINFO_LDFLAGS)' -o $(BINARY) ./$(BUILD_DIR)
+	go build $(FRONTEND_TAGS) -ldflags '$(BUILDINFO_LDFLAGS)' -o $(BINARY) ./$(BUILD_DIR)
 
 dev:
 	@test -n "$(DEV_DB)" || { echo "DEV_DB must not be empty (make dev must never use the live database)"; exit 1; }
 	@test "$(DEV_PORT)" != "$(PORT)" || { echo "DEV_PORT must differ from the live server port $(PORT)"; exit 1; }
 	mkdir -p $(dir $(DEV_DB))
-	go run -ldflags '$(BUILDINFO_LDFLAGS)' ./$(BUILD_DIR) --db $(DEV_DB) start --foreground --port $(DEV_PORT)
+	go run $(FRONTEND_TAGS) -ldflags '$(BUILDINFO_LDFLAGS)' ./$(BUILD_DIR) --db $(DEV_DB) start --foreground --port $(DEV_PORT)
 
 frontend:
 	cd web && npm install && npm run build

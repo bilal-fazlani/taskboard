@@ -30,6 +30,9 @@ Thanks for your interest in contributing! Here's how to get started.
    ```bash
    go run ./cmd/taskboard --db ./.tmp/dev.db start --foreground --port 3011
    ```
+   That binary has no web UI and says so; add `-tags frontend` after
+   `make frontend` to embed it, as `make dev` does. `go vet ./...` and
+   `go test ./...` need no web build.
 
 ## Pull Request Process
 

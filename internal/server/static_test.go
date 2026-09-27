@@ -108,6 +108,31 @@ func TestStaticClientRoutesFallBackToIndex(t *testing.T) {
 	}
 }
 
+// A binary built without the web UI (no -tags frontend) says so at every web
+// path instead of serving a blank page, and tells how to get one.
+func TestNoWebUIExplainsItself(t *testing.T) {
+	ts := httptest.NewServer(New(nil, nil))
+	t.Cleanup(ts.Close)
+	for _, path := range []string{"/", "/kanban", "/?project=ACP&ticket=ACP-7", "/assets/index-abc.js"} {
+		status, contentType, body := getStatic(t, ts.URL+path)
+		if status != http.StatusNotFound {
+			t.Errorf("GET %s = %d, want 404", path, status)
+		}
+		if !strings.HasPrefix(contentType, "text/html") {
+			t.Errorf("GET %s Content-Type = %q, want text/html", path, contentType)
+		}
+		for _, want := range []string{"built without its web UI", "make build"} {
+			if !strings.Contains(body, want) {
+				t.Errorf("GET %s body %q does not contain %q", path, body, want)
+			}
+		}
+	}
+	status, _, body := getStatic(t, ts.URL+"/api/nope")
+	if status != http.StatusNotFound || strings.Contains(body, "web UI") {
+		t.Errorf("GET /api/nope = %d %q, want the API's own 404", status, body)
+	}
+}
+
 // The API never falls back to the web app.
 func TestStaticUnknownAPIPathIsNotFound(t *testing.T) {
 	base := newStaticServer(t)
