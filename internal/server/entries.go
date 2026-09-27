@@ -2,6 +2,8 @@ package server
 
 import (
 	"net/http"
+	"os"
+	"os/user"
 	"strconv"
 	"strings"
 
@@ -96,14 +98,39 @@ func (s *Server) listEntries(kind string) http.HandlerFunc {
 			writeStoreError(w, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, page)
+		agents, err := s.store.EntryAgents(page.Entries)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, entryPageWithAgents{EntryPage: page, Agents: agents})
 	}
+}
+
+// entryPageWithAgents is a page of entries as the entry routes answer it:
+// with the agents its entries name (the author, or the agent that handled a
+// note), each with its session and keyed by id, for the author line. Left
+// out when the page names no agent.
+type entryPageWithAgents struct {
+	models.EntryPage
+	Agents map[string]models.EntryAgent `json:"agents,omitempty"`
+}
+
+// localPerson is who writes a note sent with no author: the user running the
+// server, since the web UI is the person at this machine.
+func localPerson() string {
+	if u, err := user.Current(); err == nil && u.Username != "" {
+		return u.Username
+	}
+	return os.Getenv("USER")
 }
 
 // createEntry answers POST /api/{projects,epics,tickets}/{id}/entries, whose
 // body is a models.CreateEntryRequest without its owner (the route names
 // it), with the new entry. The author is agentId, or authorName for the
-// person. Entries are never edited: a new one replaces an old one.
+// person. A note, which only the person writes, sent with neither is the
+// server's user's (localPerson): that is how the web UI leaves one. Entries
+// are never edited: a new one replaces an old one.
 func (s *Server) createEntry(kind string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		owner, ok := s.entryOwner(w, r, kind)
@@ -116,6 +143,10 @@ func (s *Server) createEntry(kind string) http.HandlerFunc {
 			return
 		}
 		req.EntryOwner = owner
+		if strings.TrimSpace(req.Type) == models.EntryNote && strings.TrimSpace(req.AgentID) == "" &&
+			strings.TrimSpace(req.AuthorName) == "" {
+			req.AuthorName = localPerson()
+		}
 		e, err := s.store.CreateEntry(req)
 		if err != nil {
 			writeStoreError(w, err)

@@ -19,6 +19,11 @@ import LabelPicker from "./LabelPicker";
 import RepoPicker from "./RepoPicker";
 import DependencyPicker, { KindPill, SurfacedFromPicker, TicketRefLabel } from "./DependencyPicker";
 import DeliverySection from "./DeliverySection";
+import TicketEntries from "./TicketEntries";
+import EntryContextBox from "./EntryContextBox";
+import { useNavigate } from "react-router-dom";
+import { useOwnerEntries } from "../hooks/useOwnerEntries";
+import { useEntryContext } from "../hooks/useEntryContext";
 import { activityEntries } from "../lib/activity";
 import { documentWindowKey } from "../lib/documents";
 import { useEscape } from "../lib/escapeStack";
@@ -189,6 +194,13 @@ export default function TicketEditor({
   const { documents, failed: documentsFailed, reload: reloadDocuments } = useOwnerDocuments({ ticketId: ticket.id });
   const docParam = useDocParam(documents);
   const docOpen = docParam.selected !== null;
+
+  // The ticket's entries, replaced ones included, and the counts of its
+  // epic's and project's; both refresh on every live change, since an
+  // entry never touches the ticket itself.
+  const ownerEntries = useOwnerEntries({ ticketId: ticket.id });
+  const entryContext = useEntryContext(ticket.id, ticket.projectId, detail.epic?.id);
+  const navigate = useNavigate();
 
   // Images pasted or dropped into the description's Write mode.
   const descriptionRef = useRef<HTMLTextAreaElement>(null);
@@ -787,6 +799,19 @@ export default function TicketEditor({
               />
             </div>
 
+            {/* The entries, in reading order: open notes, where it stands,
+                decisions, reviews, learnings and proof; then subtasks,
+                documents, and the status history last. */}
+            <TicketEntries
+              ticketId={ticket.id}
+              value={ownerEntries.value}
+              failed={ownerEntries.failed}
+              documents={documents}
+              readOnly={deleted}
+              onNoteLeft={ownerEntries.reload}
+              onOpenDocument={docParam.open}
+            />
+
             <div inert={deleted} className={deleted ? "opacity-60" : ""}>
               <h3 className={SECTION_HEADING}>Subtasks</h3>
               <ul className="space-y-1.5">
@@ -864,7 +889,7 @@ export default function TicketEditor({
               />
             </div>
 
-            {/* Last in this column. Agent requests and comments join this list as more kinds of entry. */}
+            {/* Last in this column: the status history. */}
             <div>
               <h3 className={SECTION_HEADING}>Activity</h3>
               {history && <ActivityList entries={activityEntries(history)} />}
@@ -878,6 +903,7 @@ export default function TicketEditor({
               deleted ? "opacity-60" : ""
             }`}
           >
+            {/* Who holds the ticket, with its Stop work action, goes here, first in this column. */}
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label htmlFor={statusId} className={FIELD_LABEL}>
@@ -987,6 +1013,13 @@ export default function TicketEditor({
                 </p>
               </div>
             )}
+
+            <EntryContextBox
+              context={entryContext}
+              epic={detail.epic}
+              project={{ prefix: ticket.projectPrefix }}
+              onNavigate={(to) => confirmDiscardThen(() => navigate(to))}
+            />
 
             <div>
               <h3 className={SECTION_HEADING}>Repos</h3>

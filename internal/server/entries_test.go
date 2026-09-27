@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/tcarac/taskboard/internal/db"
 )
@@ -12,22 +13,39 @@ import (
 // nothing creates agents over HTTP yet.
 func seedEntryAgent(t *testing.T, r *running) string {
 	t.Helper()
+	seedAgentInSession(t, r, "a1", "s1", "3da2c294", "implementer")
+	return "a1"
+}
+
+// storedTime is a time as the store writes it (db's sortable format), which
+// the store's agent reads parse; SQLite's CURRENT_TIMESTAMP is not.
+func storedTime(at time.Time) string {
+	return at.UTC().Format("2006-01-02T15:04:05.000000000Z")
+}
+
+// seedAgentInSession inserts a session and an agent in it, seen now.
+func seedAgentInSession(t *testing.T, r *running, agentID, sessionID, vendorSessionID, role string) {
+	t.Helper()
+	now := storedTime(time.Now())
+	execOnServed(t, r,
+		`INSERT INTO sessions (id, vendor, vendor_session_id, machine, resume_command, created_at)
+			VALUES (?, 'claude_code', ?, 'mac', 'claude --resume ' || ?, ?)`, sessionID, vendorSessionID, vendorSessionID, now)
+	execOnServed(t, r,
+		`INSERT INTO agents (id, session_id, role, model, provider, created_at, last_seen_at)
+			VALUES (?, ?, ?, 'opus', 'anthropic', ?, ?)`, agentID, sessionID, role, now, now)
+}
+
+// execOnServed runs one statement on the served database.
+func execOnServed(t *testing.T, r *running, query string, args ...any) {
+	t.Helper()
 	database, err := db.OpenAt(r.path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer database.Close()
-	for _, q := range []string{
-		`INSERT INTO sessions (id, vendor, vendor_session_id, machine, resume_command, created_at)
-			VALUES ('s1', 'claude_code', '3da2c294', 'mac', 'claude --resume 3da2c294', CURRENT_TIMESTAMP)`,
-		`INSERT INTO agents (id, session_id, role, model, provider, created_at, last_seen_at)
-			VALUES ('a1', 's1', 'implementer', 'opus', 'anthropic', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
-	} {
-		if _, err := database.Exec(q); err != nil {
-			t.Fatal(err)
-		}
+	if _, err := database.Exec(query, args...); err != nil {
+		t.Fatal(err)
 	}
-	return "a1"
 }
 
 func entryTexts(page map[string]any) []string {

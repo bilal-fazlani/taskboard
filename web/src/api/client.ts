@@ -167,6 +167,98 @@ export interface Ticket {
   /** Where the ticket's work lives and where it landed. Only the full ticket
    * carries it, and only when a field is set. */
   delivery?: Delivery;
+  /** Open notes on the ticket's epic and on its project, counted but not
+   * read. Only the full ticket carries them, and each is left out at 0. */
+  epicOpenNotes?: number;
+  projectOpenNotes?: number;
+}
+
+/** The entry types (internal/models/entry.go). The set is open: an unknown
+ * type from a newer server is kept, not refused. */
+export type EntryType = "decision" | "learning" | "hand_off" | "proof" | "review" | "note";
+
+/** What an entry sits on: one project, epic or ticket. */
+export type EntryOwnerRef = { ticketId: string } | { epicId: string } | { projectId: string };
+
+/**
+ * One entry: a short typed record of why the work is as it is. Entries are
+ * never edited; a later one of the same type can replace one (`replaces`),
+ * which is then kept with `replacedBy` set. Exactly one of agentId and
+ * authorName names the writer: an agent, or the person.
+ */
+export interface Entry {
+  id: string;
+  projectId?: string;
+  epicId?: string;
+  ticketId?: string;
+  type: EntryType | string;
+  text: string;
+  agentId?: string;
+  authorName?: string;
+  /** A decision's source: "agent", or "person" for the person's call recorded by an agent. */
+  source?: string;
+  replaces?: string;
+  replacedBy?: string;
+  /** The entry a note points at: the one the person challenges. */
+  about?: string;
+  /** The agent that handled a note, and when; absent while it is open. */
+  handledBy?: string;
+  handledAt?: string;
+  /** A review's verdict ("approve" or "changes"), its finding counts by
+   * severity, and the name of the document holding its full report. */
+  verdict?: string;
+  findings?: Record<string, number>;
+  reportDocument?: string;
+  createdAt: string;
+}
+
+/** A session: one conversation in a vendor's tool. */
+export interface AgentSession {
+  id: string;
+  vendor: string;
+  vendorSessionId: string;
+  machine: string;
+  resumeCommand: string;
+  webUrl?: string;
+  createdAt: string;
+}
+
+/** An agent that wrote an entry or handled a note, with its session. */
+export interface EntryAgent {
+  id: string;
+  sessionId: string;
+  role: string;
+  model: string;
+  /** anthropic, openai, google or other. */
+  provider: string;
+  createdAt: string;
+  lastSeenAt: string;
+  /** When any agent of its session was last seen, and whether that is past
+   * the stale threshold, as of the read. Optional because fixtures leave
+   * them out. */
+  sessionLastSeenAt?: string;
+  stale?: boolean;
+  session: AgentSession;
+}
+
+/**
+ * A run of one owner's entries, newest first, with the agents they name
+ * keyed by id. When hasMore is true, the next (older) page is the one read
+ * with before set to nextBefore.
+ */
+export interface EntryPage {
+  entries: Entry[];
+  total: number;
+  hasMore: boolean;
+  nextBefore?: string;
+  agents: Record<string, EntryAgent>;
+}
+
+/** A new entry from the person: a note, optionally pointing at the entry it challenges. */
+export interface NoteWrite {
+  type: "note";
+  text: string;
+  about?: string;
 }
 
 /** A ticket's delivery fields, set by agents through MCP, the CLI or the API.
@@ -379,6 +471,18 @@ interface RawBoard extends Omit<Board, "projectId" | "columns"> {
   columns?: RawBoardColumn[];
 }
 
+interface RawEntryPage extends Omit<EntryPage, "entries" | "agents"> {
+  entries?: Entry[];
+  agents?: Record<string, EntryAgent>;
+}
+
+/** The entries route for an owner. */
+function entriesUrl(owner: EntryOwnerRef): string {
+  if ("ticketId" in owner) return `/api/tickets/${encodeURIComponent(owner.ticketId)}/entries`;
+  if ("epicId" in owner) return `/api/epics/${encodeURIComponent(owner.epicId)}/entries`;
+  return `/api/projects/${encodeURIComponent(owner.projectId)}/entries`;
+}
+
 function normalizeProject(raw: RawProject): Project {
   return { ...raw, description: raw.description ?? "", icon: raw.icon ?? "", color: raw.color ?? "" };
 }
@@ -505,6 +609,31 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ title }),
       }),
+  },
+
+  entries: {
+    /**
+     * One page of an owner's entries, newest first: current ones only unless
+     * includeReplaced; types keeps only those; before is the previous page's
+     * nextBefore. limit is 1 to 100 (the server's default is 20).
+     */
+    list: (
+      owner: EntryOwnerRef,
+      params: { includeReplaced?: boolean; types?: readonly string[]; before?: string; limit?: number } = {},
+    ) => {
+      const qs = new URLSearchParams();
+      if (params.includeReplaced) qs.set("includeReplaced", "true");
+      if (params.types && params.types.length > 0) qs.set("type", params.types.join(","));
+      if (params.before) qs.set("before", params.before);
+      if (params.limit !== undefined) qs.set("limit", String(params.limit));
+      const query = qs.toString();
+      return request<RawEntryPage>(`${entriesUrl(owner)}${query ? `?${query}` : ""}`).then(
+        (raw): EntryPage => ({ ...raw, entries: raw.entries ?? [], agents: raw.agents ?? {} }),
+      );
+    },
+    /** Leave a note as the person; the server names the person as its user. */
+    createNote: (owner: EntryOwnerRef, note: NoteWrite) =>
+      request<Entry>(entriesUrl(owner), { method: "POST", body: JSON.stringify(note) }),
   },
 
   subtasks: {
