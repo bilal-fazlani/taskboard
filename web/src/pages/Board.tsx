@@ -208,7 +208,7 @@ export default function Board() {
     url: ticketUrl,
   } = useTicketParam(allTickets);
   // The board always shows one project, so its cards and count are out of that
-  // project's tickets; without one (no active project to pick) it has none.
+  // project's tickets; without one (no project to pick) it has none.
   const projectTickets = useMemo(() => inProject(allTickets, filters.project), [allTickets, filters.project]);
   const isShown = (ticket: Ticket) =>
     ticket.id === activeTicket?.id || (filters.project !== "" && matchesFilters(ticket, filters, docMatches));
@@ -225,7 +225,7 @@ export default function Board() {
   const projectsErrored = filters.project === "" && projects === null && projectsFailed;
   const waiting = loading || awaitingProject(filters.project, projects, projectsFailed);
   const repos = useMemo(() => repoOptions(projectTickets, filters.repo), [projectTickets, filters.repo]);
-  const addBlocked = newTicketBlocked(filters.project, projects, projectsFailed);
+  const addBlocked = newTicketBlocked(projects, projectsFailed);
 
   const findTicketById = (id: UniqueIdentifier): Ticket | undefined => {
     for (const col of columns) {

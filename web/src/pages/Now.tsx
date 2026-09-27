@@ -3,7 +3,7 @@ import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { api, type LandedTicket, type Now as NowData, type NowTicket, type Project } from "../api/client";
 import { fieldClass } from "../components/controlStyles";
 import { useLiveRefresh } from "../hooks/useLiveRefresh";
-import { activeProjects, projectLabel } from "../lib/defaultProject";
+import { projectIconAndName, projectsByName } from "../lib/defaultProject";
 import {
   TICK_MS,
   editorLink,
@@ -21,7 +21,7 @@ import { AGENT_REVIEW_STATUS, IN_PROGRESS_STATUS, STATUS_LABELS, STATUS_STYLES }
 // (`project`, a prefix) like the views' filter, and Now remembers its own
 // pick, apart from the views' last project (see nowProject.ts): a URL without
 // a project gets the pick last made here back, "All projects" included. A
-// remembered project archived or deleted since, like nothing remembered,
+// remembered project deleted since, like nothing remembered,
 // gives "All projects". A URL naming a project wins and is remembered. It is
 // the present only; the history of status changes is the Activity feed's.
 
@@ -191,9 +191,9 @@ export default function Now() {
   const latest = useRef(0);
 
   // A URL without a project gets the remembered pick back once the projects
-  // have loaded and show it is still active; until then nothing loads, so
+  // have loaded and show it still exists; until then nothing loads, so
   // the page never shows every project on its way to one. A remembered
-  // project archived or deleted since, or projects that fail to load, leave
+  // project deleted since, or projects that fail to load, leave
   // "All projects". The pick is read once per arrival (see arrive), so a
   // redraw or a live refresh never moves a page already open.
   const { key: locationKey } = useLocation();
@@ -267,13 +267,15 @@ export default function Now() {
     loadProjects();
   });
 
-  // Active projects by name, plus the one the URL names when it is archived
-  // or unknown, so the dropdown always shows what the page is narrowed to.
+  // Projects by name, plus the one the URL names when it is unknown, so the
+  // dropdown always shows what the page is narrowed to.
   const options = useMemo(() => {
-    const list = (projects ? activeProjects(projects) : []).map((p) => ({ value: p.prefix, label: projectLabel(p) }));
+    const list = (projects ? projectsByName(projects) : []).map((p) => ({
+      value: p.prefix,
+      label: projectIconAndName(p),
+    }));
     if (project && !list.some((o) => o.value.toLowerCase() === project.toLowerCase())) {
-      const named = projects?.find((p) => p.prefix.toLowerCase() === project.toLowerCase());
-      list.push({ value: named?.prefix ?? project, label: named ? projectLabel(named) : project });
+      list.push({ value: project, label: project });
     }
     return list;
   }, [projects, project]);

@@ -2,12 +2,11 @@ import { useEffect, useMemo } from "react";
 import type { Project } from "../api/client";
 import type { FilterState } from "../hooks/useFilters";
 import {
-  activeProjects,
   defaultProject,
-  isArchived,
   latestActivity,
   namedProject,
-  projectLabel,
+  projectIconAndName,
+  projectsByName,
   readLastProject,
   rememberProject,
   type ActivityTicket,
@@ -19,9 +18,8 @@ import { fieldClass } from "./controlStyles";
  * The project dropdown, used by the filter bar (FilterPanel) and on its own by
  * the Epics view, which has no other filters. The rules are defaultProject.ts's:
  * the URL's `project` names the project, a URL without one or with one that no
- * longer exists gets an active project picked, archived projects are offered
- * only when the URL names one, and the project shown is remembered for the
- * next view.
+ * longer exists gets a project picked, and the project shown is remembered
+ * for the next view.
  */
 export default function ProjectSelect({
   state,
@@ -36,11 +34,11 @@ export default function ProjectSelect({
 }) {
   const { filters, setFilter, dropFilters } = state;
   const prefixes = useMemo(() => projects?.map((p) => p.prefix) ?? null, [projects]);
-  const offered = useMemo(() => (projects ? activeProjects(projects) : null), [projects]);
+  const offered = useMemo(() => (projects ? projectsByName(projects) : null), [projects]);
   const shownProject = prefixes && namedProject(prefixes, filters.project);
 
-  // With no active project left to pick, a project the URL names that no
-  // longer exists is dropped rather than replaced.
+  // With no project left to pick, a project the URL names that no longer
+  // exists is dropped rather than replaced.
   const stale = offered?.length === 0 && filters.project !== "" && shownProject === null;
   useEffect(() => {
     if (stale) dropFilters(["project"]);
@@ -59,15 +57,13 @@ export default function ProjectSelect({
     if (shownProject) rememberProject(shownProject);
   }, [shownProject]);
 
-  const options = useMemo(() => {
-    const entries = (offered ?? []).map((p) => ({ value: p.prefix, label: projectLabel(p) }));
-    const archived = projects?.find((p) => p.prefix === shownProject && isArchived(p));
-    if (archived) entries.push({ value: archived.prefix, label: projectLabel(archived) });
-    return entries;
-  }, [offered, projects, shownProject]);
+  const options = useMemo(
+    () => (offered ?? []).map((p) => ({ value: p.prefix, label: projectIconAndName(p) })),
+    [offered],
+  );
 
   const shown = selectOptions(options, filters.project, true);
-  const placeholder = offered?.length === 0 ? (projects?.length ? "No active projects" : "No projects") : "Project";
+  const placeholder = offered?.length === 0 ? "No projects" : "Project";
 
   return (
     <select

@@ -8,7 +8,7 @@ import { useFilters } from "../hooks/useFilters";
 import { useLiveRefresh, useLiveStatus, type LiveStatus } from "../hooks/useLiveRefresh";
 import { useTicketParam } from "../hooks/useTicketParam";
 import { entryTicket } from "../lib/activityFeed";
-import { activeProjects, namedProject } from "../lib/defaultProject";
+import { namedProject } from "../lib/defaultProject";
 
 const NO_REPOS: string[] = [];
 
@@ -101,9 +101,9 @@ export default function Activity() {
   }, [projects, projectsFailed, filters.project]);
   const projectsErrored = filters.project === "" && projects === null && projectsFailed;
   // Until then the page waits, as the views do: for the list, or for the bar
-  // to pick or replace the URL's project, which it does whenever there is an
-  // active project to pick.
-  const waiting = projects === null ? !projectsFailed : activeProjects(projects).length > 0;
+  // to pick or replace the URL's project, which it does whenever there is a
+  // project to pick.
+  const waiting = projects === null ? !projectsFailed : projects.length > 0;
 
   const open = (entry: ProjectActivityEntry) =>
     openTicket(tickets.find((t) => t.id === entry.ticketId) ?? entryTicket(entry));

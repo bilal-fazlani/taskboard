@@ -7,7 +7,7 @@
 // from the view's filters, so a field the filters can also name starts the
 // same way by adding it here. Every value stays changeable in the form.
 
-import { activeProjects, isArchived, namedProject, type PickableProject } from "./defaultProject";
+import { namedProject, projectsByName, type PickableProject } from "./defaultProject";
 import { isNoEpic, type Filters } from "./filters";
 
 /** The form fields a view's filters preset. */
@@ -32,12 +32,10 @@ export interface ProjectEpics {
 /**
  * The form's starting values for a view with the given filters. The project is
  * picked the same way the filter bar picks one (see defaultProject.ts): among
- * the active projects, sorted by name, the one the view shows, named by prefix
- * and matched ignoring case as the filters match it. A view without one, or
- * with one that names no active project (including an archived one), falls
- * back to the first active project by name. With no active projects there is
- * none to fall back to, and the form starts with no project rather than
- * silently picking an archived one.
+ * the projects, sorted by name, the one the view shows, named by prefix and
+ * matched ignoring case as the filters match it. A view without one, or with
+ * one that names no project, falls back to the first project by name. With no
+ * projects there is none to fall back to, and the form starts with no project.
  *
  * The epic is the one the view's epic filter names, matched by name ignoring
  * case among that project's epics, once they have loaded. A filter for tickets
@@ -50,12 +48,12 @@ export function newTicketDefaults(
   projects: readonly DefaultableProject[],
   epics: ProjectEpics | null = null,
 ): NewTicketDefaults {
-  const active = activeProjects(projects);
+  const sorted = projectsByName(projects);
   const kept = namedProject(
-    active.map((p) => p.prefix),
+    sorted.map((p) => p.prefix),
     filters.project,
   );
-  const project = (kept && active.find((p) => p.prefix === kept)) || active[0];
+  const project = (kept && sorted.find((p) => p.prefix === kept)) || sorted[0];
   const projectId = project?.id ?? "";
   const wanted = filters.epic.length === 1 ? filters.epic[0].toLowerCase() : "";
   const epic =
@@ -72,11 +70,8 @@ export function newTicketDefaults(
  * where it would have to guess a project:
  *
  * - while the projects are still loading (`projects` is null), since until
- *   then the view can't tell whether its project is active;
- * - when the view shows an archived project, which a URL naming one keeps
- *   selected (see defaultProject.ts): a new ticket belongs in the view's
- *   project, and an archived one takes none;
- * - when no project is active, so there is none to put a ticket in.
+ *   then the view can't tell whether there is a project to put it in;
+ * - when there are no projects, so there is none to put a ticket in.
  *
  * `failed` is whether the projects list has never loaded because its only
  * attempt so far failed, which changes only the message shown while
@@ -88,18 +83,11 @@ export function newTicketDefaults(
  * says can't be added.
  */
 export function newTicketBlocked(
-  viewProject: string,
   projects: readonly PickableProject[] | null,
   failed = false,
   noun: "tickets" | "epics" = "tickets",
 ): string | null {
   if (projects === null) return failed ? "Couldn't load projects. Retrying…" : "Loading projects…";
-  const shown = namedProject(
-    projects.map((p) => p.prefix),
-    viewProject,
-  );
-  const archived = shown === null ? undefined : projects.find((p) => p.prefix === shown && isArchived(p));
-  if (archived) return `${archived.name} is archived. Unarchive it to add ${noun}.`;
-  if (activeProjects(projects).length === 0) return `Create a project to add ${noun}.`;
+  if (projects.length === 0) return `Create a project to add ${noun}.`;
   return null;
 }

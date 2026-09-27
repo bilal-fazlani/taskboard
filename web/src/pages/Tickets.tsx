@@ -137,7 +137,7 @@ export default function Tickets() {
   useLiveRefresh(load);
 
   // The table always shows one project, so its rows and count are out of that
-  // project's tickets; without one (no active project to pick) it has none.
+  // project's tickets; without one (no project to pick) it has none.
   // Filters apply client-side, so changing one never refetches.
   const projectTickets = useMemo(() => inProject(tickets, filters.project), [tickets, filters.project]);
   const filtered = useMemo(
@@ -156,7 +156,7 @@ export default function Tickets() {
   const waiting = loading || awaitingProject(filters.project, projects, projectsFailed);
   const repos = useMemo(() => repoOptions(projectTickets, filters.repo), [projectTickets, filters.repo]);
   // Why New Ticket can't open the form here, if it can't (see newTicketBlocked).
-  const createBlocked = newTicketBlocked(filters.project, projects, projectsFailed);
+  const createBlocked = newTicketBlocked(projects, projectsFailed);
 
   const handleCreate = async (data: TicketWrite) => {
     await api.tickets.create(data);

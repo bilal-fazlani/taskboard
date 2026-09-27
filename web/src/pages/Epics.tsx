@@ -600,7 +600,7 @@ export default function Epics() {
   // (see newTicketBlocked), then the shown project's epics still loading, which
   // the dialog checks a new name against.
   const newEpicBlocked =
-    newTicketBlocked(filters.project, projects, false, "epics") ??
+    newTicketBlocked(projects, false, "epics") ??
     (shownProject && current ? null : "Loading epics…");
 
   return (

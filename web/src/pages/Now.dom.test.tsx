@@ -86,7 +86,7 @@ const BOARD: Now = {
   ],
 };
 
-const PROJECTS = [project("LDR", "Leaderboard"), project("ACP", "Control plane"), project("IAGML", "Scoring"), project("OLD", "Old", "archived")];
+const PROJECTS = [project("LDR", "Leaderboard"), project("ACP", "Control plane"), project("IAGML", "Scoring")];
 
 async function settle() {
   for (let i = 0; i < 4; i++) await act(async () => {});
@@ -229,7 +229,7 @@ describe("Now page", () => {
     expect(mockApi.now.get).toHaveBeenLastCalledWith(undefined);
     const select = screen.getByLabelText("Project") as HTMLSelectElement;
     expect(select.value).toBe("");
-    // Active projects by name; archived ones are left out.
+    // Every project, by name.
     expect([...select.options].map((o) => o.textContent)).toEqual(["All projects", "Control plane", "Leaderboard", "Scoring"]);
     expect(within(cardOf("Batch scoring endpoint")).getByTestId("project-chip").textContent).toBe("IAGML");
     expect(screen.getAllByTestId("project-chip")).toHaveLength(8);
@@ -252,6 +252,20 @@ describe("Now page", () => {
     await mount("/now?project=ldr");
     expect(mockApi.now.get).toHaveBeenLastCalledWith("ldr");
     expect((screen.getByLabelText("Project") as HTMLSelectElement).value).toBe("LDR");
+  });
+
+  it("keeps a project the URL names that no longer exists, as an extra entry by its prefix", async () => {
+    await mount("/now?project=GONE");
+    expect(mockApi.now.get).toHaveBeenLastCalledWith("GONE");
+    const select = screen.getByLabelText("Project") as HTMLSelectElement;
+    expect(select.value).toBe("GONE");
+    expect([...select.options].map((o) => o.textContent)).toEqual([
+      "All projects",
+      "Control plane",
+      "Leaderboard",
+      "Scoring",
+      "GONE",
+    ]);
   });
 
   it("updates live as tickets move", async () => {

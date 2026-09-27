@@ -265,18 +265,6 @@ describe.each(views)("%s's ways to open the new-ticket form", (_name, page, path
     }
   });
 
-  it("are disabled on an archived project the URL keeps selected, naming it", async () => {
-    serves([...PROJECTS, project("OLD", "Old stuff", "archived")]);
-    await mount(page(), `${path}?project=OLD`);
-    await expectDisabled("Old stuff is archived. Unarchive it to add tickets.");
-  });
-
-  it("are disabled when no project is active", async () => {
-    serves([project("OLD", "Old stuff", "archived")]);
-    await mount(page(), path);
-    await expectDisabled("Create a project to add tickets.");
-  });
-
   it("are disabled when there are no projects at all", async () => {
     serves([]);
     await mount(page(), path);

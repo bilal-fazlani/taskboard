@@ -259,7 +259,7 @@ export function matchesFilters(
 /**
  * The tickets in the given project, ignoring case as the filter does. None
  * when no project is given: every view shows one project, and a view left
- * without one (no active project to pick) shows its empty state rather than
+ * without one (no project to pick) shows its empty state rather than
  * every project's tickets.
  */
 export function inProject<T extends Pick<FilterableTicket, "projectPrefix">>(tickets: readonly T[], project: string): T[] {

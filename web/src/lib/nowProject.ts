@@ -4,14 +4,14 @@
 // defaultProject.ts): a pick on Kanban, Table, Dependencies, Epics or
 // Activity doesn't move Now, and Now never moves the views. Only a pick in
 // Now's dropdown, or a URL naming a project, changes it. Opening Now with no
-// project in the URL restores it, when it is still an active project; else
+// project in the URL restores it, when that project still exists; else
 // the page shows every project, as it does with nothing remembered.
 //
 // localStorage can be missing or throw (private windows, blocked site data),
 // so every access is wrapped: storage that can't be used just means there is
 // no memory, which is "All projects".
 
-import { activeProjects, namedProject, type PickableProject } from "./defaultProject";
+import { namedProject, type PickableProject } from "./defaultProject";
 
 /** The localStorage key holding the project Now last showed, by prefix; "" for every project. */
 export const NOW_PROJECT_KEY = "taskboard.nowProject";
@@ -36,10 +36,9 @@ export function rememberNowProject(prefix: string): void {
 
 /**
  * The project to restore into a Now URL without one, spelled as the list
- * spells it: the remembered one if it exists and is active, else "" for
- * every project (it has been archived or deleted since, or nothing was
- * remembered).
+ * spells it: the remembered one if it still exists, else "" for every
+ * project (it has been deleted since, or nothing was remembered).
  */
 export function restoredNowProject(projects: readonly PickableProject[], remembered: string): string {
-  return namedProject(activeProjects(projects).map((p) => p.prefix), remembered) ?? "";
+  return namedProject(projects.map((p) => p.prefix), remembered) ?? "";
 }

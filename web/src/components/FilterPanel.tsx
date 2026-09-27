@@ -7,7 +7,7 @@ import { CONTROL_BUTTON, fieldClass, segmentClass, segmentedClass } from "./cont
 import FilterMultiSelect from "./FilterMultiSelect";
 import { PriorityIcon } from "./PriorityBadge";
 import ProjectSelect from "./ProjectSelect";
-import { activeProjects, namedProject, type ActivityTicket } from "../lib/defaultProject";
+import { namedProject, type ActivityTicket } from "../lib/defaultProject";
 import { NO_EPIC, urlValue, type MultiFilterKey, type SelectOption, type UnmatchedMode } from "../lib/filters";
 import { PRIORITIES } from "../lib/priority";
 import { staleFilters } from "../lib/staleFilters";
@@ -213,9 +213,9 @@ export default function FilterPanel({
   // none that exists. Picking one for a URL without it, offering the
   // dropdown's entries, remembering the one shown and dropping a stale one
   // are ProjectSelect's job; the bar only needs to know which project its
-  // epics belong to, and whether any project is active to show.
+  // epics belong to, and whether there is any project to show.
   const shownProject = projectNames && namedProject(projectNames, filters.project);
-  const noActiveProject = useMemo(() => projects !== null && activeProjects(projects).length === 0, [projects]);
+  const noProject = projects !== null && projects.length === 0;
 
   // The epic filter offers the shown project's epics, loaded when it changes
   // and on every live change, like the projects and labels. An answer for a
@@ -236,12 +236,12 @@ export default function FilterPanel({
     loadEpics();
   }, [shownProject, loadEpics]);
   useLiveRefresh(loadEpics);
-  // The shown project's epics, or null while they are unknown. With no active
+  // The shown project's epics, or null while they are unknown. With no
   // project left to show there are none at all.
   const shownEpics = useMemo(() => {
     if (shownProject) return epics && epics.project === shownProject ? epics.epics : null;
-    return noActiveProject ? [] : null;
-  }, [epics, shownProject, noActiveProject]);
+    return noProject ? [] : null;
+  }, [epics, shownProject, noProject]);
 
   // An epic is dropped from the filter once it names no epic of the shown
   // project, which is also what drops it on a switch to another project, and a

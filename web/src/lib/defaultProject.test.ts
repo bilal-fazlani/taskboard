@@ -1,14 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   LAST_PROJECT_KEY,
-  activeProjects,
   awaitingProject,
   defaultProject,
-  isArchived,
   latestActivity,
   namedProject,
   projectIconAndName,
-  projectLabel,
+  projectsByName,
   readLastProject,
   rememberProject,
 } from "./defaultProject";
@@ -16,31 +14,30 @@ import { memoryStorage } from "../test/memoryStorage";
 
 const prefixes = ["ACP", "IAGML", "LDR"];
 
-const project = (prefix: string, name: string, status = "active") => ({ prefix, name, status });
+const project = (prefix: string, name: string) => ({ prefix, name });
 const ticket = (projectPrefix: string, updatedAt: string) => ({ projectPrefix, updatedAt });
 
-// Listed newest first, as the API does, with an archived project among them.
+// Listed newest first, as the API does.
 const FDM = project("FDM", "Zoo field day");
 const ACP = project("ACP", "Taskboard: agent control plane");
-const OLD = project("OLD", "Archived one", "archived");
 const IAGML = project("IAGML", "iagml site");
-const PROJECTS = [FDM, OLD, ACP, IAGML];
+const PROJECTS = [FDM, ACP, IAGML];
 
 const NO_ACTIVITY = new Map<string, number>();
 
 afterEach(() => vi.unstubAllGlobals());
 
 describe("defaultProject", () => {
-  // ACP's tickets changed last among the active projects; OLD's changed later
-  // still, but it is archived.
+  // ACP's tickets changed last; GONE's changed later still, but it is not
+  // listed (a deleted project never is).
   const activity = latestActivity([
     ticket("FDM", "2026-09-20T10:00:00Z"),
     ticket("ACP", "2026-09-22T10:00:00Z"),
     ticket("IAGML", "2026-09-21T10:00:00Z"),
-    ticket("OLD", "2026-09-23T10:00:00Z"),
+    ticket("GONE", "2026-09-23T10:00:00Z"),
   ]);
 
-  it("is the remembered project when it is still active", () => {
+  it("is the remembered project when it still exists", () => {
     expect(defaultProject(PROJECTS, "IAGML", activity)).toBe("IAGML");
     expect(defaultProject(PROJECTS, "FDM", NO_ACTIVITY)).toBe("FDM");
   });
@@ -49,23 +46,14 @@ describe("defaultProject", () => {
     expect(defaultProject(PROJECTS, "iagml", activity)).toBe("IAGML");
   });
 
-  it("is the active project whose tickets changed last, with nothing remembered", () => {
+  it("is the project whose tickets changed last, with nothing remembered", () => {
     expect(defaultProject(PROJECTS, null, activity)).toBe("ACP");
     expect(defaultProject(PROJECTS, "", activity)).toBe("ACP");
   });
 
-  it("passes over a remembered project that has since been archived", () => {
-    expect(defaultProject(PROJECTS, "OLD", activity)).toBe("ACP");
-    expect(defaultProject(PROJECTS, "old", NO_ACTIVITY)).toBe("IAGML");
-  });
-
   it("passes over a remembered project that has since been deleted", () => {
     expect(defaultProject(PROJECTS, "GONE", activity)).toBe("ACP");
-  });
-
-  it("never picks an archived project, however recent its tickets", () => {
-    const onlyOld = latestActivity([ticket("OLD", "2026-09-23T10:00:00Z")]);
-    expect(defaultProject(PROJECTS, null, onlyOld)).toBe("IAGML");
+    expect(defaultProject(PROJECTS, "gone", NO_ACTIVITY)).toBe("IAGML");
   });
 
   it("counts a project's latest ticket, whatever its status or order", () => {
@@ -85,16 +73,10 @@ describe("defaultProject", () => {
     expect(defaultProject(PROJECTS, null, tie)).toBe("IAGML");
   });
 
-  it("goes by name, ignoring case, when no active project has tickets", () => {
+  it("goes by name, ignoring case, when no project has tickets", () => {
     // "iagml site", "Taskboard: …", "Zoo field day": not FDM, the newest.
     expect(defaultProject(PROJECTS, null, NO_ACTIVITY)).toBe("IAGML");
     expect(defaultProject([project("B", "beta"), project("A", "Alpha"), project("C", "Gamma")], null, NO_ACTIVITY)).toBe("A");
-  });
-
-  it("is nothing when every project is archived", () => {
-    const archived = [project("OLD", "Old", "archived"), project("OLDER", "Older", "archived")];
-    expect(defaultProject(archived, "OLD", latestActivity([ticket("OLD", "2026-09-23T10:00:00Z")]))).toBe("");
-    expect(defaultProject(archived, null, NO_ACTIVITY)).toBe("");
   });
 
   it("is nothing when there are no projects", () => {
@@ -123,10 +105,10 @@ describe("latestActivity", () => {
   });
 });
 
-describe("activeProjects", () => {
-  it("leaves out archived projects and sorts the rest by name, ignoring case", () => {
-    expect(activeProjects(PROJECTS).map((p) => p.prefix)).toEqual(["IAGML", "ACP", "FDM"]);
-    expect(activeProjects([project("Z", "zeta"), project("A", "Alpha"), project("B", "beta")]).map((p) => p.prefix)).toEqual([
+describe("projectsByName", () => {
+  it("sorts every project by name, ignoring case", () => {
+    expect(projectsByName(PROJECTS).map((p) => p.prefix)).toEqual(["IAGML", "ACP", "FDM"]);
+    expect(projectsByName([project("Z", "zeta"), project("A", "Alpha"), project("B", "beta")]).map((p) => p.prefix)).toEqual([
       "A",
       "B",
       "Z",
@@ -135,14 +117,12 @@ describe("activeProjects", () => {
 
   it("orders equal names by prefix, and leaves the list it was given alone", () => {
     const given = [project("B", "Same"), project("A", "same")];
-    expect(activeProjects(given).map((p) => p.prefix)).toEqual(["A", "B"]);
+    expect(projectsByName(given).map((p) => p.prefix)).toEqual(["A", "B"]);
     expect(given.map((p) => p.prefix)).toEqual(["B", "A"]);
   });
 
-  it("is empty when every project is archived", () => {
-    expect(activeProjects([OLD])).toEqual([]);
-    expect(isArchived(OLD)).toBe(true);
-    expect(isArchived(ACP)).toBe(false);
+  it("is empty when there are no projects", () => {
+    expect(projectsByName([])).toEqual([]);
   });
 });
 
@@ -202,23 +182,18 @@ describe("the remembered project", () => {
 });
 
 describe("awaitingProject", () => {
-  const active = { status: "active" };
-  const archived = { status: "archived" };
-
   it("waits while the URL names no project and one will be picked", () => {
     expect(awaitingProject("", null)).toBe(true);
-    expect(awaitingProject("", [active])).toBe(true);
-    expect(awaitingProject("", [archived, active])).toBe(true);
+    expect(awaitingProject("", [ACP])).toBe(true);
   });
 
-  it("does not wait with no active projects, so the view shows its empty state", () => {
+  it("does not wait with no projects, so the view shows its empty state", () => {
     expect(awaitingProject("", [])).toBe(false);
-    expect(awaitingProject("", [archived])).toBe(false);
   });
 
   it("does not wait once a project is set", () => {
     expect(awaitingProject("ACP", null)).toBe(false);
-    expect(awaitingProject("ACP", [active])).toBe(false);
+    expect(awaitingProject("ACP", [ACP])).toBe(false);
   });
 });
 
@@ -229,20 +204,5 @@ describe("projectIconAndName", () => {
 
   it("has no leading space when there is no icon", () => {
     expect(projectIconAndName({ name: "Taskboard" })).toBe("Taskboard");
-  });
-});
-
-describe("projectLabel", () => {
-  it("joins icon and name with a space", () => {
-    expect(projectLabel({ icon: "🧭", name: "Taskboard", status: "active" })).toBe("🧭 Taskboard");
-  });
-
-  it("has no leading space when there is no icon", () => {
-    expect(projectLabel({ name: "Taskboard", status: "active" })).toBe("Taskboard");
-  });
-
-  it("appends (archived) for an archived project, after the icon and name", () => {
-    expect(projectLabel({ icon: "🧭", name: "Taskboard", status: "archived" })).toBe("🧭 Taskboard (archived)");
-    expect(projectLabel({ name: "Taskboard", status: "archived" })).toBe("Taskboard (archived)");
   });
 });

@@ -681,91 +681,61 @@ describe("the project a URL without one gets", () => {
   });
 });
 
-// Archived projects stay out of the way: never picked, and not offered in the
-// dropdown, which lists the active ones by name. A link to an archived one
-// still opens it.
-describe("archived projects and the project order", () => {
+// The dropdown lists every project by name, and the pick goes by the most
+// recent tickets. A deleted project is never listed, so it is never picked
+// or offered.
+describe("the project order and the pick", () => {
   const remember = (prefix: string) => globalThis.localStorage.setItem(LAST_PROJECT_KEY, prefix);
   const options = () => [...select("Project").options].map((o) => o.value);
 
   // Newest first, as the API lists them.
   beforeEach(() => {
-    projectList.mockResolvedValue([
-      project("ZED", "zed tools"),
-      project("OLD", "Archive me", "archived"),
-      project("BET", "Beta"),
-      project("ALP", "alpha"),
-    ]);
+    projectList.mockResolvedValue([project("ZED", "zed tools"), project("BET", "Beta"), project("ALP", "alpha")]);
   });
 
-  it("offers only the active projects, by name ignoring case", async () => {
+  it("offers every project, by name ignoring case", async () => {
     await mount("/?project=BET", true);
     expect(options()).toEqual(["ALP", "BET", "ZED"]);
     expect([...select("Project").options].map((o) => o.textContent)).toEqual(["alpha", "Beta", "zed tools"]);
   });
 
-  it("keeps an archived project a URL names, as an extra entry, without replacing it", async () => {
-    await mount("/kanban?project=OLD&status=todo&ticket=OLD-3", true, [touched("BET", "2026-09-23T10:00:00Z")]);
-    expect(search()).toBe("?project=OLD&status=todo&ticket=OLD-3");
-    expect(select("Project").value).toBe("OLD");
-    expect(options()).toEqual(["ALP", "BET", "ZED", "OLD"]);
-  });
-
-  it("labels a project without an icon by its name alone, archived or not", async () => {
+  it("labels a project with its icon and name, and one without an icon by its name alone", async () => {
     // The API leaves an empty icon out of the JSON altogether.
     const withoutIcon = (p: ReturnType<typeof project>) => {
       const json: Partial<typeof p> = { ...p };
       delete json.icon;
       return json;
     };
-    projectList.mockResolvedValue([
-      withoutIcon(project("ALP", "alpha")),
-      withoutIcon(project("OLD", "Archive me", "archived")),
-    ]);
-    await mount("/?project=OLD", true);
-    expect([...select("Project").options].map((o) => o.textContent)).toEqual(["alpha", "Archive me (archived)"]);
+    projectList.mockResolvedValue([withoutIcon(project("ALP", "alpha")), { ...project("BOX", "Boxes"), icon: "📦" }]);
+    await mount("/?project=box", true);
+    expect(select("Project").value).toBe("BOX");
+    expect([...select("Project").options].map((o) => o.textContent)).toEqual(["alpha", "📦 Boxes"]);
   });
 
-  it("labels the archived project's entry with its icon and name, marked archived, whatever the URL's case", async () => {
-    projectList.mockResolvedValue([
-      { ...project("OLD", "Archive me", "archived"), icon: "📦" },
-      project("ALP", "alpha"),
-    ]);
-    await mount("/?project=old", true);
-    expect(search()).toBe("?project=old");
-    expect(select("Project").value).toBe("OLD");
-    const labels = [...select("Project").options].map((o) => o.textContent);
-    expect(labels).toEqual(["alpha", "📦 Archive me (archived)"]);
-    expect(select("Project").selectedOptions[0].textContent).toBe("📦 Archive me (archived)");
-  });
-
-  it("drops the archived project from the list again once another is chosen", async () => {
-    await mount("/?project=OLD", true);
-    await act(async () => {
-      select("Project").value = "BET";
-      select("Project").dispatchEvent(new Event("change", { bubbles: true }));
-    });
-    expect(search()).toBe("?project=BET");
+  it("replaces a deleted project a URL names with the pick, rather than offering it", async () => {
+    await mount("/kanban?project=OLD&status=todo", true, [touched("BET", "2026-09-23T10:00:00Z")]);
+    expect(search()).toBe("?project=BET&status=todo");
     expect(options()).toEqual(["ALP", "BET", "ZED"]);
   });
 
-  it("is the active project whose tickets changed last, with nothing remembered", async () => {
+  it("is the project whose tickets changed last, with nothing remembered", async () => {
     await mount("/table", true, [
       touched("ALP", "2026-09-20T10:00:00Z"),
       touched("ZED", "2026-09-22T10:00:00Z"),
+      // A deleted project's tickets are never listed; if one were, it is not a pick.
       touched("OLD", "2026-09-23T10:00:00Z"),
     ]);
     expect(search()).toBe("?project=ZED");
   });
 
-  it("passes over a remembered project that has since been archived", async () => {
+  it("passes over a remembered project that has since been deleted", async () => {
     remember("OLD");
     await mount("/", true, [touched("BET", "2026-09-22T10:00:00Z")]);
     expect(search()).toBe("?project=BET");
   });
 
-  it("is the first active project by name when none has tickets", async () => {
-    // Not ZED, the newest, and not OLD, first by name but archived.
+  it("is the first project by name when none has tickets", async () => {
+    // Not ZED, the newest.
     await mount("/", true);
     expect(search()).toBe("?project=ALP");
   });
@@ -787,25 +757,12 @@ describe("archived projects and the project order", () => {
     expect(search()).toBe("?project=BET");
   });
 
-  it("picks nothing when every project is archived, and the bar says so", async () => {
-    projectList.mockResolvedValue([project("OLD", "Archive me", "archived")]);
-    remember("OLD");
-    await mount("/?status=todo", true, [touched("OLD", "2026-09-23T10:00:00Z")]);
+  it("drops a deleted project from the URL when no project is left", async () => {
+    projectList.mockResolvedValue([]);
+    remember("GONE");
+    await mount("/?project=GONE&status=todo", true, [touched("GONE", "2026-09-23T10:00:00Z")]);
     expect(search()).toBe("?status=todo");
-    expect([...select("Project").options].map((o) => o.textContent)).toEqual(["No active projects"]);
-  });
-
-  it("drops a deleted project from the URL when every project left is archived", async () => {
-    projectList.mockResolvedValue([project("OLD", "Archive me", "archived")]);
-    await mount("/?project=GONE&status=todo", true);
-    expect(search()).toBe("?status=todo");
-  });
-
-  it("still keeps an archived project a URL names when every project is archived", async () => {
-    projectList.mockResolvedValue([project("OLD", "Archive me", "archived")]);
-    await mount("/?project=OLD", true);
-    expect(search()).toBe("?project=OLD");
-    expect(select("Project").value).toBe("OLD");
+    expect([...select("Project").options].map((o) => o.textContent)).toEqual(["No projects"]);
   });
 });
 

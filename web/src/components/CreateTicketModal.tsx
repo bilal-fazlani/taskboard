@@ -4,7 +4,7 @@ import { api, type TicketWrite, type Project } from "../api/client";
 import ImageUploadStatus from "./ImageUploadStatus";
 import LabelPicker from "./LabelPicker";
 import { usePasteImages } from "../hooks/usePasteImages";
-import { activeProjects, projectLabel } from "../lib/defaultProject";
+import { projectIconAndName, projectsByName } from "../lib/defaultProject";
 import { actionErrorMessage } from "../lib/saveError";
 import { DEFAULT_STATUS } from "../lib/status";
 import type { Filters } from "../lib/filters";
@@ -45,21 +45,16 @@ export default function CreateTicketModal({
   const defaults = newTicketDefaults(filters, projects, epics);
   if (chosenProjectId === null && defaults.projectId !== "") setChosenProjectId(defaults.projectId);
   // Same offering as the filter bar's project dropdown (see defaultProject.ts):
-  // active projects only, sorted by name. With none, the placeholder mirrors
-  // ProjectSelect's rather than falling back to an archived project.
-  const activeProjectsList = activeProjects(projects);
-  // A project archived while the form is open (a live refresh brings the
+  // every project, sorted by name. With none, the placeholder mirrors
+  // ProjectSelect's.
+  const offeredProjects = projectsByName(projects);
+  // A project deleted while the form is open (a live refresh brings the
   // change in) is no longer offered, so the form drops it and waits for
   // another pick rather than creating the ticket there.
   const chosen = chosenProjectId ?? defaults.projectId;
-  const projectId = activeProjectsList.some((p) => p.id === chosen) ? chosen : "";
+  const projectId = offeredProjects.some((p) => p.id === chosen) ? chosen : "";
   const epicId = pickedEpicId ?? defaults.epicId;
-  const projectPlaceholder =
-    activeProjectsList.length === 0
-      ? projects.length
-        ? "No active projects"
-        : "No projects"
-      : "Select project…";
+  const projectPlaceholder = offeredProjects.length === 0 ? "No projects" : "Select project…";
   const projectEpics = epics && epics.projectId === projectId ? epics.epics : [];
   const dialogTitleId = useId();
   const projectFieldId = useId();
@@ -173,9 +168,9 @@ export default function CreateTicketModal({
                     {projectPlaceholder}
                   </option>
                 )}
-                {activeProjectsList.map((p) => (
+                {offeredProjects.map((p) => (
                   <option key={p.id} value={p.id}>
-                    {projectLabel(p)}
+                    {projectIconAndName(p)}
                   </option>
                 ))}
               </select>

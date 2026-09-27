@@ -182,12 +182,12 @@ describe("Epics project selector", () => {
     expect(mockApi.epics.list).toHaveBeenLastCalledWith("LDR");
   });
 
-  it("shows no epics and no pick with no active projects", async () => {
-    mockApi.projects.list.mockResolvedValue([project("OLD", "archived")]);
+  it("shows no epics and no pick with no projects", async () => {
+    mockApi.projects.list.mockResolvedValue([]);
     await mount("/epics");
     expect(params().get("project")).toBeNull();
     expect(mockApi.epics.list).not.toHaveBeenCalled();
-    expect(screen.getByText("No active projects")).toBeTruthy();
+    expect(screen.getByText("No projects")).toBeTruthy();
     expect(screen.queryByText("Loading epics…")).toBeNull();
   });
 });
@@ -211,19 +211,6 @@ describe("Epics New epic button", () => {
     expect(newEpic().getAttribute("title")).toBeNull();
     await act(async () => newEpic().click());
     expect(screen.getByRole("dialog").textContent).toContain("New epic");
-  });
-
-  it("is disabled on an archived project the URL keeps selected, naming it and epics", async () => {
-    mockApi.projects.list.mockResolvedValue([...PROJECTS, project("OLD", "archived")]);
-    await mount("/epics?project=OLD");
-    expect(params().get("project")).toBe("OLD");
-    await expectDisabled("OLD is archived. Unarchive it to add epics.");
-  });
-
-  it("is disabled when no project is active", async () => {
-    mockApi.projects.list.mockResolvedValue([project("OLD", "archived")]);
-    await mount("/epics");
-    await expectDisabled("Create a project to add epics.");
   });
 
   it("is disabled when there are no projects at all", async () => {

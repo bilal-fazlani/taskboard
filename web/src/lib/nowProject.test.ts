@@ -5,8 +5,8 @@ import { memoryStorage } from "../test/memoryStorage";
 
 afterEach(() => vi.unstubAllGlobals());
 
-const project = (prefix: string, name: string, status = "active") => ({ prefix, name, status });
-const PROJECTS = [project("LDR", "Leaderboard"), project("OLD", "Old", "archived"), project("ACP", "Control plane")];
+const project = (prefix: string, name: string) => ({ prefix, name });
+const PROJECTS = [project("LDR", "Leaderboard"), project("ACP", "Control plane")];
 
 describe("Now's remembered project", () => {
   it("is every project when nothing was picked", () => {
@@ -69,8 +69,7 @@ describe("restoredNowProject", () => {
     expect(restoredNowProject(PROJECTS, "ldr")).toBe("LDR");
   });
 
-  it("falls back to every project when the remembered one is archived or deleted", () => {
-    expect(restoredNowProject(PROJECTS, "OLD")).toBe("");
+  it("falls back to every project when the remembered one is deleted", () => {
     expect(restoredNowProject(PROJECTS, "GONE")).toBe("");
   });
 
