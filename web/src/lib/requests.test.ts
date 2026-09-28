@@ -1,14 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { TicketRequest } from "../api/client";
-import {
-  answerToast,
-  answerTone,
-  askedAgo,
-  collectorPhrase,
-  earlierRequests,
-  questionAnswer,
-  requestKindLabel,
-} from "./requests";
+import { answerToast, answerTone, askedAgo, collectorPhrase, earlierRequests, questionAnswer } from "./requests";
 
 function req(overrides: Partial<TicketRequest>): TicketRequest {
   return {
@@ -68,22 +60,24 @@ describe("toast and labels", () => {
     expect(answerToast("approval", "declined", undefined)).toBe("Declined. The agent that asked gets it on its next call.");
     expect(collectorPhrase({ role: "reviewer", model: "" })).toBe("The reviewer");
   });
-  it("names the types, keeping an unknown one's own name", () => {
-    expect(requestKindLabel("question")).toBe("Question");
-    expect(requestKindLabel("approval")).toBe("Approve");
-    expect(requestKindLabel("pick_file")).toBe("pick file");
-  });
   it("colours an answer by what it says", () => {
     expect(answerTone(req({ type: "approval", answer: "declined", answeredAt: "x" }))).toBe("declined");
     expect(answerTone(req({ type: "approval", answer: "approved", answeredAt: "x" }))).toBe("approved");
     expect(answerTone(req({ answer: "Round only", answeredAt: "x" }))).toBe("answer");
     expect(answerTone(req({}))).toBe("waiting");
   });
-  it("keeps a request closed by stopping work neutral, whatever its type", () => {
+  it("keeps a request closed by stopping work neutral, whatever its type, going by `stopped` and not the answer text", () => {
     // The server's models.StoppedAnswer, as it arrives.
     const stopped = "Not answered: the person stopped work on this ticket.";
-    expect(answerTone(req({ type: "approval", answer: stopped, answeredAt: "x" }))).toBe("closed");
-    expect(answerTone(req({ type: "question", answer: stopped, answeredAt: "x" }))).toBe("closed");
+    expect(answerTone(req({ type: "approval", answer: stopped, answeredAt: "x", stopped: true }))).toBe("closed");
+    expect(answerTone(req({ type: "question", answer: stopped, answeredAt: "x", stopped: true }))).toBe("closed");
+  });
+  it("pins that answerTone branches on `stopped`, not on matching the answer's text, even though the real server never sends one without the other", () => {
+    // The server always sets `stopped: true` alongside this exact text
+    // (models.StoppedAnswer), so this combination never arrives for real;
+    // it only isolates which of the two fields answerTone actually reads.
+    const looksStopped = "Not answered: the person stopped work on this ticket.";
+    expect(answerTone(req({ type: "question", answer: looksStopped, answeredAt: "x" }))).toBe("answer");
   });
   it("calls an approval approved or declined only for exactly those answers", () => {
     expect(answerTone(req({ type: "approval", answer: "yes", answeredAt: "x" }))).toBe("closed");

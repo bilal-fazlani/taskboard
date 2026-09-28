@@ -159,6 +159,11 @@ export interface TicketRequest {
   note?: string;
   createdAt: string;
   answeredAt?: string;
+  /** Whether the request closed because the person stopped work on its
+   * ticket, rather than being answered: `answer` is then the server's fixed
+   * sentence, neither approved, declined nor a real answer. Read this
+   * instead of comparing `answer` to that sentence. */
+  stopped?: boolean;
 }
 
 /** What the person sends to answer a request: see TicketRequest.answer. */

@@ -15,9 +15,9 @@ import {
   collectorPhrase,
   earlierRequests,
   questionAnswer,
-  requestKindLabel,
 } from "../lib/requests";
 import { actionErrorMessage } from "../lib/saveError";
+import { requestKind } from "../lib/waiting";
 import { VendorMark } from "./EntryCard";
 import { EntryFold } from "./EntryParts";
 
@@ -26,9 +26,18 @@ type AgentInfo = Pick<Agent, "id" | "role" | "model" | "provider">;
 /** How long the toast after an answer stays, unless dismissed. */
 export const TOAST_MS = 8000;
 
-/** What the server answers when a request was answered or closed before this answer: a 400, or a 404. */
-const REFUSED = /^API error (400|404)\b/;
-const ALREADY_ANSWERED ="This request was already answered. It is in Earlier requests.";
+/**
+ * A 400 from the server, on this route, is always someone else's answer
+ * arriving first: everything else AnswerRequest could refuse (a blank
+ * answer, an approval answered with neither approved nor declined) is
+ * something this page's own forms never send, so no other 400 reaches it.
+ */
+const ANSWERED_ELSEWHERE = /^API error 400\b/;
+const ALREADY_ANSWERED = "This request was already answered. It is in Earlier requests.";
+
+/** A 404 means the request itself is gone, not merely answered: nothing about it is in Earlier requests either. */
+const REQUEST_GONE = /^API error 404\b/;
+const NO_LONGER_EXISTS = "This request no longer exists.";
 
 /** Sends an answer and its note; rejects with the server's reason. */
 type Answer = (answer: string, note: string) => Promise<void>;
@@ -120,11 +129,19 @@ export default function RequestBlock({
     try {
       done = await api.requests.answer(request.id, { answer: text, ...(note.trim() ? { note: note.trim() } : {}) });
     } catch (err) {
-      // Refused: answered or closed elsewhere since the page last read it.
-      // Anything else (the network, say) leaves the form to try again.
-      if (!(err instanceof Error) || !REFUSED.test(err.message)) throw err;
+      // Refused: answered or closed elsewhere, or gone outright, since the
+      // page last read it. Anything else (the network, say) leaves the form
+      // to try again.
+      const refusal = !(err instanceof Error)
+        ? undefined
+        : ANSWERED_ELSEWHERE.test(err.message)
+          ? ALREADY_ANSWERED
+          : REQUEST_GONE.test(err.message)
+            ? NO_LONGER_EXISTS
+            : undefined;
+      if (!refusal) throw err;
       setRefused((prev) => ({ ...prev, [request.id]: true }));
-      say(ALREADY_ANSWERED);
+      say(refusal);
       onAnswered?.();
       reload();
       return;
@@ -222,7 +239,7 @@ function OpenRequest({
   onAnswer: Answer;
 }) {
   const now = useNow();
-  const kind = requestKindLabel(request.type);
+  const kind = requestKind(request.type);
   const who = agent ? `the ${agent.role}` : "an agent";
   return (
     <section
@@ -454,7 +471,7 @@ function EarlierRequest({ request }: { request: TicketRequest }) {
       data-testid="earlier-request"
       className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-baseline gap-2 rounded-md bg-slate-800/50 px-2.5 py-1.5 text-[12.5px]"
     >
-      <span className={`${KIND_TAG} text-slate-500`}>{requestKindLabel(request.type)}</span>
+      <span className={`${KIND_TAG} text-slate-500`}>{requestKind(request.type)}</span>
       <div className="min-w-0 space-y-0.5">
         <div
           data-testid="earlier-prompt"

@@ -85,8 +85,8 @@ func TestStopWorkClosesTheOpenRequest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !r.Answered() || r.Answer != StoppedAnswer || r.AnsweredBy != "bilal" {
-		t.Fatalf("request after the stop = %+v, want it closed with %q by bilal", r, StoppedAnswer)
+	if !r.Answered() || r.Answer != StoppedAnswer || r.AnsweredBy != "bilal" || !r.Stopped {
+		t.Fatalf("request after the stop = %+v, want it closed with %q by bilal, Stopped true", r, StoppedAnswer)
 	}
 	wantHistoryNote(t, f.s, f.ticket.ID, models.StatusNeedsUserInput, models.StatusTodo, "request "+reqID+" (approval) was closed unanswered")
 }

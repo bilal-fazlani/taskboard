@@ -39,6 +39,11 @@ const (
 // is closed with it. It means the ticket is no longer the asking agent's:
 // neither approved nor declined, and nothing is left to do on it but the
 // hand-off.
+//
+// TicketRequest.Stopped and AnsweredRequest.Stopped are both derived from
+// this constant at read time (r.Answer == StoppedAnswer, internal/db/requests.go),
+// not stored on the row: changing the sentence here unmarks every request
+// already closed by a stop unless those rows are migrated to match.
 const StoppedAnswer = "Not answered: the person stopped work on this ticket."
 
 // TicketRequest is an agent's request for user input on a ticket. A ticket
@@ -70,6 +75,11 @@ type TicketRequest struct {
 	Note       string     `json:"note,omitempty"`
 	CreatedAt  time.Time  `json:"createdAt"`
 	AnsweredAt *time.Time `json:"answeredAt,omitempty"`
+	// Stopped is whether the request closed because the person stopped work
+	// on its ticket (Answer is StoppedAnswer) rather than being answered.
+	// Read it instead of comparing Answer to StoppedAnswer: the same field,
+	// by the same name, is what AnsweredRequest carries to agents.
+	Stopped bool `json:"stopped,omitempty"`
 }
 
 // CreateUserInputRequest is an agent asking the person for user input on a
@@ -128,7 +138,7 @@ func (r TicketRequest) AsAnsweredRequest() AnsweredRequest {
 	if r.AnsweredAt != nil {
 		a.AnsweredAt = *r.AnsweredAt
 	}
-	if r.Answer == StoppedAnswer {
+	if r.Stopped {
 		a.Stopped = true
 	} else {
 		a.Answer = r.Answer

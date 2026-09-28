@@ -47,6 +47,7 @@ func scanRequest(row interface{ Scan(...any) error }) (models.TicketRequest, err
 		return r, fmt.Errorf("reading request %s's choices: %w", r.ID, err)
 	}
 	r.Answer, r.AnsweredBy, r.Note = answer.String, answeredBy.String, note.String
+	r.Stopped = r.Answer == models.StoppedAnswer
 	return r, nil
 }
 

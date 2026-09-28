@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { BrowserRouter } from "react-router-dom";
 import type { Agent, Project, Ticket, TicketRequest } from "../api/client";
+import { requestKind } from "../lib/waiting";
 
 // The ticket page's requests for user input, through the editor, with the API
 // mocked: no test reaches a real server.
@@ -402,15 +403,13 @@ describe("an open approval", () => {
     expect(screen.getByTestId("earlier-request").textContent).toContain("Declined by bilal");
   });
 
-  it("treats a request gone from the server (404) the same way", async () => {
+  it("says the request no longer exists, not that it's in Earlier requests, when the server has no record of it (404)", async () => {
     waitingOn(APPROVAL);
     mockApi.requests.answer.mockRejectedValue(new Error('API error 404: {"error":"request not found"}'));
     renderEditor();
     const block = await openRequest();
     fireEvent.click(within(block).getByRole("button", { name: "Decline" }));
-    expect((await screen.findByTestId("answer-toast")).textContent).toBe(
-      "This request was already answered. It is in Earlier requests.",
-    );
+    expect((await screen.findByTestId("answer-toast")).textContent).toBe("This request no longer exists.");
     expect(screen.queryByTestId("open-request")).toBeNull();
   });
 
@@ -429,12 +428,14 @@ describe("an open approval", () => {
 });
 
 describe("the block's form", () => {
-  it("follows the request's type, and says so for a type it can't answer yet", async () => {
+  it("follows the request's type, and says so for a type it can't answer yet, naming it as waiting.ts's requestKind does (the graph card's own label)", async () => {
     waitingOn({ ...QUESTION, type: "pick_file" });
     renderEditor();
     const block = await openRequest();
     expect(block.getAttribute("data-type")).toBe("pick_file");
-    expect(within(block).getByText(/can.t answer a .pick file. request yet/)).toBeTruthy();
+    expect(requestKind("pick_file")).toBe("Pick file");
+    expect(within(block).getByText(/can.t answer a .Pick file. request yet/)).toBeTruthy();
+    expect(within(block).getByText("Pick file")).toBeTruthy();
     expect(within(block).queryByRole("button")).toBeNull();
   });
 
@@ -469,10 +470,12 @@ describe("request history", () => {
     expect(within(rows[1]).queryByTestId("request-note")).toBeNull();
   });
 
-  it("shows a request closed by stopping work as closed, neither approved nor answered", async () => {
-    // The server's models.StoppedAnswer, word for word.
+  it("shows a request closed by stopping work as closed, neither approved nor answered, going by the server's `stopped` flag", async () => {
+    // The server's models.StoppedAnswer, word for word, with the `stopped`
+    // field the API sets alongside it (ACP-222): the page reads that, not
+    // the sentence, to tell a stop apart from a real answer.
     const stopped = "Not answered: the person stopped work on this ticket.";
-    const closedAt = { answer: stopped, answeredBy: "bilal", answeredAt: "2026-09-28T09:50:00Z" };
+    const closedAt = { answer: stopped, answeredBy: "bilal", answeredAt: "2026-09-28T09:50:00Z", stopped: true };
     waitingOn(undefined, [
       { ...APPROVAL, ...closedAt },
       { ...QUESTION, ...closedAt, createdAt: "2026-09-28T08:59:00Z" },

@@ -115,8 +115,8 @@ func TestAnswerRequestQuestionAcceptsFreeTextAndNormalisesAMatchingChoice(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !r.Answered() || r.Answer != "Land" || r.AnsweredBy != "Bilal" || r.Note != "" {
-		t.Fatalf("matched answer = %+v, want Land by Bilal with no note", r)
+	if !r.Answered() || r.Answer != "Land" || r.AnsweredBy != "Bilal" || r.Note != "" || r.Stopped {
+		t.Fatalf("matched answer = %+v, want Land by Bilal with no note, Stopped false", r)
 	}
 	got, _ := f.s.GetTicket(f.ticket.ID)
 	if got.Status != models.StatusInProgress || got.OpenRequest != nil || got.Agent == nil || got.Agent.ID != f.first.ID {

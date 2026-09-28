@@ -3,13 +3,6 @@
 
 import type { Agent, TicketRequest } from "../api/client";
 
-/** A request's type as its tag names it; a type this client doesn't know keeps its own name. */
-export function requestKindLabel(type: string): string {
-  if (type === "question") return "Question";
-  if (type === "approval") return "Approve";
-  return type.replace(/_/g, " ");
-}
-
 /**
  * What a question's form sends: the person's own words when they wrote any,
  * which win over a picked choice, else the choice. "" when there is neither,
@@ -48,13 +41,6 @@ export function collectorPhrase(agent: Pick<Agent, "role" | "model"> | undefined
   return agent.model ? `The ${role} (${agent.model})` : `The ${role}`;
 }
 
-/**
- * The answer a request is closed with when the person stops work on its
- * ticket, whatever its type: the server's models.StoppedAnswer, word for
- * word. Neither approved nor declined, and not the person's answer.
- */
-export const STOPPED_ANSWER = "Not answered: the person stopped work on this ticket.";
-
 /** The toast after an answer: what was sent, and which agent collects it. */
 export function answerToast(type: string, answer: string, agent: Pick<Agent, "role" | "model"> | undefined): string {
   const sent =
@@ -69,11 +55,12 @@ export function answerToast(type: string, answer: string, agent: Pick<Agent, "ro
 /**
  * How an earlier request's answer reads, and its colour. Only "approved" is
  * approved and only "declined" declined; an approval closed any other way,
- * and a request of either type closed by stopping work, is "closed".
+ * and a request of either type closed by stopping work (`stopped`), is
+ * "closed".
  */
 export function answerTone(r: TicketRequest): "approved" | "declined" | "answer" | "closed" | "waiting" {
   if (!r.answeredAt) return "waiting";
-  if (r.answer === STOPPED_ANSWER) return "closed";
+  if (r.stopped) return "closed";
   if (r.type === "approval") {
     if (r.answer === "approved") return "approved";
     if (r.answer === "declined") return "declined";
