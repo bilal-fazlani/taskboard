@@ -154,3 +154,34 @@ describe("api.documents", () => {
     );
   });
 });
+
+describe("requests for user input", () => {
+  it("answers a request with its note, leaving who answered to the server", async () => {
+    const answered = {
+      id: "r1",
+      ticketId: "t1",
+      agentId: "a1",
+      type: "approval",
+      prompt: "Land it?",
+      choices: [],
+      answer: "approved",
+      answeredBy: "bilal",
+      note: "after the rebase",
+      createdAt: "2026-09-28T09:00:00Z",
+      answeredAt: "2026-09-28T09:05:00Z",
+    };
+    const fetch = stubFetch(200, answered);
+    const got = await api.requests.answer("r1", { answer: "approved", note: "after the rebase" });
+    expect(got.note).toBe("after the rebase");
+    const [url, init] = fetch.mock.calls[0];
+    expect(url).toBe("/api/requests/r1/answer");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body)).toEqual({ answer: "approved", note: "after the rebase" });
+  });
+
+  it("reads a ticket's request history, and an empty one as []", async () => {
+    const fetch = stubFetch(200, null);
+    expect(await api.requests.list("ACP-19")).toEqual([]);
+    expect(fetch.mock.calls[0][0]).toBe("/api/tickets/ACP-19/requests");
+  });
+});

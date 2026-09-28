@@ -139,16 +139,31 @@ export type UserInputType = "approval" | "question";
 export interface TicketRequest {
   id: string;
   ticketId: string;
+  /** The agent that asked, and that collects the answer. */
   agentId: string;
-  type: UserInputType;
+  /** A type this client does not know yet is kept, not refused. */
+  type: UserInputType | string;
   prompt: string;
-  /** The answers offered; empty when the answer is free. */
+  /** For a question, suggested answers: the person may answer with any
+   * non-empty text instead, and one matching a choice, ignoring case, is
+   * stored as the choice is written. Empty when the answer is free. An
+   * approval's choices change nothing. */
   choices: string[];
+  /** A question's answer is the person's text (or the choice it matched);
+   * an approval's is always "approved" or "declined". Left out until answered. */
   answer?: string;
   /** Who answered: the local person today. */
   answeredBy?: string;
+  /** The person's optional note, sent with the answer of either type. */
+  note?: string;
   createdAt: string;
   answeredAt?: string;
+}
+
+/** What the person sends to answer a request: see TicketRequest.answer. */
+export interface RequestAnswer {
+  answer: string;
+  note?: string;
 }
 
 export interface Ticket {
@@ -649,6 +664,22 @@ export const api = {
     /** Leave a note as the person; the server names the person as its user. */
     createNote: (owner: EntryOwnerRef, note: NoteWrite) =>
       request<Entry>(entriesUrl(owner), { method: "POST", body: JSON.stringify(note) }),
+  },
+
+  requests: {
+    /** A ticket's requests for user input, answered or not, newest first. */
+    list: (ticketId: string) =>
+      request<TicketRequest[] | null>(`/api/tickets/${encodeURIComponent(ticketId)}/requests`).then((raw) => raw ?? []),
+    /** Answer as the person; the server records the local person as who answered. */
+    answer: (id: string, data: RequestAnswer) =>
+      request<TicketRequest>(`/api/requests/${encodeURIComponent(id)}/answer`, {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+  },
+
+  agents: {
+    get: (id: string) => request<AgentListItem>(`/api/agents/${encodeURIComponent(id)}`),
   },
 
   subtasks: {

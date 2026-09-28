@@ -19,6 +19,7 @@ import LabelPicker from "./LabelPicker";
 import RepoPicker from "./RepoPicker";
 import DependencyPicker, { KindPill, SurfacedFromPicker, TicketRefLabel } from "./DependencyPicker";
 import DeliverySection from "./DeliverySection";
+import RequestBlock from "./RequestBlock";
 import TicketEntries from "./TicketEntries";
 import EntryContextBox from "./EntryContextBox";
 import { useNavigate } from "react-router-dom";
@@ -291,6 +292,10 @@ export default function TicketEditor({
     else if (editOnOpen.opened && openDocId !== editOnOpen.id) setEditOnOpen(null);
   }
 
+  // Counts answers sent from the request block: each fetches the ticket
+  // again, so it shows back in progress without waiting for the live refresh.
+  const [answeredSeq, setAnsweredSeq] = useState(0);
+
   // The full ticket, fetched on open and again whenever the ticket the editor
   // was handed changes — which is how an edit made elsewhere, arriving as a
   // live refresh with a newer `updatedAt`, reaches the editor.
@@ -320,7 +325,7 @@ export default function TicketEditor({
     return () => {
       cancelled = true;
     };
-  }, [ticket.id, ticket.updatedAt, syncFrom]);
+  }, [ticket.id, ticket.updatedAt, answeredSeq, syncFrom]);
 
   // Move focus into the dialog on open and give it back on close.
   useEffect(() => {
@@ -720,7 +725,8 @@ export default function TicketEditor({
             aria-label="Ticket content"
             className="space-y-6 p-4 sm:p-6 lg:overflow-y-auto"
           >
-            {/* The open agent request block goes here, first in this column. */}
+            {/* First in this column: the open request for user input, then the earlier ones. */}
+            <RequestBlock ticket={detail} readOnly={deleted} onAnswered={() => setAnsweredSeq((n) => n + 1)} />
             <input
               aria-label="Title"
               value={title}
