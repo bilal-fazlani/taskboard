@@ -206,6 +206,8 @@ export default function TicketEditor({
 
   // Images pasted or dropped into the description's Write mode.
   const descriptionRef = useRef<HTMLTextAreaElement>(null);
+  // The Status select, where focus goes once Stop work has freed the ticket.
+  const statusRef = useRef<HTMLSelectElement>(null);
   const pasteImages = usePasteImages({
     owner: { ticketId: ticket.id },
     documents,
@@ -598,12 +600,15 @@ export default function TicketEditor({
 
   // Stop work frees the ticket at once. The ticket it answers with is shown
   // the way a live refresh would show it: filled in quietly, or offered by
-  // the notice while there are unsaved edits.
+  // the notice while there are unsaved edits. Held by, and with it the
+  // focused confirm, goes away, so focus moves to the Status select, which
+  // now says To do, rather than dropping to the page.
   const handleStopWork = async () => {
     clearActionError();
     try {
       const full = await api.tickets.stop(ticket.id);
       setDetail(full);
+      statusRef.current?.focus();
       if (!dirtyRef.current) {
         syncFrom(full);
         return;
@@ -941,6 +946,7 @@ export default function TicketEditor({
                     the select is disabled: only answering its request or
                     stopping the work moves it out. */}
                 <select
+                  ref={statusRef}
                   id={statusId}
                   value={status}
                   disabled={statusLocked}

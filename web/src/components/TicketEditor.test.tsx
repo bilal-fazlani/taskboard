@@ -2694,8 +2694,11 @@ describe("Held by and Stop work", () => {
     fireEvent.click(within(confirm).getByRole("button", { name: "Stop work" }));
     await waitFor(() => expect(heldBy()).toBeNull());
     expect(mockApi.tickets.stop).toHaveBeenCalledWith("t1");
-    expect((screen.getByLabelText("Status") as HTMLSelectElement).value).toBe("todo");
+    const status = screen.getByLabelText("Status") as HTMLSelectElement;
+    expect(status.value).toBe("todo");
     expect(screen.queryByRole("alertdialog", { name: "Confirm stop work" })).toBeNull();
+    // Focus moves to the Status select, not down to the page, as the confirm goes.
+    expect(document.activeElement).toBe(status);
   });
 
   it("goes away when a live change frees the ticket elsewhere", async () => {
