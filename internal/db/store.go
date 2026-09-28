@@ -819,7 +819,9 @@ func (s *Store) CreateTicket(req models.CreateTicketRequest) (*models.Ticket, er
 // UpdateTicket applies the fields req sets and leaves the rest alone. A change
 // of status writes a row of status history, with req.Note, in the same
 // transaction; opts can add rules for that change (see
-// RequireNoteLeavingReview). req.AppendDescription is joined onto the
+// RequireNoteLeavingReview). A status change out of needs_user_input while
+// the ticket's request is open is refused with an ErrTicketWaiting, and the
+// update writes nothing. req.AppendDescription is joined onto the
 // description read inside the transaction (see models.AppendToDescription).
 func (s *Store) UpdateTicket(id string, req models.UpdateTicketRequest, opts ...WriteOption) (*models.Ticket, error) {
 	if req.AppendDescription != nil {
@@ -897,6 +899,9 @@ func (s *Store) UpdateTicket(id string, req models.UpdateTicketRequest, opts ...
 			return nil, invalidStatus(*req.Status)
 		}
 		t.Status = *req.Status
+	}
+	if err := checkNotWaiting(tx, id, fromStatus, t.Status); err != nil {
+		return nil, err
 	}
 	if err := collectWriteOptions(opts).checkStatusChange(fromStatus, t.Status, req.Note); err != nil {
 		return nil, err
@@ -1009,7 +1014,8 @@ func (s *Store) UpdateTicket(id string, req models.UpdateTicketRequest, opts ...
 // returns (nil, nil) for an unknown id. A move that changes the status writes
 // a row of status history, with req.Note, in the same transaction; a move
 // within a column writes none. opts can add rules for the change (see
-// RequireNoteLeavingReview).
+// RequireNoteLeavingReview). A move out of needs_user_input while the
+// ticket's request is open is refused with an ErrTicketWaiting.
 func (s *Store) MoveTicket(id string, req models.MoveTicketRequest, opts ...WriteOption) (*models.Ticket, error) {
 	if !validStatus(req.Status) {
 		return nil, invalidStatus(req.Status)
@@ -1027,6 +1033,9 @@ func (s *Store) MoveTicket(id string, req models.MoveTicketRequest, opts ...Writ
 	}
 	if !found {
 		return nil, nil
+	}
+	if err := checkNotWaiting(tx, id, fromStatus, req.Status); err != nil {
+		return nil, err
 	}
 	if err := collectWriteOptions(opts).checkStatusChange(fromStatus, req.Status, req.Note); err != nil {
 		return nil, err

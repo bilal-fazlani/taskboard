@@ -55,7 +55,7 @@ func (o writeOptions) checkStatusChange(from, to, note string) error {
 // validStatus reports whether status is one of models.Statuses, the statuses
 // a write may set. models.StatusNeedsUserInput is not among them: only a
 // request for user input (CreateRequest) puts a ticket there, and only its
-// answer takes it out. It gates writes (CreateTicket, UpdateTicket,
+// answer or a stop takes it out (checkNotWaiting). It gates writes (CreateTicket, UpdateTicket,
 // MoveTicket): a row already holding some other value, from before this
 // check existed, must still be readable, so no path that reads a ticket's
 // own stored status calls it. A list's status filter takes every known

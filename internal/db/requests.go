@@ -80,6 +80,49 @@ func openRequestOn(q dbtx, ticketID string) (*models.TicketRequest, error) {
 	return &r, nil
 }
 
+// ErrTicketWaiting is a move or status change refused because it would take
+// a ticket out of needs_user_input while its request for user input is open
+// (checkNotWaiting). It names the ticket and the request, and the two ways
+// out, both the person's: answering the request on the ticket page, or
+// stopping the work there. It is also an ErrInvalidInput, so a surface that
+// knows no better reports it as the caller's mistake; the HTTP layer
+// recognizes it ahead of that and answers 409 instead.
+type ErrTicketWaiting struct {
+	Ticket  string
+	Request string
+	msg     string
+}
+
+func (e *ErrTicketWaiting) Error() string { return e.msg }
+
+// Unwrap makes errors.As find an ErrInvalidInput with the same message.
+func (e *ErrTicketWaiting) Unwrap() error { return &ErrInvalidInput{Msg: e.msg} }
+
+// checkNotWaiting refuses a status change from from to to, inside q's
+// transaction, with an ErrTicketWaiting when it takes the ticket out of
+// needs_user_input while the ticket's request is open: needs_user_input
+// holds exactly while a request is open, and only the person lifts it, by
+// answering (AnswerRequest) or stopping the work (StopWork), which move the
+// ticket themselves rather than through here. A waiting ticket with no open
+// request, which that rule never leaves behind, may move.
+func checkNotWaiting(q dbtx, ticketID, from, to string) error {
+	if from != models.StatusNeedsUserInput || to == from {
+		return nil
+	}
+	open, err := openRequestOn(q, ticketID)
+	if err != nil || open == nil {
+		return err
+	}
+	key, err := ticketKey(q, ticketID)
+	if err != nil {
+		return err
+	}
+	return &ErrTicketWaiting{Ticket: key, Request: open.ID, msg: fmt.Sprintf(
+		"ticket %s waits on the person: its request %s (%s) is open, so it cannot be moved out of %s. "+
+			"Only the person takes it out, by answering the request on the ticket page, or by stopping the work there (Stop work)",
+		key, open.ID, open.Type, models.StatusNeedsUserInput)}
+}
+
 // ListRequests returns a ticket's requests for user input, newest first: its
 // whole history, answered and unanswered alike. ticketID is a resolved
 // ticket id, not a display key.

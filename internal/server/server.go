@@ -445,12 +445,15 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 // writeStoreError maps a ticket held by another live session (db.ErrTicketHeld),
 // a start refused because the ticket is done (db.ErrTicketDone), and an
 // agent's write on work the person stopped (db.ErrStopped) to 409, a
-// caller's bad input to 400, and everything else to 500.
+// caller's bad input to 400, and everything else to 500. A move out of
+// needs_user_input while the request is open (db.ErrTicketWaiting) is a 409
+// too.
 func writeStoreError(w http.ResponseWriter, err error) {
 	var held *db.ErrTicketHeld
 	var done *db.ErrTicketDone
 	var stopped *db.ErrStopped
-	if errors.As(err, &held) || errors.As(err, &done) || errors.As(err, &stopped) {
+	var waiting *db.ErrTicketWaiting
+	if errors.As(err, &held) || errors.As(err, &done) || errors.As(err, &stopped) || errors.As(err, &waiting) {
 		writeError(w, http.StatusConflict, err.Error())
 		return
 	}

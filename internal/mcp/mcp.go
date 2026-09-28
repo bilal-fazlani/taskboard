@@ -1040,6 +1040,11 @@ const noteParamDescription = "Why the status is changing, saved with the change 
 	"Required when moving a ticket out of agent_review: say why it is leaving review, either that it was approved and landed, " +
 	"or the review findings it is being sent back to fix. Optional for every other change; ignored when the status does not change."
 
+// waitingHelp tells move_ticket and update_ticket callers that a waiting
+// ticket stays put: only the person lifts the wait.
+const waitingHelp = " A ticket in needs_user_input cannot be moved out while its request is open, and the call is refused: " +
+	"only the person takes it out, by answering the request on the ticket page or stopping the work there (Stop work)."
+
 // The help for a project's two text fields: the description says what the
 // project is, the agent instructions how to work on it.
 const (
@@ -1403,7 +1408,7 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 		},
 		{
 			Name: "update_ticket",
-			Description: "Update ticket properties. Changing the status out of agent_review requires a note. " +
+			Description: "Update ticket properties. Changing the status out of agent_review requires a note." + waitingHelp + " " +
 				"To add a line or paragraph to the description, pass appendDescription rather than resending the whole description. " +
 				"To record the branch, worktree, pull request or landed commits, pass delivery." +
 				ticketImageRefsHelp +
@@ -1448,7 +1453,7 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 		},
 		{
 			Name: "move_ticket",
-			Description: "Move ticket to a different status column. Moving it out of agent_review requires a note." +
+			Description: "Move ticket to a different status column. Moving it out of agent_review requires a note." + waitingHelp +
 				shortAnswerHelp(ticketHolds, changedHelp, ticketWhole),
 			InputSchema: jsonSchema{
 				Type: "object",

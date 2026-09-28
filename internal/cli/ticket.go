@@ -171,6 +171,7 @@ func ticketCommands() *cobra.Command {
 	moveCmd := &cobra.Command{
 		Use:   "move [id-or-key]",
 		Short: "Move ticket to different status, by id or display key (e.g. BILL-2)",
+		Long:  "Move a ticket, by id or display key (e.g. BILL-2, case-insensitive), to the end of another status column.\n\n" + waitingStatusHelp,
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			store, err := openStore()
@@ -259,6 +260,7 @@ func ticketCommands() *cobra.Command {
 		Use:   "update [id-or-key]",
 		Short: "Update ticket fields, by id or display key (e.g. BILL-2)",
 		Long: "Update ticket fields, identified by id or display key (e.g. BILL-2, case-insensitive).\n\n" +
+			waitingStatusHelp + "\n\n" +
 			"Omitting a flag leaves that field untouched. Passing --repo, --labels " +
 			"or --depends-on replaces the existing set, so passing one with an empty " +
 			"value clears it. --label is accepted as an alias for --labels, matching " +
@@ -707,6 +709,12 @@ func formatTicketDetail(t models.Ticket) string {
 }
 
 const noteFlagUsage = "why the status changed, saved with the change in the ticket's history (optional; ignored when the status does not change)"
+
+// waitingStatusHelp is the rule ticket move and ticket update --status share
+// for a ticket that waits on the person.
+const waitingStatusHelp = "A ticket in needs_user_input cannot be moved out while its request is open, " +
+	"and the command is refused: only the person takes it out, by answering the request " +
+	"(on the ticket page, or with 'request answer') or by stopping the work ('ticket stop')."
 
 // formatHandOff joins where the work stopped and the next step into the one
 // hand-off entry `ticket release` gives the ticket back with.
