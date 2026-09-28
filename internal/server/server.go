@@ -215,6 +215,7 @@ func (s *Server) setupRoutes(webFS fs.FS) {
 			r.Post("/{id}/entries", s.createEntry(entryOnTicket))
 			r.Post("/{id}/start", s.startTicket)
 			r.Post("/{id}/release", s.releaseTicket)
+			r.Post("/{id}/stop", s.stopWork)
 			r.Post("/{id}/requests", s.createRequest)
 			r.Get("/{id}/requests", s.listTicketRequests)
 		})
@@ -442,10 +443,12 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 }
 
 // writeStoreError maps a ticket held by another live session (db.ErrTicketHeld)
-// to 409, a caller's bad input to 400, and everything else to 500.
+// and an agent's write on work the person stopped (db.ErrStopped) to 409, a
+// caller's bad input to 400, and everything else to 500.
 func writeStoreError(w http.ResponseWriter, err error) {
 	var held *db.ErrTicketHeld
-	if errors.As(err, &held) {
+	var stopped *db.ErrStopped
+	if errors.As(err, &held) || errors.As(err, &stopped) {
 		writeError(w, http.StatusConflict, err.Error())
 		return
 	}

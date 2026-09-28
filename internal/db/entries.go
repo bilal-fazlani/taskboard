@@ -153,7 +153,8 @@ func agentExists(q dbtx, id, what string) error {
 // Replaces names an earlier entry of the same type on the same owner that
 // this one replaces; each entry is replaced at most once. Anything else
 // wrong is an ErrInvalidInput and writes nothing. An agent's entry touches
-// the agent.
+// the agent. On a ticket where the person stopped the agent's session's work
+// (StopWork), only its hand-off is accepted; anything else is an ErrStopped.
 func (s *Store) CreateEntry(req models.CreateEntryRequest) (*models.Entry, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -212,6 +213,13 @@ func createEntry(q dbtx, req models.CreateEntryRequest, now time.Time) (string, 
 	if e.AgentID != "" {
 		if err := agentExists(q, e.AgentID, "agentId"); err != nil {
 			return "", err
+		}
+		// The person stopped this agent's session's work on the ticket: of
+		// its entries there, only its hand-off is still accepted.
+		if e.TicketID != "" && e.Type != models.EntryHandOff {
+			if err := checkNotStopped(q, e.TicketID, e.AgentID); err != nil {
+				return "", err
+			}
 		}
 	}
 	if e.About != "" {
@@ -354,7 +362,8 @@ func (s *Store) GetEntry(id string) (*models.Entry, error) {
 // longer open. It answers with the note. Only an open note can be handled
 // (models.Entry.Open), and only once; an unknown note or agent, or a note
 // already handled or replaced by a revised one, is an ErrInvalidInput and
-// changes nothing. It touches the agent.
+// changes nothing; so is a note on a ticket where the person stopped the
+// agent's session's work (an ErrStopped). It touches the agent.
 func (s *Store) MarkNoteHandled(noteID, agentID string) (*models.Entry, error) {
 	noteID, agentID = strings.TrimSpace(noteID), strings.TrimSpace(agentID)
 	tx, err := s.db.Begin()
@@ -383,6 +392,11 @@ func (s *Store) MarkNoteHandled(noteID, agentID string) (*models.Entry, error) {
 	}
 	if note.ReplacedBy != "" {
 		return nil, invalidInput("note %q is replaced by %q, so it is not open: handle the note that replaced it", noteID, note.ReplacedBy)
+	}
+	if note.TicketID != "" {
+		if err := checkNotStopped(tx, note.TicketID, agentID); err != nil {
+			return nil, err
+		}
 	}
 	now := time.Now().UTC()
 	if _, err := tx.Exec(`UPDATE entries SET handled_by = ?, handled_at = ? WHERE id = ? AND handled_at IS NULL`,

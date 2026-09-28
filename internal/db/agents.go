@@ -2,6 +2,7 @@ package db
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -367,6 +368,10 @@ func (e *ErrTicketHeld) Unwrap() error { return &ErrInvalidInput{Msg: e.msg} }
 // history, even when the status does not change, whose note names both
 // agents and the ticket's latest hand-off; the answer carries the agent it
 // was taken from and that hand-off.
+//
+// A claim is how a session the person stopped (StopWork) takes the ticket
+// up again: it clears that session's stops on the ticket, so its writes are
+// accepted once more.
 func (s *Store) ClaimTicket(ticketID, agentID string) (*models.Claim, error) {
 	agentID = strings.TrimSpace(agentID)
 	tx, err := s.db.Begin()
@@ -434,6 +439,9 @@ func (s *Store) ClaimTicket(ticketID, agentID string) (*models.Claim, error) {
 	if _, err := tx.Exec(`UPDATE tickets SET agent_id = ?, updated_at = ? WHERE id = ?`, agentID, stamp(now), id); err != nil {
 		return nil, fmt.Errorf("claiming ticket: %w", err)
 	}
+	if err := forgetStops(tx, id, claimer.SessionID); err != nil {
+		return nil, err
+	}
 	to := models.StatusInProgress
 	if status == models.StatusNeedsUserInput || status == models.StatusAgentReview {
 		to = status
@@ -464,6 +472,11 @@ func (s *Store) ClaimTicket(ticketID, agentID string) (*models.Claim, error) {
 // one while the ticket waits on the person. One by an agent outside the
 // holder's session is refused with an ErrTicketHeld. Nothing is written
 // when it is refused.
+//
+// Once the person has stopped the work (StopWork), the stopped session's
+// hand-off is still accepted: it writes the entry and changes nothing else,
+// since the ticket is no longer its own. Finishing is refused with an
+// ErrStopped.
 func (s *Store) ReleaseTicket(ticketID string, req models.ReleaseTicketRequest) (*models.Ticket, error) {
 	agentID := strings.TrimSpace(req.AgentID)
 	outcome := strings.TrimSpace(req.Outcome)
@@ -505,6 +518,21 @@ func (s *Store) ReleaseTicket(ticketID string, req models.ReleaseTicketRequest) 
 	now := time.Now().UTC()
 	if err := touchAgent(tx, agentID, now); err != nil {
 		return nil, err
+	}
+	if err := checkNotStopped(tx, id, agentID); err != nil {
+		var stopped *ErrStopped
+		if !errors.As(err, &stopped) || outcome != models.ReleaseGiveBack {
+			return nil, err
+		}
+		if _, err := createEntry(tx, models.CreateEntryRequest{
+			EntryOwner: models.EntryOwner{TicketID: id}, Type: entryType, Text: text, AgentID: agentID,
+		}, now); err != nil {
+			return nil, err
+		}
+		if err := tx.Commit(); err != nil {
+			return nil, fmt.Errorf("committing the hand-off: %w", err)
+		}
+		return s.GetTicket(id)
 	}
 	status, holder, err := ticketHolding(tx, id)
 	if err != nil {

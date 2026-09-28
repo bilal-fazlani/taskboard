@@ -106,3 +106,23 @@ func (s *Server) releaseTicket(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, t)
 }
+
+// stopWork answers POST /api/tickets/{id}/stop: the person stopping the work
+// an agent does on the ticket. It is the person's route, never an agent's
+// (agents give work back with release), so it takes no body: who stopped it
+// is the local person (localPerson, entries.go), as with an answer. It
+// answers with the ticket, freed and back in todo. An unknown ticket is a
+// 404; one no agent holds is a 400.
+func (s *Server) stopWork(w http.ResponseWriter, r *http.Request) {
+	id, err := s.store.ResolveTicketID(chi.URLParam(r, "id"))
+	if err != nil {
+		writeLookupError(w, err)
+		return
+	}
+	t, err := s.store.StopWork(id, localPerson())
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, t)
+}

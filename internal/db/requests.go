@@ -108,7 +108,8 @@ func (s *Store) ListRequests(ticketID string) ([]models.TicketRequest, error) {
 // second one while the first is unanswered is refused. The ticket must be
 // held by an agent, though not necessarily the one asking: an orchestrator
 // may ask for approval of the work its implementer holds. It touches the
-// agent. Anything wrong is an ErrInvalidInput and writes nothing.
+// agent. Anything wrong is an ErrInvalidInput and writes nothing; an agent
+// whose session's work on the ticket the person stopped gets an ErrStopped.
 func (s *Store) CreateRequest(req models.CreateUserInputRequest) (string, error) {
 	typ := strings.TrimSpace(req.Type)
 	prompt := strings.TrimSpace(req.Prompt)
@@ -144,6 +145,9 @@ func (s *Store) CreateRequest(req models.CreateUserInputRequest) (string, error)
 	}
 	now := time.Now().UTC()
 	if err := touchAgent(tx, agentID, now); err != nil {
+		return "", err
+	}
+	if err := checkNotStopped(tx, ticketID, agentID); err != nil {
 		return "", err
 	}
 	if open, err := openRequestOn(tx, ticketID); err != nil {

@@ -483,6 +483,33 @@ func ticketCommands() *cobra.Command {
 	releaseCmd.Flags().StringVar(&releaseProof, "proof", "", "what was verified, how, and the result, to finish the ticket")
 	releaseCmd.Flags().BoolVar(&releaseJSON, "json", false, "print the released ticket as JSON instead of readable text")
 
+	var stopJSON bool
+	stopCmd := &cobra.Command{
+		Use:   "stop [id-or-key]",
+		Short: "Stop the work an agent does on a ticket, as the person running this shell",
+		Long: "Stop the work an agent does on a ticket, live or stale: the agent is cleared and the ticket goes back " +
+			"to todo at once, recorded as stopped by the local user (the same default author `entry add` uses). " +
+			"This is the person's own command; agents give work back with `ticket release`. The agent is not asked: " +
+			"its next write on the ticket is refused as stopped by the person, all but its hand-off.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			store, err := openStore()
+			if err != nil {
+				return err
+			}
+			t, err := store.StopWork(args[0], defaultAuthor())
+			if err != nil {
+				return err
+			}
+			if stopJSON {
+				return encodeJSON(cmd.OutOrStdout(), t)
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "Stopped work on %s: now %s\n", t.DisplayKey(), t.Status)
+			return nil
+		},
+	}
+	stopCmd.Flags().BoolVar(&stopJSON, "json", false, "print the stopped ticket as JSON instead of readable text")
+
 	var askAgent, askType, askPrompt string
 	var askChoices []string
 	var askJSON bool
@@ -527,7 +554,7 @@ func ticketCommands() *cobra.Command {
 	askCmd.Flags().StringArrayVar(&askChoices, "choice", nil, "a suggested answer for a question (repeatable), which the person may still answer freely instead; changes nothing for an approval")
 	askCmd.Flags().BoolVar(&askJSON, "json", false, "print the new request as JSON instead of readable text")
 
-	cmd.AddCommand(listCmd, getCmd, createCmd, moveCmd, deleteCmd, updateCmd, historyCmd, startCmd, releaseCmd, askCmd,
+	cmd.AddCommand(listCmd, getCmd, createCmd, moveCmd, deleteCmd, updateCmd, historyCmd, startCmd, releaseCmd, stopCmd, askCmd,
 		findByCommitCommand(), subtaskCommands())
 	return cmd
 }
