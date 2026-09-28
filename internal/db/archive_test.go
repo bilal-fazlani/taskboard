@@ -82,7 +82,7 @@ func seedArchive(t *testing.T, s *Store) archiveFixture {
 	if f.epicDoc, err = s.CreateDocument(models.CreateDocumentRequest{EpicID: f.epic.ID, Name: "Decisions", Content: "needle"}); err != nil {
 		t.Fatal(err)
 	}
-	appendEntry(t, s, "GONE", "Bilal", "gone entry")
+	mustCreateEntry(t, s, personsProjectDecision("GONE", "gone entry"))
 	return f
 }
 
@@ -271,12 +271,12 @@ func TestDeletedProjectIsGoneFromEveryRead(t *testing.T) {
 		t.Fatalf("ReferencedImage = %+v, %v; want nil, nil", img, err)
 	}
 
-	// Subtasks, journal, Now, activity, labels.
+	// Subtasks, project entries, Now, activity, labels.
 	if st, err := s.GetSubtask(f.subtask.ID); err != nil || st != nil {
 		t.Fatalf("GetSubtask = %+v, %v; want nil, nil", st, err)
 	}
-	_, err = s.ListJournal("GONE", "", JournalDefaultLimit)
-	wantNotFound(t, "ListJournal", err)
+	_, err = s.ListEntries(models.EntryOwner{ProjectID: "GONE"}, models.EntryFilter{}, "", EntryDefaultLimit)
+	wantNotFound(t, "ListEntries", err)
 	_, err = s.ListActivity("GONE", nil, "", ActivityDefaultLimit)
 	wantNotFound(t, "ListActivity", err)
 	now, err := s.Now("", time.Now())
@@ -419,8 +419,8 @@ func TestWritesToDeletedProjectAreNotFound(t *testing.T) {
 	_, err = s.DeleteDocumentReportingUse(f.image.ID)
 	wantNotFound(t, "DeleteDocumentReportingUse", err)
 
-	_, err = s.AppendJournalEntry("GONE", models.AppendJournalEntryRequest{Author: "Bilal", Text: "more"})
-	wantNotFound(t, "AppendJournalEntry", err)
+	_, err = s.CreateEntry(personsProjectDecision("GONE", "more"))
+	wantNotFound(t, "CreateEntry", err)
 
 	wantSameRows(t, "the refused writes", before, rowCounts(t, s))
 	var title, docContent string

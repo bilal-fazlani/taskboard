@@ -11,7 +11,7 @@ import (
 )
 
 // archiveSeed is a project GONE with a ticket, an epic, a document, a
-// subtask and a journal entry, and a project KEEP whose ticket depends on
+// subtask and a project entry, and a project KEEP whose ticket depends on
 // GONE's and shares its label.
 type archiveSeed struct {
 	gone, keep *models.Project
@@ -52,7 +52,8 @@ func seedArchiveHTTP(t *testing.T, store *db.Store) archiveSeed {
 	if f.subtask, err = store.AddSubtask(f.g1.ID, models.CreateSubtaskRequest{Title: "Step"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.AppendJournalEntry("GONE", models.AppendJournalEntryRequest{Author: "Bilal", Text: "entry"}); err != nil {
+	if _, err := store.CreateEntry(models.CreateEntryRequest{EntryOwner: models.EntryOwner{ProjectID: "GONE"},
+		Type: models.EntryDecision, Text: "entry", AuthorName: "Bilal", Source: models.DecisionSourcePerson}); err != nil {
 		t.Fatal(err)
 	}
 	return f
@@ -89,7 +90,7 @@ func TestDeletedProjectIsGoneFromTheAPI(t *testing.T) {
 	}
 	for _, url := range []string{
 		base + "/projects/" + f.gone.ID,
-		base + "/projects/GONE/journal",
+		base + "/projects/GONE/entries",
 		base + "/projects/GONE/activity",
 		base + "/tickets/" + f.g1.ID,
 		base + "/tickets/" + f.g1.ID + "/history",
@@ -128,7 +129,7 @@ func TestDeletedProjectIsGoneFromTheAPI(t *testing.T) {
 	// Writes.
 	for _, w := range []struct{ method, url, body string }{
 		{http.MethodPut, base + "/projects/" + f.gone.ID, `{"name":"Back"}`},
-		{http.MethodPost, base + "/projects/GONE/journal", `{"author":"Bilal","text":"more"}`},
+		{http.MethodPost, base + "/projects/GONE/entries", `{"type":"note","text":"more"}`},
 		{http.MethodPut, base + "/tickets/" + f.g1.ID, `{"title":"Changed"}`},
 		{http.MethodPost, base + "/tickets/" + f.g1.ID + "/move", `{"status":"done"}`},
 		{http.MethodPost, base + "/tickets/" + f.g1.ID + "/subtasks", `{"title":"More"}`},

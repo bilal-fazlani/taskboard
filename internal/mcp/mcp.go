@@ -318,11 +318,6 @@ func (s *MCPServer) callToolCtx(ctx context.Context, name string, args json.RawM
 		if err != nil {
 			return nil, err
 		}
-		journal, err := s.store.ListJournal(p.ID, "", db.JournalPreviewLimit)
-		if err != nil {
-			return nil, err
-		}
-		p.Journal = &journal
 		return p, nil
 
 	case "create_project":
@@ -377,20 +372,6 @@ func (s *MCPServer) callToolCtx(ctx context.Context, name string, args json.RawM
 			return nil, err
 		}
 		return map[string]bool{"deleted": true}, s.store.DeleteProject(projectID)
-
-	case "append_project_journal":
-		var a appendJournalArgs
-		if err := decodeArgs(args, &a); err != nil {
-			return nil, err
-		}
-		return s.appendProjectJournal(a)
-
-	case "list_project_journal":
-		var a listJournalArgs
-		if err := decodeArgs(args, &a); err != nil {
-			return nil, err
-		}
-		return s.listProjectJournal(a)
 
 	case "list_tickets":
 		var a listTicketsArgs
@@ -861,7 +842,7 @@ func (a idOrKeyArg) ref() string {
 
 // projectRefArg is the project-scoping argument every project-scoped tool
 // takes: a project id or prefix under projectId, the name every ticket,
-// epic and journal entry's own JSON already carries that value under, or,
+// epic and entry's own JSON already carries that value under, or,
 // under the alias project, the exact same value (ACP-184: update_epic,
 // delete_epic and the document tools named it project while every other
 // project-scoped tool named it projectId, so an agent had to guess which
@@ -1060,7 +1041,7 @@ const noteParamDescription = "Why the status is changing, saved with the change 
 // project is, the agent instructions how to work on it.
 const (
 	projectDescriptionHelp = "What the project is: its goals, scope and context. Not how to work on it; that goes in agentInstructions. " +
-		"Not running notes or a log of what happened; append those to the project's journal with append_project_journal."
+		"Not running notes or a log of what happened; record decisions and learnings as the project's entries with write_entry."
 	projectAgentInstructionsHelp = "Agent instructions: how agents should work on this project's tickets (for example branches, review, " +
 		"verify commands, commit style). get_project returns them; the board never acts on them."
 )
@@ -1182,8 +1163,7 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 			Name: "get_project",
 			Description: "Get detailed project information by ID, including its full description (list_projects returns only a short preview) " +
 				"and its agentInstructions: how agents should work on the project's tickets. " +
-				"Before working on a project's tickets, read its agent instructions and follow them. The board itself never acts on them. " +
-				getProjectJournalHelp,
+				"Before working on a project's tickets, read its agent instructions and follow them. The board itself never acts on them.",
 			InputSchema: jsonSchema{
 				Type:       "object",
 				Properties: idOrKeyProps("Project ID or prefix (case-insensitive)."),
@@ -1236,8 +1216,6 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 				Properties: idOrKeyProps("Project ID or prefix (case-insensitive)."),
 			},
 		},
-		journalToolDefs[0],
-		journalToolDefs[1],
 		// --- Epics (project-scoped grouping of tickets) ---
 		{
 			Name: "list_epics",

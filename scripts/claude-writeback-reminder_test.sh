@@ -125,7 +125,7 @@ for run_parser in "${parsers[@]}"; do
   f=$(transcript board "$(tool list_projects '{}')" "$(tool get_now '{}')" \
     "$(tool list_tickets '{"project":"ACP","status":"todo"}')" "$(tool list_epics '{"project":"ACP"}')" \
     "$(tool list_labels '{}')" "$(tool get_project '{"id":"ACP"}')" "$(tool get_board '{"project":"ACP"}')" \
-    "$(tool list_project_journal '{"project":"ACP"}')" "$(tool get_document '{"epic":"Write-back","project":"ACP","id":"Decisions"}')")
+    "$(tool list_entries '{"project":"ACP"}')" "$(tool get_document '{"epic":"Write-back","project":"ACP","id":"Spec"}')")
   expect silent 'board-level reads only: turn end' "$(hook_json Stop board "$f")"
   expect silent 'board-level reads only: /compact' "$(hook_json PreCompact board "$f")"
   expect silent 'board-level reads only: auto-compaction' "$(hook_json PreCompact board "$f" "$auto")"

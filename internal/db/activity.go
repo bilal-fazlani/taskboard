@@ -18,9 +18,9 @@ const (
 
 // ListActivity returns one page of a project's activity: the status changes
 // of its tickets, ticket creation included, newest first. It pages like
-// ListJournal: up to limit entries (1 to ActivityMaxLimit), starting with the
+// ListEntries: up to limit entries (1 to ActivityMaxLimit), starting with the
 // newest when before is empty, or else with the newest change older than the
-// position before names, a previous page's NextBefore. Unlike the journal's,
+// position before names, a previous page's NextBefore. Unlike the entries',
 // that position is not a row id: it stays valid after the change it came from
 // is deleted with its ticket, so a walk through the feed never breaks.
 //
@@ -58,7 +58,7 @@ func (s *Store) ListActivity(projectRef string, epics []string, before string, l
 		if !ok {
 			return page, invalidInput("before %q is not a nextBefore from this feed", before)
 		}
-		// Compared in SQL on the stored text, as ListJournal does, with rowid
+		// Compared in SQL on the stored text, as ListEntries does, with rowid
 		// breaking ties between changes written within the same instant. The
 		// position needs no row to exist, so it outlives the change it came
 		// from when that change's ticket is deleted.

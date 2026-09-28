@@ -83,26 +83,6 @@ func TestProjectScopedToolsAcceptProjectAlias(t *testing.T) {
 			t.Fatalf("get_board by project returned board for %q, want %q", got, project.ID)
 		}
 	})
-
-	t.Run("append_project_journal", func(t *testing.T) {
-		entry, err := s.callTool("append_project_journal", mustJSON(t, map[string]any{"project": project.Prefix, "author": "agent", "text": "Shipped."}))
-		if err != nil {
-			t.Fatalf("append_project_journal by project: %v", err)
-		}
-		if got := entry.(*models.JournalEntry).ProjectID; got != project.ID {
-			t.Fatalf("append_project_journal by project wrote entry for %q, want %q", got, project.ID)
-		}
-	})
-
-	t.Run("list_project_journal", func(t *testing.T) {
-		page, err := s.callTool("list_project_journal", mustJSON(t, map[string]any{"project": project.Prefix}))
-		if err != nil {
-			t.Fatalf("list_project_journal by project: %v", err)
-		}
-		if got := page.(models.JournalPage).Total; got == 0 {
-			t.Fatalf("list_project_journal by project returned an empty journal, want the entry appended above")
-		}
-	})
 }
 
 // TestProjectScopedToolsAcceptProjectIDOnFormerlyProjectOnlyTools is the
@@ -174,8 +154,6 @@ func TestProjectRefRequiredError(t *testing.T) {
 		args map[string]any
 	}{
 		{"list_epics", nil},
-		{"append_project_journal", map[string]any{"author": "a", "text": "t"}},
-		{"list_project_journal", nil},
 	} {
 		args := tc.args
 		if args == nil {

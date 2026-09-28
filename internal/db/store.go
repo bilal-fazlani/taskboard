@@ -224,7 +224,7 @@ func writeProject(q dbtx, p *models.Project) (bool, error) {
 
 // DeleteProject archives a project: it sets its status to ProjectArchived and
 // removes nothing, and from then on the project and its tickets, epics,
-// documents and journal are gone from every read (see live.go). Nothing
+// documents and entries are gone from every read (see live.go). Nothing
 // restores it, and its prefix stays taken (checkPrefixFree). An unknown or
 // already deleted project reports ErrInvalidInput rather than silently
 // succeeding.

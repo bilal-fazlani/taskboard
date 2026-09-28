@@ -397,7 +397,6 @@ func TestEveryTicketCallFlagsOpenNotes(t *testing.T) {
 	// names it, needs a call above (and a case in ticketOfCall).
 	notOnOneTicket := map[string]bool{
 		"list_projects": true, "get_project": true, "create_project": true, "update_project": true, "delete_project": true,
-		"append_project_journal": true, "list_project_journal": true,
 		"list_epics": true, "create_epic": true, "update_epic": true, "delete_epic": true,
 		"list_labels": true, "create_label": true, "update_label": true, "delete_label": true,
 		"list_tickets": true, "find_tickets_by_commit": true, "get_board": true, "get_now": true,

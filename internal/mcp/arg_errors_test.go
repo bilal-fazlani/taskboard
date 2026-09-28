@@ -67,8 +67,8 @@ func newArgErrorFixture(t *testing.T) *argErrorFixture {
 // possibly touch: every project (including the fixture project's own read,
 // which is the only one that carries its agentInstructions text), every
 // ticket (with its subtasks, labels and epic), the fixture ticket's status
-// history, every label, the fixture project's epics and journal, and the
-// fixture ticket's documents, each with its content. Comparing two snapshots
+// history, every label, the fixture project's epics and entries, and the
+// fixture ticket's documents, each with its content, and entries. Comparing two snapshots
 // byte-for-byte after a rejected call is how the test checks "no change to
 // the data" — not just that an error came back.
 func (f *argErrorFixture) snapshot(t *testing.T) string {
@@ -103,9 +103,9 @@ func (f *argErrorFixture) snapshot(t *testing.T) string {
 	if err != nil {
 		t.Fatalf("ListStatusChanges: %v", err)
 	}
-	journal, err := s.store.ListJournal(f.projectID, "", db.JournalMaxLimit)
+	projectEntries, err := s.store.ListEntries(models.EntryOwner{ProjectID: f.projectID}, models.EntryFilter{IncludeReplaced: true}, "", db.EntryMaxLimit)
 	if err != nil {
-		t.Fatalf("ListJournal: %v", err)
+		t.Fatalf("ListEntries on the project: %v", err)
 	}
 	docMetas, err := s.store.ListDocuments(db.DocumentOwner{TicketID: f.ticketID})
 	if err != nil {
@@ -125,17 +125,17 @@ func (f *argErrorFixture) snapshot(t *testing.T) string {
 	}
 
 	blob := struct {
-		Projects  []models.Project
-		Project   *models.Project
-		Tickets   []models.Ticket
-		Labels    []models.Label
-		Epics     []models.Epic
-		Ticket    *models.Ticket
-		History   []models.StatusChange
-		Documents []*models.Document
-		Journal   models.JournalPage
-		Entries   models.EntryPage
-	}{projects, project, tickets, labels, epics, ticket, history, docs, journal, entries}
+		Projects       []models.Project
+		Project        *models.Project
+		Tickets        []models.Ticket
+		Labels         []models.Label
+		Epics          []models.Epic
+		Ticket         *models.Ticket
+		History        []models.StatusChange
+		Documents      []*models.Document
+		ProjectEntries models.EntryPage
+		Entries        models.EntryPage
+	}{projects, project, tickets, labels, epics, ticket, history, docs, projectEntries, entries}
 
 	data, err := json.Marshal(blob)
 	if err != nil {
@@ -168,8 +168,6 @@ func TestToolHandlersRejectWronglyTypedArguments(t *testing.T) {
 		{"create_project", map[string]any{"name": 1, "prefix": "X"}},
 		{"update_project", map[string]any{"id": f.projectID, "agentInstructions": 1}},
 		{"delete_project", map[string]any{"id": 1}},
-		{"append_project_journal", map[string]any{"projectId": f.projectID, "author": "a", "text": 1}},
-		{"list_project_journal", map[string]any{"projectId": f.projectID, "limit": "5"}},
 		{"list_epics", map[string]any{"projectId": 1}},
 		{"create_epic", map[string]any{"projectId": f.projectID, "name": 1}},
 		{"update_epic", map[string]any{"id": f.epicID, "name": 1}},

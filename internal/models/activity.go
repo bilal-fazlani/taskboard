@@ -13,7 +13,7 @@ type ActivityEntry struct {
 
 // ActivityPage is a run of a project's activity, newest first. When HasMore
 // is true, the next page is the one read with Before set to NextBefore: an
-// opaque position just after this page's oldest entry. Unlike JournalPage's,
+// opaque position just after this page's oldest entry. Unlike EntryPage's,
 // it is not an entry id, so it stays valid when that entry is deleted with
 // its ticket.
 type ActivityPage struct {

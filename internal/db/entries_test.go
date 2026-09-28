@@ -66,6 +66,13 @@ func mustCreateEntry(t *testing.T, s *Store, req models.CreateEntryRequest) *mod
 	return e
 }
 
+// personsProjectDecision is a decision of Bilal's on the project projectRef
+// names, written without an agent, as the journal's entries were.
+func personsProjectDecision(projectRef, text string) models.CreateEntryRequest {
+	return models.CreateEntryRequest{EntryOwner: models.EntryOwner{ProjectID: projectRef}, Type: models.EntryDecision,
+		Text: text, AuthorName: "Bilal", Source: models.DecisionSourcePerson}
+}
+
 func wantInvalidContaining(t *testing.T, err error, want string) {
 	t.Helper()
 	var invalid *ErrInvalidInput
@@ -685,8 +692,8 @@ func assertEntriesSchema(t *testing.T, database *sql.DB) {
 // project's entries as a decision of the person's, keeping its id, text,
 // author and time and the journal's order, a deleted project's too, and
 // drops the journal's table; a blank author, which only raw SQL could have
-// written, becomes "unknown" rather than failing the migration. The journal
-// reads the same before and after.
+// written, becomes "unknown" rather than failing the migration. The
+// project's entries read in the journal's order.
 func TestMigrationMovesJournalIntoProjectEntries(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "legacy.db")
 	legacy := openLegacyDB(t, path, entriesMigration)
@@ -737,46 +744,20 @@ Second line.', '2026-09-27T11:51:14.047291000Z'),
 	}
 
 	s := NewStore(database)
-	page, err := s.ListJournal("ACP", "", JournalDefaultLimit)
-	if err != nil {
-		t.Fatal(err)
+	page := listCurrent(t, s, models.EntryOwner{ProjectID: "ACP"})
+	if fmt.Sprint(ids(page.Entries)) != "[j3 j2 j1]" || page.Total != 3 {
+		t.Fatalf("project entries after migrating = %v (total %d), want the journal's order", ids(page.Entries), page.Total)
 	}
-	if fmt.Sprint(entryTexts(page.Entries)) != fmt.Sprint([]string{"Tied with j2, written after it.",
-		"Correction: ordered by the vision.\nSecond line.", "Decision: rewrite the North Star."}) || page.Total != 3 {
-		t.Fatalf("journal after migrating = %q (total %d)", entryTexts(page.Entries), page.Total)
-	}
-	if a := page.Entries[1]; a.ID != "j2" || a.Author != "Bilal" || a.CreatedAt.Format(time.RFC3339Nano) != "2026-09-27T11:51:14.047291Z" {
+	if a := page.Entries[1]; a.AuthorName != "Bilal" || a.CreatedAt.Format(time.RFC3339Nano) != "2026-09-27T11:51:14.047291Z" {
 		t.Fatalf("migrated journal entry = %+v", a)
 	}
 	// The migrated file takes new entries, and still refuses edits.
-	appendEntry(t, s, "ACP", "Bilal", "After the move.")
+	mustCreateEntry(t, s, personsProjectDecision("ACP", "After the move."))
 	if _, err := database.Exec(`UPDATE entries SET text = 'x' WHERE id = 'j1'`); err == nil {
 		t.Fatal("editing a migrated entry was accepted")
 	}
 	var fkErrors int
 	if err := database.QueryRow(`SELECT COUNT(*) FROM pragma_foreign_key_check`).Scan(&fkErrors); err != nil || fkErrors != 0 {
 		t.Fatalf("foreign key check after migrating: %d violations, %v", fkErrors, err)
-	}
-}
-
-// A journal entry is a project entry: an agent's current project entries
-// show in the journal under its role, and a replaced one is left out.
-func TestJournalReadsCurrentProjectEntries(t *testing.T) {
-	f := newEntriesFixture(t)
-	old := appendEntry(t, f.s, "ACP", "Bilal", "Ports from 3011.")
-	r := models.CreateEntryRequest{EntryOwner: f.onProject(), Type: models.EntryDecision, Text: "Ports from 3012.",
-		AgentID: f.agent, Source: models.DecisionSourcePerson, Replaces: old.ID}
-	mustCreateEntry(t, f.s, r)
-	mustCreateEntry(t, f.s, f.learning(f.onEpic(), "not the project's"))
-	page, err := f.s.ListJournal("ACP", "", JournalDefaultLimit)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(page.Entries) != 1 || page.Total != 1 || page.Entries[0].Text != "Ports from 3012." || page.Entries[0].Author != "implementer" {
-		t.Fatalf("journal = %+v, want only the replacement, by the agent's role", page)
-	}
-	stored, err := f.s.GetEntry(old.ID)
-	if err != nil || stored.Type != models.EntryDecision || stored.Source != models.DecisionSourcePerson || stored.AuthorName != "Bilal" {
-		t.Fatalf("appended journal entry stored as %+v, %v; want the person's decision", stored, err)
 	}
 }

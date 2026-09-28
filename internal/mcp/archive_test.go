@@ -71,8 +71,7 @@ func TestDeletedProjectIsGoneFromTheTools(t *testing.T) {
 		{"create_subtask", map[string]any{"ticketId": "GONE-1", "title": "More"}},
 		{"toggle_subtask", map[string]any{"id": sub.ID, "completed": true}},
 		{"list_epics", map[string]any{"projectId": "GONE"}},
-		{"list_project_journal", map[string]any{"projectId": "GONE"}},
-		{"append_project_journal", map[string]any{"projectId": "GONE", "author": "Bilal", "text": "more"}},
+		{"list_entries", map[string]any{"project": "GONE"}},
 		{"create_project", map[string]any{"name": "Again", "prefix": "GONE"}},
 	} {
 		text, isError := callToolText(t, s, c.tool, c.args)
