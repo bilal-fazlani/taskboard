@@ -133,12 +133,13 @@ afterEach(() => {
 });
 
 describe("Kanban's Waiting on You column", () => {
-  it("sits between In Progress and Agent Review, tinted red", async () => {
+  it("sits between In Progress and Agent Review, with a red heading and no lane tint", async () => {
     await mount(board(WAITING));
     const headings = screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent);
     expect(headings).toEqual(["Todo", "In Progress", "Waiting on You", "Agent Review", "Done"]);
     const waiting = column("needs_user_input");
-    expect(waiting.className.split(/\s+/)).toEqual(expect.arrayContaining(["bg-red-500/5", "ring-red-500/25"]));
+    expect(waiting.className).not.toContain("bg-red-500/5");
+    expect(waiting.className).not.toContain("ring-red-500/25");
     expect(within(waiting).getByRole("heading").className).toContain("text-red-400");
     expect(within(waiting).getByText("2")).toBeTruthy();
     expect(column("in_progress").className).not.toContain("bg-red-500/5");

@@ -92,9 +92,7 @@ function Column({
   return (
     <div
       data-testid={`board-column-${status}`}
-      className={`flex flex-col w-80 shrink-0 ${
-        waiting ? "-mt-2 rounded-lg bg-red-500/5 px-2 pt-2 ring-1 ring-red-500/25" : ""
-      }`}
+      className="flex flex-col w-80 shrink-0"
     >
       <div className="flex items-center gap-2 px-1 pb-3">
         <div className={`w-2 h-2 rounded-full ${STATUS_COLORS[status]}`} />
