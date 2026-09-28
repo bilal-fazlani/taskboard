@@ -21,11 +21,16 @@ func TestAwaitAnswerOnAStoppedApproval(t *testing.T) {
 		"prompt": "Land the branch on main?"})["id"].(string)
 
 	web := f.secondStore(t)
+	stopErr := make(chan error, 1)
 	go func() {
 		time.Sleep(300 * time.Millisecond)
-		web.StopWork("ACP-1", "bilal")
+		_, err := web.StopWork("ACP-1", "bilal")
+		stopErr <- err
 	}()
 	got := callJSON(t, f.s, "await_answer", map[string]any{"request": id, "agentId": agent, "timeoutSeconds": 20})
+	if err := <-stopErr; err != nil {
+		t.Fatalf("stopping work on ACP-1: %v", err)
+	}
 	if got["answered"] != true || got["answer"] != models.StoppedAnswer || got["answeredBy"] != "bilal" {
 		t.Fatalf("await_answer on a stopped approval = %v, want answered with %q by bilal", got, models.StoppedAnswer)
 	}

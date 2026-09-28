@@ -389,7 +389,8 @@ func ticketCommands() *cobra.Command {
 		Long: "Begin work on a ticket: claim it for --agent and print, as compact JSON, the same answer the MCP " +
 			"start_ticket tool and POST /api/tickets/{id}/start give: the ticket, its project (with agent " +
 			"instructions) and epic, their entries, the latest hand-off, every open note, the agent it was taken " +
-			"over from and the unfinished dependencies, each only when there is one. Refused while an agent of " +
+			"over from, the person's stop this start lifts (stopped: by and at) and the unfinished dependencies, " +
+			"each only when there is one. Refused while an agent of " +
 			"another session holds the ticket and is live, naming it and when its session was last seen; once that " +
 			"session is stale, the ticket is taken over. There is no separate claim command.",
 		Args: cobra.ExactArgs(1),
