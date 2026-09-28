@@ -27,18 +27,32 @@ import { useTicketParam } from "../hooks/useTicketParam";
 import { awaitingProject } from "../lib/defaultProject";
 import { inProject, matchesFilters, repoOptions } from "../lib/filters";
 import { newTicketBlocked } from "../lib/newTicketDefaults";
-import { STATUSES, STATUS_LABELS, STATUS_COLORS, isStatus, type Status } from "../lib/status";
+import {
+  KNOWN_STATUSES,
+  NEEDS_USER_INPUT_STATUS,
+  STATUS_LABELS,
+  STATUS_COLORS,
+  isStatus,
+  isWritableStatus,
+  type KnownStatus,
+} from "../lib/status";
+import { compareWaiting } from "../lib/waiting";
 
+// A card on Kanban. `fixed` is a card that can't be dragged: one waiting on
+// the person, which only the answer to its request moves.
 function DraggableTicket({
   ticket,
+  fixed,
   onClick,
 }: {
   ticket: Ticket;
+  fixed: boolean;
   onClick: () => void;
 }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: ticket.id,
     data: { ticket },
+    disabled: fixed,
   });
 
   return (
@@ -46,13 +60,17 @@ function DraggableTicket({
       ref={setNodeRef}
       {...listeners}
       {...attributes}
-      className={`cursor-grab active:cursor-grabbing ${isDragging ? "opacity-30" : ""}`}
+      className={`${fixed ? "" : "cursor-grab active:cursor-grabbing"} ${isDragging ? "opacity-30" : ""}`}
     >
       <TicketCard ticket={ticket} onClick={onClick} />
     </div>
   );
 }
 
+// A column per status a ticket can hold. Waiting on You, between In Progress
+// and Agent Review, is tinted red and takes no drops and no new tickets: only
+// a request for user input puts a ticket there, and only its answer takes it
+// out, so its cards don't drag either. It lists the longest wait first.
 function Column({
   status,
   tickets,
@@ -60,37 +78,46 @@ function Column({
   onAddTicket,
   addBlocked,
 }: {
-  status: Status;
+  status: KnownStatus;
   tickets: Ticket[];
   onTicketClick: (ticket: Ticket) => void;
   onAddTicket: (status: string) => void;
   /** Why + can't open the new-ticket form, or null when it can (see newTicketBlocked). */
   addBlocked: string | null;
 }) {
-  const { setNodeRef, isOver } = useDroppable({ id: status });
+  const writable = isWritableStatus(status);
+  const { setNodeRef, isOver } = useDroppable({ id: status, disabled: !writable });
+  const waiting = status === NEEDS_USER_INPUT_STATUS;
 
   return (
-    <div className="flex flex-col w-80 shrink-0">
+    <div
+      data-testid={`board-column-${status}`}
+      className={`flex flex-col w-80 shrink-0 ${
+        waiting ? "-mt-2 rounded-lg bg-red-500/5 px-2 pt-2 ring-1 ring-red-500/25" : ""
+      }`}
+    >
       <div className="flex items-center gap-2 px-1 pb-3">
         <div className={`w-2 h-2 rounded-full ${STATUS_COLORS[status]}`} />
-        <h3 className="text-sm font-medium text-slate-300">
+        <h3 className={`text-sm font-medium ${waiting ? "text-red-400" : "text-slate-300"}`}>
           {STATUS_LABELS[status]}
         </h3>
         <span className="text-xs text-slate-600 ml-auto">{tickets.length}</span>
         {/* aria-disabled rather than disabled, so the reason shows on hover and
             the button stays focusable for a screen reader to announce it. */}
-        <button
-          type="button"
-          aria-label={`New ticket in ${STATUS_LABELS[status]}`}
-          aria-disabled={addBlocked !== null || undefined}
-          title={addBlocked ?? undefined}
-          onClick={() => {
-            if (addBlocked === null) onAddTicket(status);
-          }}
-          className="text-slate-600 hover:text-slate-300 transition-colors aria-disabled:cursor-not-allowed aria-disabled:opacity-50 aria-disabled:hover:text-slate-600"
-        >
-          <Plus aria-hidden="true" className="w-4 h-4" />
-        </button>
+        {writable && (
+          <button
+            type="button"
+            aria-label={`New ticket in ${STATUS_LABELS[status]}`}
+            aria-disabled={addBlocked !== null || undefined}
+            title={addBlocked ?? undefined}
+            onClick={() => {
+              if (addBlocked === null) onAddTicket(status);
+            }}
+            className="text-slate-600 hover:text-slate-300 transition-colors aria-disabled:cursor-not-allowed aria-disabled:opacity-50 aria-disabled:hover:text-slate-600"
+          >
+            <Plus aria-hidden="true" className="w-4 h-4" />
+          </button>
+        )}
       </div>
       <div
         ref={setNodeRef}
@@ -102,12 +129,17 @@ function Column({
           <DraggableTicket
             key={ticket.id}
             ticket={ticket}
+            fixed={waiting}
             onClick={() => onTicketClick(ticket)}
           />
         ))}
         {tickets.length === 0 && (
-          <div className="flex items-center justify-center h-24 text-xs text-slate-700 border border-dashed border-slate-800 rounded-lg">
-            Drop tickets here
+          <div
+            className={`flex items-center justify-center h-24 text-xs border border-dashed rounded-lg ${
+              waiting ? "text-red-400/60 border-red-500/20" : "text-slate-700 border-slate-800"
+            }`}
+          >
+            {waiting ? "Nothing waiting on you" : "Drop tickets here"}
           </div>
         )}
       </div>
@@ -150,15 +182,15 @@ export default function Board() {
       // Every project's tickets: the project is a filter, applied below.
       const board = await api.board.get();
       if (seq !== loadSeqRef.current) return;
-      // Only the columns this board draws: the API also sends a column for
-      // each status it has no column for yet (needs_user_input), whose
-      // tickets would otherwise count here without showing.
+      // Only the columns this board draws: a newer server may send a column
+      // for a status this build doesn't know, whose tickets would otherwise
+      // count here without showing.
       setColumns((board.columns || []).filter((c) => isStatus(c.status)));
     } catch {
       if (seq !== loadSeqRef.current) return;
       // A failed refetch keeps what is on screen — an open editor included —
       // and only an outright failed first load falls back to empty columns.
-      setColumns((prev) => (prev.length > 0 ? prev : STATUSES.map((status) => ({ status, tickets: [] }))));
+      setColumns((prev) => (prev.length > 0 ? prev : KNOWN_STATUSES.map((status) => ({ status, tickets: [] }))));
     }
     setLoading(false);
   }, []);
@@ -215,8 +247,11 @@ export default function Board() {
   const projectTickets = useMemo(() => inProject(allTickets, filters.project), [allTickets, filters.project]);
   const isShown = (ticket: Ticket) =>
     ticket.id === activeTicket?.id || (filters.project !== "" && matchesFilters(ticket, filters, docMatches));
-  const getColumnTickets = (status: string) =>
-    (columns.find((c) => c.status === status)?.tickets || []).filter(isShown);
+  // Waiting on You lists the longest wait first; the others keep the board's order.
+  const getColumnTickets = (status: string) => {
+    const shown = (columns.find((c) => c.status === status)?.tickets || []).filter(isShown);
+    return status === NEEDS_USER_INPUT_STATUS ? shown.sort(compareWaiting) : shown;
+  };
   const shownCount = projectTickets.filter((t) => matchesFilters(t, filters, docMatches)).length;
   const projectCount = projectTickets.length;
   // The filter bar picks a project for a URL without one; until it has, the
@@ -260,7 +295,8 @@ export default function Board() {
       ? over.id
       : findColumnByTicketId(over.id);
 
-    if (!activeStatus || !overStatus || activeStatus === overStatus) return;
+    // Waiting on You takes no drops, not even over one of its cards.
+    if (!activeStatus || !isWritableStatus(overStatus) || activeStatus === overStatus) return;
 
     setColumns((prev) =>
       prev.map((col) => {
@@ -287,7 +323,7 @@ export default function Board() {
         : findColumnByTicketId(over.id)
       : undefined;
 
-    if (!targetStatus) {
+    if (!isWritableStatus(targetStatus)) {
       endDrag();
       return;
     }
@@ -358,7 +394,7 @@ export default function Board() {
             }}
           >
             <div className="flex gap-6 h-full">
-              {STATUSES.map((status) => (
+              {KNOWN_STATUSES.map((status) => (
                 <Column
                   key={status}
                   status={status}

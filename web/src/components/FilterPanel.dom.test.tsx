@@ -318,9 +318,17 @@ describe("filter panel dropdowns", () => {
 
   it("offers every status, agent_review included, in board column order", async () => {
     await mount("/?project=ALP&status=agent_review", true);
-    expect(await rowLabels("Status")).toEqual(["Todo", "In Progress", "Agent Review", "Done"]);
+    expect(await rowLabels("Status")).toEqual(["Todo", "In Progress", "Waiting on You", "Agent Review", "Done"]);
     expect(await ticked("Status")).toEqual(["Agent Review"]);
     expect(reads("Status")).toBe("Agent Review");
+  });
+
+  it("offers Waiting on You, with its red dot", async () => {
+    await mount("/?project=ALP&status=needs_user_input", true);
+    expect(await ticked("Status")).toEqual(["Waiting on You"]);
+    expect(reads("Status")).toBe("Waiting on You");
+    const row = [...control("Status").querySelectorAll('[role="option"]')].find((o) => o.textContent === "Waiting on You")!;
+    expect(row.querySelector(".bg-red-500")).toBeTruthy();
   });
 });
 
@@ -429,6 +437,7 @@ describe("multi-value filters", () => {
       });
     const activeRow = () => document.getElementById(list.getAttribute("aria-activedescendant")!)!.textContent;
     expect(activeRow()).toBe("Todo");
+    await key("ArrowDown");
     await key("ArrowDown");
     await key("ArrowDown");
     expect(activeRow()).toBe("Agent Review");

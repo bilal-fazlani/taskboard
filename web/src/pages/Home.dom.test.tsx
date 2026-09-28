@@ -81,7 +81,7 @@ const board: BoardData = {
   ],
 };
 
-const empty: Now = { inProgress: [], inReview: [], landed: [] };
+const empty: Now = { inProgress: [], waiting: [], inReview: [], landed: [] };
 
 const spec: DocumentMeta = {
   id: "doc-1",

@@ -39,8 +39,10 @@ function StatusBadge({ status }: { status: string }) {
   const label = isStatus(status) ? STATUS_LABELS[status] : status;
   return (
     <span
-      className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium capitalize ${
-        style || "bg-slate-700 text-slate-300"
+      // A known status shows its label as written ("Waiting on You"); only
+      // an unknown one's raw value is capitalised.
+      className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+        style || "capitalize bg-slate-700 text-slate-300"
       }`}
     >
       {label}

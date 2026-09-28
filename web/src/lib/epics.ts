@@ -8,7 +8,7 @@
 
 import type { Epic, EpicProgress } from "../api/client";
 import { NO_EPIC, isNoEpic } from "./filters";
-import { ACTIVE_STATUSES, DONE_STATUS, type Status } from "./status";
+import { ACTIVE_STATUSES, DONE_STATUS, type KnownStatus } from "./status";
 import type { TicketViewPath } from "./lastView";
 
 const count = (progress: EpicProgress, status: string) => progress.counts?.[status] ?? 0;
@@ -64,11 +64,15 @@ export function showsNoEpic(noEpic: EpicProgress | null | undefined): boolean {
   return (noEpic?.total ?? 0) > 0;
 }
 
-/** The progress bar's segments from left to right, in the status colours. */
-export const BAR_ORDER: readonly Status[] = ["done", "agent_review", "in_progress", "todo"];
+/**
+ * The progress bar's segments from left to right, in the status colours:
+ * the board's columns in reverse, so waiting on the person, in red, sits
+ * between agent review and in progress.
+ */
+export const BAR_ORDER: readonly KnownStatus[] = ["done", "agent_review", "needs_user_input", "in_progress", "todo"];
 
 export interface BarSegment {
-  status: Status;
+  status: KnownStatus;
   count: number;
   /** The segment's share of the bar, in percent. */
   percent: number;

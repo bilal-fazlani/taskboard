@@ -145,6 +145,64 @@ body {
   }
 }
 
+/* A card waiting on the person (needs_user_input) in the waiting red
+   (--color-red-500, the status dot's token). Rather than a third colour of
+   the same breath, its ring ripples: it leaves the border and fades as it
+   grows, on a slower 2.6s cycle, while a steady faint glow keeps the card
+   lit between ripples. Blue and violet swell and ease back in place, so a
+   waiting card next to an active one reads as a different kind of signal,
+   not the same one out of step. The dot beats once as each ripple leaves. */
+@keyframes graph-attention-waiting-ring {
+  0% {
+    box-shadow:
+      0 0 0 0 color-mix(in oklab, var(--color-red-500) 65%, transparent),
+      0 0 12px 1px color-mix(in oklab, var(--color-red-500) 25%, transparent);
+  }
+  70%,
+  100% {
+    box-shadow:
+      0 0 0 10px color-mix(in oklab, var(--color-red-500) 0%, transparent),
+      0 0 12px 1px color-mix(in oklab, var(--color-red-500) 25%, transparent);
+  }
+}
+
+@keyframes graph-attention-waiting-dot {
+  0%,
+  60%,
+  100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 transparent;
+  }
+  15% {
+    transform: scale(1.5);
+    box-shadow: 0 0 9px 3px color-mix(in oklab, var(--color-red-500) 70%, transparent);
+  }
+}
+
+.graph-attention-waiting {
+  animation: graph-attention-waiting-ring 2.6s ease-out infinite;
+}
+
+.graph-attention-waiting-dot {
+  animation: graph-attention-waiting-dot 2.6s ease-out infinite;
+}
+
+/* Without motion the red border, the band and a still ring carry the state. */
+@media (prefers-reduced-motion: reduce) {
+  .graph-attention-waiting {
+    animation: none;
+    box-shadow:
+      0 0 0 2px color-mix(in oklab, var(--color-red-500) 60%, transparent),
+      0 0 16px 3px color-mix(in oklab, var(--color-red-500) 30%, transparent);
+  }
+
+  .graph-attention-waiting-dot {
+    animation: none;
+    transform: scale(1.35);
+    box-shadow: 0 0 8px 2px color-mix(in oklab, var(--color-red-500) 55%, transparent);
+  }
+}
+
 .prose-card {
   font-size: 0.875rem;
   line-height: 1.625;

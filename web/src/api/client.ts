@@ -414,7 +414,15 @@ export interface Board {
  * waits on the person) or asked for changes. */
 export type NowReview = "running" | "approved" | "changes";
 
-/** A ticket in progress or in review, as the Now page shows it. */
+/** A waiting ticket's open request for user input, as the Now page shows it. */
+export interface NowRequest {
+  type: UserInputType;
+  prompt: string;
+  /** When the agent asked. */
+  createdAt: string;
+}
+
+/** A ticket in progress, waiting on the person or in review, as the Now page shows it. */
 export interface NowTicket {
   id: string;
   key: string;
@@ -429,6 +437,8 @@ export interface NowTicket {
   since: string;
   /** Set only on a ticket in agent_review. */
   review?: NowReview;
+  /** What it waits on; set only on a ticket in needs_user_input. */
+  request?: NowRequest;
 }
 
 /** A ticket that moved to done in the last day, with its landed commits. */
@@ -444,6 +454,8 @@ export interface LandedTicket {
 /** GET /api/now: what is moving now, and what just landed. */
 export interface Now {
   inProgress: NowTicket[];
+  /** The tickets waiting on the person (needs_user_input), oldest wait first. */
+  waiting: NowTicket[];
   inReview: NowTicket[];
   landed: LandedTicket[];
 }

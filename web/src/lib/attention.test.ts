@@ -6,9 +6,11 @@ import {
   ATTENTION_DOT_CLASS,
   ATTENTION_REVIEW_CARD_CLASS,
   ATTENTION_REVIEW_DOT_CLASS,
+  ATTENTION_WAITING_CARD_CLASS,
+  ATTENTION_WAITING_DOT_CLASS,
   attentionClasses,
 } from "./attention";
-import { STATUSES } from "./status";
+import { KNOWN_STATUSES } from "./status";
 
 describe("attentionClasses", () => {
   it("rings and pulses an in-progress card on the graph", () => {
@@ -30,13 +32,25 @@ describe("attentionClasses", () => {
     expect(ATTENTION_REVIEW_DOT_CLASS).not.toBe(ATTENTION_DOT_CLASS);
   });
 
+  it("rings and pulses a card waiting on the person, in a pair of its own", () => {
+    expect(attentionClasses("needs_user_input", true)).toEqual({
+      card: ATTENTION_WAITING_CARD_CLASS,
+      dot: ATTENTION_WAITING_DOT_CLASS,
+    });
+    for (const other of [ATTENTION_CARD_CLASS, ATTENTION_REVIEW_CARD_CLASS]) {
+      expect(ATTENTION_WAITING_CARD_CLASS).not.toBe(other);
+    }
+  });
+
   it("leaves the same tickets alone off the graph, so Kanban and Table stay still", () => {
     expect(attentionClasses("in_progress", false)).toEqual({ card: "", dot: "" });
     expect(attentionClasses("agent_review", false)).toEqual({ card: "", dot: "" });
+    expect(attentionClasses("needs_user_input", false)).toEqual({ card: "", dot: "" });
   });
 
   it("animates no other status", () => {
-    for (const status of STATUSES.filter((s) => s !== "in_progress" && s !== "agent_review")) {
+    const held = ["in_progress", "needs_user_input", "agent_review"];
+    for (const status of KNOWN_STATUSES.filter((s) => !held.includes(s))) {
       expect(attentionClasses(status, true)).toEqual({ card: "", dot: "" });
     }
   });
@@ -60,6 +74,8 @@ describe("the stylesheet behind the classes", () => {
     ATTENTION_DOT_CLASS,
     ATTENTION_REVIEW_CARD_CLASS,
     ATTENTION_REVIEW_DOT_CLASS,
+    ATTENTION_WAITING_CARD_CLASS,
+    ATTENTION_WAITING_DOT_CLASS,
   ]) {
     it(`animates .${className} and holds it still under reduced motion`, () => {
       const rules = [...css.matchAll(new RegExp(`\\.${className}\\s*\\{([^}]*)\\}`, "g"))].map(
@@ -83,5 +99,18 @@ describe("the stylesheet behind the classes", () => {
     // lib/status.ts's STATUS_COLORS if the palette ever changed.
     expect(css).not.toMatch(/rgb\(\s*59\s+130\s+246/);
     expect(css).not.toMatch(/rgb\(\s*139\s+92\s+246/);
+  });
+
+  it("ripples a waiting card in red, from the status token, on a cycle of its own", () => {
+    const ring = css.match(/@keyframes graph-attention-waiting-ring\s*\{[\s\S]*?\n\}/)![0];
+    expect(ring).toContain("var(--color-red-500)");
+    expect(ring).not.toContain("var(--color-blue-500)");
+    expect(ring).not.toContain("var(--color-violet-500)");
+    expect(css).not.toMatch(/rgb\(\s*239\s+68\s+68/);
+    // A different period from the 2s breath, so the two never beat as one.
+    const period = (className: string) =>
+      css.match(new RegExp(`\\.${className}\\s*\\{\\s*animation:\\s*\\S+\\s+([\\d.]+s)`))![1];
+    expect(period(ATTENTION_WAITING_CARD_CLASS)).toBe(period(ATTENTION_WAITING_DOT_CLASS));
+    expect(period(ATTENTION_WAITING_CARD_CLASS)).not.toBe(period(ATTENTION_CARD_CLASS));
   });
 });

@@ -200,6 +200,15 @@ describe("TicketEditor as a modal", () => {
     await waitFor(() => expect(mockApi.tickets.get).toHaveBeenCalledWith("t1"));
   });
 
+  it("badges a ticket waiting on the person Waiting on You, in red", async () => {
+    renderEditor(makeTicket({ status: "needs_user_input" }));
+    const badge = screen.getByTestId("ticket-editor-status");
+    expect(badge.textContent).toBe("Waiting on You");
+    expect(badge.className).toMatch(/\bbg-red-500\/20\b/);
+    expect(badge.className).toMatch(/\btext-red-400\b/);
+    await waitFor(() => expect(mockApi.tickets.get).toHaveBeenCalledWith("t1"));
+  });
+
   it("puts content in the first column and fields in the second", () => {
     renderEditor();
     const body = screen.getByTestId("ticket-editor-body");

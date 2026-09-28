@@ -11,9 +11,10 @@ import { namedProject, type ActivityTicket } from "../lib/defaultProject";
 import { NO_EPIC, urlValue, type MultiFilterKey, type SelectOption, type UnmatchedMode } from "../lib/filters";
 import { PRIORITIES } from "../lib/priority";
 import { staleFilters } from "../lib/staleFilters";
-import { STATUSES, STATUS_COLORS, STATUS_LABELS, isStatus } from "../lib/status";
+import { KNOWN_STATUSES, STATUS_COLORS, STATUS_LABELS, isStatus } from "../lib/status";
 
-const STATUS_OPTIONS: SelectOption[] = STATUSES.map((s) => ({ value: s, label: STATUS_LABELS[s] }));
+// Every status a ticket can hold, Waiting on You included: it filters like any other.
+const STATUS_OPTIONS: SelectOption[] = KNOWN_STATUSES.map((s) => ({ value: s, label: STATUS_LABELS[s] }));
 const PRIORITY_OPTIONS: SelectOption[] = PRIORITIES.map((p) => ({ value: p, label: p.charAt(0).toUpperCase() + p.slice(1) }));
 
 // How each list draws its options, as the rest of the app draws them: the

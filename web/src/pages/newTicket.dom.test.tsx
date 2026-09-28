@@ -5,7 +5,7 @@ import { BrowserRouter } from "react-router-dom";
 import type { Board as BoardData, Project, Ticket } from "../api/client";
 import { LAST_PROJECT_KEY } from "../lib/defaultProject";
 import { DEBOUNCE_MS } from "../lib/liveRefresh";
-import { STATUS_LABELS } from "../lib/status";
+import { STATUSES, STATUS_LABELS } from "../lib/status";
 import { memoryStorage } from "../test/memoryStorage";
 
 // The new-ticket form on each view that offers one starts in the project the
@@ -241,7 +241,9 @@ describe.each(views)("%s's new-ticket form accessibility", (_name, page, path, n
 });
 
 describe.each(views)("%s's ways to open the new-ticket form", (_name, page, path, _button, openers) => {
-  const count = path === "/kanban" ? Object.keys(STATUS_LABELS).length : 1;
+  // Kanban has a + on every column but Waiting on You, which only a request
+  // for user input fills.
+  const count = path === "/kanban" ? STATUSES.length : 1;
   // Each one is disabled with the reason as its title, which hovering shows
   // and a screen reader announces as its description; a click opens nothing.
   const expectDisabled = async (reason: string) => {

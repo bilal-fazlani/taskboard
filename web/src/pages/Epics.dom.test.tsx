@@ -297,6 +297,22 @@ describe("Epics rows", () => {
     ]);
   });
 
+  it("gives the tickets waiting on the person a red segment of their own", async () => {
+    serves({
+      epics: [epic("Agents", { needs_user_input: 1, in_progress: 1, done: 2 }, "2026-09-01T00:00:00Z")],
+      noEpic: progress(),
+    });
+    await mount();
+    const bar = within(rowOf("Agents")).getByTestId("epic-bar");
+    const segments = [...bar.children] as HTMLElement[];
+    expect(segments.map((s) => [s.dataset.status, s.style.width, s.className])).toEqual([
+      ["done", "50%", "bg-green-500"],
+      ["needs_user_input", "25%", "bg-red-500"],
+      ["in_progress", "25%", "bg-blue-500"],
+    ]);
+    expect(bar.getAttribute("aria-label")).toBe("2 done, 1 waiting on you, 1 in progress");
+  });
+
   it("shows an empty epic with 0 tickets and an empty bar", async () => {
     await mount();
     const row = rowOf("Ideas");

@@ -1,10 +1,13 @@
+import { useEffect, useState } from "react";
 import { Calendar, Check, CheckCircle2, EyeOff, Layers, Paperclip } from "lucide-react";
-import type { EpicRef, Ticket } from "../api/client";
+import type { EpicRef, Ticket, TicketRequest } from "../api/client";
 import { attentionClasses } from "../lib/attention";
 import { formatDueDate } from "../lib/dueDate";
 import type { GraphNode } from "../lib/graphLayout";
 import { hiddenBlockersText, satisfiedDependenciesText } from "../lib/graphText";
-import { AGENT_REVIEW_STATUS, STATUS_COLORS, STATUS_LABELS, STATUS_STYLES, isDone, isStatus } from "../lib/status";
+import { TICK_MS, runningFor } from "../lib/now";
+import { AGENT_REVIEW_STATUS, STATUS_COLORS, STATUS_LABELS, STATUS_STYLES, isDone, isStatus, isWaiting } from "../lib/status";
+import { firstLine, requestKind, waitingSince } from "../lib/waiting";
 import DependencyBand from "./DependencyBand";
 import PriorityBadge from "./PriorityBadge";
 
@@ -133,6 +136,45 @@ function ReviewRounds({ rounds }: { rounds: number }) {
   );
 }
 
+// The red band at the foot of a card waiting on the person: the type of user
+// input it asks for, then the first line of the prompt, so a glance tells a
+// yes/no from a question. The same on the graph and Kanban.
+function RequestBand({ request }: { request: TicketRequest }) {
+  return (
+    <div
+      data-testid="card-request"
+      className="-mx-3 -mb-3 rounded-b-[7px] border-t border-red-500/50 bg-red-500/10 px-3 py-1.5 text-xs leading-snug text-red-400"
+    >
+      <p className="line-clamp-2">
+        <span className="mr-1.5 text-[10.5px] font-bold uppercase tracking-wider">{requestKind(request.type)}</span>
+        {firstLine(request.prompt)}
+      </p>
+    </div>
+  );
+}
+
+// How long a card on the graph has waited on the person, in its header:
+// "12m", "1h 05m". It redraws itself on Now's tick, so the graph around it
+// never re-renders for a clock.
+function WaitedFor({ since }: { since: string }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), TICK_MS);
+    return () => clearInterval(timer);
+  }, []);
+  const text = runningFor(since, now);
+  if (!text) return null;
+  return (
+    <span
+      data-testid="card-waited"
+      title={`Waiting on you since ${new Date(since).toLocaleString()}`}
+      className="shrink-0 font-mono text-[11px] tabular-nums text-red-400"
+    >
+      {text}
+    </span>
+  );
+}
+
 /**
  * A ticket card, shared by the board and the graph. It is purely
  * presentational: the board wraps it for dragging, the graph positions it.
@@ -142,7 +184,9 @@ function ReviewRounds({ rounds }: { rounds: number }) {
  * been to agent review. Without it the card renders exactly as the board
  * always has. A ticket in an epic shows the epic before its key, after the
  * graph's dot. A done ticket on the graph, in its done block, has a check
- * for its dot and a quieter title.
+ * for its dot and a quieter title. A ticket waiting on the person has a red
+ * border and, at its foot, a red band with its request; on the graph it also
+ * says how long it has waited, and its ring and dot animate (attention.ts).
  */
 export default function TicketCard({
   ticket,
@@ -155,15 +199,17 @@ export default function TicketCard({
   onClick?: () => void;
   graph?: GraphCardInfo;
 }) {
-  // Empty strings everywhere but an in-progress card on the graph.
+  // Empty strings everywhere but a held card on the graph.
   const attention = attentionClasses(ticket.status, graph !== undefined);
   const reviewRounds = ticket.reviewRounds ?? 0;
+  const waiting = isWaiting(ticket.status);
   return (
     <div
       onClick={onClick}
-      className={`rounded-lg border border-slate-700/50 bg-slate-900 p-3 space-y-2 transition-colors hover:border-slate-600 cursor-pointer ${
-        isDragging ? "opacity-90 shadow-xl shadow-blue-500/10 rotate-2" : ""
-      } ${attention.card}`}
+      data-waiting={waiting || undefined}
+      className={`rounded-lg border bg-slate-900 p-3 space-y-2 transition-colors cursor-pointer ${
+        waiting ? "border-red-500/80 hover:border-red-400" : "border-slate-700/50 hover:border-slate-600"
+      } ${isDragging ? "opacity-90 shadow-xl shadow-blue-500/10 rotate-2" : ""} ${attention.card}`}
     >
       <div className="flex items-start justify-between gap-2">
         {ticket.epic ? (
@@ -187,7 +233,14 @@ export default function TicketCard({
             {ticket.projectPrefix}-{ticket.number}
           </span>
         )}
-        <PriorityBadge priority={ticket.priority} />
+        {graph && waiting ? (
+          <span className="inline-flex shrink-0 items-center gap-2">
+            <WaitedFor since={waitingSince(ticket)} />
+            <PriorityBadge priority={ticket.priority} />
+          </span>
+        ) : (
+          <PriorityBadge priority={ticket.priority} />
+        )}
       </div>
       <p className={`text-sm leading-snug ${graph && isDone(ticket.status) ? "text-slate-400" : "text-slate-200"}`}>
         {ticket.title}
@@ -214,6 +267,7 @@ export default function TicketCard({
         </div>
       )}
       <CardFooter ticket={ticket} />
+      {waiting && ticket.openRequest && <RequestBand request={ticket.openRequest} />}
     </div>
   );
 }

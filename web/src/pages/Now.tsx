@@ -20,7 +20,14 @@ import {
   rememberNowProject,
   restoredNowProject,
 } from "../lib/nowProject";
-import { AGENT_REVIEW_STATUS, IN_PROGRESS_STATUS, STATUS_LABELS, STATUS_STYLES } from "../lib/status";
+import {
+  AGENT_REVIEW_STATUS,
+  IN_PROGRESS_STATUS,
+  NEEDS_USER_INPUT_STATUS,
+  STATUS_LABELS,
+  STATUS_STYLES,
+} from "../lib/status";
+import { WAITING_ANCHOR, firstLine, requestKind } from "../lib/waiting";
 
 // The Now page: what is moving right now, and what just landed, across every
 // project unless the dropdown narrows it to one. Every Now URL names what it
@@ -159,6 +166,75 @@ function Column({
   );
 }
 
+// A ticket waiting on the person: its key and title, then what it asks, the
+// type before the prompt's first line, in red, and how long it has waited.
+function WaitingRow({ ticket, now }: { ticket: NowTicket; now: number }) {
+  const since = ticket.request?.createdAt ?? ticket.since;
+  return (
+    <Link
+      to={editorLink(ticket)}
+      data-testid="waiting-row"
+      className="grid grid-cols-[auto_minmax(0,1fr)_auto_auto] items-center gap-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 transition-colors hover:border-red-500/50 hover:bg-red-500/15 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500"
+    >
+      <span className="font-mono text-xs text-slate-400">{ticket.key}</span>
+      <span className="min-w-0">
+        <span className="block truncate text-sm font-medium text-slate-200">{ticket.title}</span>
+        {ticket.request && (
+          <span data-testid="waiting-request" className="block truncate text-xs text-red-400">
+            <span className="font-semibold">{requestKind(ticket.request.type)}:</span> {firstLine(ticket.request.prompt)}
+          </span>
+        )}
+      </span>
+      <Chip prefix={ticket.projectPrefix} />
+      <span
+        data-testid="waited-for"
+        title={`Waiting on you since ${new Date(since).toLocaleString()}`}
+        className="text-right text-[11.5px] tabular-nums text-slate-500"
+      >
+        {runningFor(since, now)}
+      </span>
+    </Link>
+  );
+}
+
+// Waiting on you, first on the page and across its whole width: the person
+// is the one holding these up. The server sends them oldest wait first. The
+// header's "N waiting on you" links here, by the section's id.
+function WaitingGroup({ tickets, now, focus }: { tickets: NowTicket[]; now: number; focus: boolean }) {
+  const ref = useRef<HTMLElement>(null);
+  // Arriving through that link brings the group into view and puts focus on
+  // it, once it is on the page.
+  useEffect(() => {
+    if (!focus || !ref.current) return;
+    ref.current.scrollIntoView?.({ block: "start" });
+    ref.current.focus({ preventScroll: true });
+  }, [focus]);
+  return (
+    <section
+      ref={ref}
+      id={WAITING_ANCHOR}
+      tabIndex={-1}
+      aria-labelledby="now-waiting"
+      className="flex scroll-mt-4 flex-col gap-2 rounded-lg focus-visible:outline-none"
+    >
+      <h2 id="now-waiting" className="flex items-center gap-2 text-xs font-medium text-slate-400">
+        <span className={`rounded-full px-2 py-px text-[11px] font-medium ${STATUS_STYLES[NEEDS_USER_INPUT_STATUS]}`}>
+          {STATUS_LABELS[NEEDS_USER_INPUT_STATUS]}
+        </span>
+        <span className="font-mono text-slate-500">{tickets.length}</span>
+        {tickets.length > 1 && <span className="text-slate-500">oldest first</span>}
+      </h2>
+      {tickets.length === 0 ? (
+        <p className="rounded-lg border border-dashed border-slate-800 px-3 py-4 text-center text-xs text-slate-500">
+          Nothing waiting on you
+        </p>
+      ) : (
+        tickets.map((t) => <WaitingRow key={t.id} ticket={t} now={now} />)
+      )}
+    </section>
+  );
+}
+
 function LandedRow({ ticket, now }: { ticket: LandedTicket; now: number }) {
   return (
     <Link
@@ -207,7 +283,7 @@ export default function Now() {
   // A remembered project deleted since, or projects that fail to load, give
   // `all`. The pick is read once per arrival (see arrive), so a redraw or a
   // live refresh never moves a page already open.
-  const { key: locationKey } = useLocation();
+  const { key: locationKey, hash } = useLocation();
   const [arrival, setArrival] = useState(() => arrive(locationKey, project, null, false));
   let current = arrival;
   if (arrival.key !== locationKey) {
@@ -337,6 +413,7 @@ export default function Now() {
         <p className="px-6 py-8 text-sm text-slate-500">{failed ? "Could not load what is running." : "Loading…"}</p>
       ) : (
         <div className="flex flex-col gap-6 p-6">
+          <WaitingGroup tickets={data.waiting ?? []} now={now} focus={hash === `#${WAITING_ANCHOR}`} />
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <Column status={IN_PROGRESS_STATUS} tickets={data.inProgress} now={now} empty="Nothing in progress" />
             <Column status={AGENT_REVIEW_STATUS} tickets={data.inReview} now={now} empty="Nothing in review" />

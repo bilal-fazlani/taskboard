@@ -6,6 +6,7 @@ import TicketEditor from "../components/TicketEditor";
 import TicketCard, { type GraphCardInfo } from "../components/TicketCard";
 import FilterPanel from "../components/FilterPanel";
 import ProjectsLoadError from "../components/ProjectsLoadError";
+import WaitingChip from "../components/WaitingChip";
 import { useChangeGlow } from "../hooks/useChangeGlow";
 import { useDocumentSearch } from "../hooks/useDocumentMatches";
 import { useDocumentVisible } from "../hooks/useDocumentVisible";
@@ -51,6 +52,7 @@ import { entrySize, mergeSizes, pruneSizes } from "../lib/graphSizes";
 import { columnHeading, doneCountText } from "../lib/graphText";
 import { CONFLICT_ONLY_DASH, conflictOnlyEdges, edgeKey } from "../lib/graphEdgeKinds";
 import { isDone } from "../lib/status";
+import { waitingCount } from "../lib/waiting";
 import {
   FIT_PADDING,
   IDENTITY,
@@ -385,6 +387,9 @@ export default function Graph() {
   // project brings no card in and nothing flashes.
   const openTickets = useMemo(() => fetched?.filter((t) => !isDone(t.status)) ?? null, [fetched]);
   const glowing = useChangeGlow(openTickets);
+  // The header's count is every project's tickets waiting on the person, not
+  // only this project's: an answer owed elsewhere still needs the person.
+  const waitingTotal = useMemo(() => waitingCount(fetched ?? []), [fetched]);
   // The ids of the cards the filters match, or null when every card on the
   // graph does: with no filter but the project set, or in hide mode.
   const matching = useMemo(
@@ -791,6 +796,7 @@ export default function Graph() {
     <div className="h-full flex flex-col">
       <header className="shrink-0 flex items-center justify-between px-6 h-14 border-b border-slate-800">
         <h1 className="text-lg font-semibold text-white">Dependencies</h1>
+        <WaitingChip count={waitingTotal} />
       </header>
 
       <FilterPanel

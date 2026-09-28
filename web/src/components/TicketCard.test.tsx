@@ -1,13 +1,16 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import type { Ticket } from "../api/client";
 import {
   ATTENTION_CARD_CLASS,
   ATTENTION_DOT_CLASS,
   ATTENTION_REVIEW_CARD_CLASS,
   ATTENTION_REVIEW_DOT_CLASS,
+  ATTENTION_WAITING_CARD_CLASS,
+  ATTENTION_WAITING_DOT_CLASS,
 } from "../lib/attention";
+import { TICK_MS } from "../lib/now";
 import TicketCard, { type GraphCardInfo } from "./TicketCard";
 
 afterEach(cleanup);
@@ -297,7 +300,94 @@ describe("TicketCard's attention glow", () => {
       const card = container.firstElementChild as HTMLElement;
       expect(classTokens(card)).not.toContain(ATTENTION_CARD_CLASS);
       expect(classTokens(card)).not.toContain(ATTENTION_REVIEW_CARD_CLASS);
+      expect(classTokens(card)).not.toContain(ATTENTION_WAITING_CARD_CLASS);
       unmount();
     }
+  });
+});
+
+// A ticket waiting on the person: a red card with its request in a band at
+// its foot, on Kanban and the graph alike; only the graph's card ripples,
+// pulses its dot and says how long it has waited.
+describe("TicketCard waiting on the person", () => {
+  const ASKED = "2026-09-28T10:00:00Z";
+  const waitingTicket = (overrides: Partial<Ticket> = {}) =>
+    makeTicket({
+      status: "needs_user_input",
+      openRequest: {
+        id: "r1",
+        ticketId: "t1",
+        agentId: "a1",
+        type: "approval",
+        prompt: "Delete the Decisions document now that its bullets are entries?\nNothing else is deleted.",
+        choices: [],
+        createdAt: ASKED,
+      },
+      ...overrides,
+    });
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.parse(ASKED) + 12 * 60_000);
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("has a red border and a band naming the type before the prompt's first line", () => {
+    const { container } = render(<TicketCard ticket={waitingTicket()} graph={GRAPH} />);
+    const card = container.firstElementChild as HTMLElement;
+    expect(classTokens(card)).toContain("border-red-500/80");
+    const band = screen.getByTestId("card-request");
+    expect(band.textContent).toBe("ApproveDelete the Decisions document now that its bullets are entries?");
+    expect(band.textContent).not.toContain("Nothing else is deleted");
+  });
+
+  it("names a question Question", () => {
+    const ticket = waitingTicket();
+    render(<TicketCard ticket={{ ...ticket, openRequest: { ...ticket.openRequest!, type: "question", prompt: "Which port?" } }} />);
+    expect(screen.getByTestId("card-request").textContent).toBe("QuestionWhich port?");
+  });
+
+  it("ripples its ring and pulses its dot on the graph, in the waiting pair and no other", () => {
+    const { container } = render(<TicketCard ticket={waitingTicket()} graph={GRAPH} />);
+    const card = container.firstElementChild as HTMLElement;
+    expect(classTokens(card)).toContain(ATTENTION_WAITING_CARD_CLASS);
+    expect(classTokens(card)).not.toContain(ATTENTION_CARD_CLASS);
+    expect(classTokens(card)).not.toContain(ATTENTION_REVIEW_CARD_CLASS);
+    const dot = left(container).firstElementChild as HTMLElement;
+    expect(classTokens(dot)).toContain(ATTENTION_WAITING_DOT_CLASS);
+    expect(classTokens(dot)).toContain("bg-red-500");
+    expect(dot.getAttribute("title")).toBe("Waiting on You");
+  });
+
+  it("shows on the graph how long it has waited, from its request, and counts on", () => {
+    render(<TicketCard ticket={waitingTicket()} graph={GRAPH} />);
+    expect(screen.getByTestId("card-waited").textContent).toBe("12m");
+    act(() => {
+      vi.advanceTimersByTime(TICK_MS * 2);
+    });
+    expect(screen.getByTestId("card-waited").textContent).toBe("13m");
+  });
+
+  it("stays still on Kanban, with no wait time, but keeps the red border and band", () => {
+    const { container } = render(<TicketCard ticket={waitingTicket()} />);
+    const card = container.firstElementChild as HTMLElement;
+    expect(classTokens(card)).not.toContain(ATTENTION_WAITING_CARD_CLASS);
+    expect(classTokens(card)).toContain("border-red-500/80");
+    expect(screen.queryByTestId("card-waited")).toBeNull();
+    expect(screen.getByTestId("card-request")).toBeTruthy();
+  });
+
+  it("keeps the red border without a band when its request didn't come with it", () => {
+    const { container } = render(<TicketCard ticket={waitingTicket({ openRequest: undefined })} graph={GRAPH} />);
+    expect(classTokens(container.firstElementChild as HTMLElement)).toContain("border-red-500/80");
+    expect(screen.queryByTestId("card-request")).toBeNull();
+  });
+
+  it("shows no band on a card that isn't waiting", () => {
+    render(<TicketCard ticket={makeTicket({ status: "in_progress" })} graph={GRAPH} />);
+    expect(screen.queryByTestId("card-request")).toBeNull();
+    expect(screen.queryByTestId("card-waited")).toBeNull();
   });
 });

@@ -548,6 +548,57 @@ describe("computeGraphTopology", () => {
     expect(crossingsOf(topology)).toBe(0);
   });
 
+  // Tickets waiting on the person, each with when its request was made.
+  function waitingOn(specs: Spec[], asked: Record<string, string>): GraphTicket[] {
+    return tickets(specs).map((t) => (asked[t.id] ? { ...t, openRequest: { createdAt: asked[t.id] } } : t));
+  }
+
+  it("keeps waiting tickets off the shelf, at the top of Ready above the other held ones, oldest first", () => {
+    const topology = computeGraphTopology(
+      waitingOn(
+        [
+          ["A-1", "todo"],
+          ["A-2", "in_progress"],
+          ["A-3", "needs_user_input"],
+          ["A-4", "needs_user_input"],
+          ["A-5", "agent_review"],
+        ],
+        { "A-3": "2026-09-28T10:05:00Z", "A-4": "2026-09-28T10:00:00Z" },
+      ),
+    );
+    expect(topology.columns).toEqual([["A-4", "A-3", "A-2", "A-5"]]);
+    expect(topology.shelf).toEqual(["A-1"]);
+    expect(topology.nodes.filter((n) => n.active).map((n) => n.id)).toEqual(["A-4", "A-3", "A-2", "A-5"]);
+  });
+
+  it("puts a waiting ticket at the top of a later column, above another component's cards, and places it there", () => {
+    // By ticket order A-1's component leads, so A-2 would top column 1; the
+    // waiting A-4 goes above it instead, and is drawn above it too.
+    const specs: Spec[] = [
+      ["A-1", "todo"],
+      ["A-2", "todo", ["A-1"]],
+      ["A-3", "todo"],
+      ["A-4", "needs_user_input", ["A-3"]],
+    ];
+    const input = waitingOn(specs, { "A-4": "2026-09-28T10:00:00Z" });
+    expect(computeGraphTopology(input).columns[1]).toEqual(["A-4", "A-2"]);
+    const y = Object.fromEntries(layoutGraph(input).nodes.map((n) => [n.id, n.y]));
+    expect(y["A-4"]).toBeLessThan(y["A-2"]);
+  });
+
+  it("orders two waiting tickets of one column oldest first, whatever their ticket order", () => {
+    const specs: Spec[] = [
+      ["A-1", "todo"],
+      ["A-2", "needs_user_input", ["A-1"]],
+      ["A-3", "needs_user_input", ["A-1"]],
+      ["A-4", "todo", ["A-1"]],
+    ];
+    const topology = computeGraphTopology(
+      waitingOn(specs, { "A-2": "2026-09-28T11:00:00Z", "A-3": "2026-09-28T09:00:00Z" }),
+    );
+    expect(topology.columns[1]).toEqual(["A-3", "A-2", "A-4"]);
+  });
+
   it("keeps held tickets at the top of Ready, linked or not, and their components first", () => {
     // A-2 is held and links nothing; A-3 is held and blocks A-5. Both stay in
     // the column, above A-1, and A-3's component leads column 1 so its arrow

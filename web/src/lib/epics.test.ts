@@ -79,6 +79,16 @@ describe("barSegments", () => {
     ]);
   });
 
+  it("gives the tickets waiting on the person their own segment, between agent review and in progress", () => {
+    expect(barSegments(progress({ todo: 2, in_progress: 1, needs_user_input: 1, agent_review: 1, done: 5 }))).toEqual([
+      { status: "done", count: 5, percent: 50 },
+      { status: "agent_review", count: 1, percent: 10 },
+      { status: "needs_user_input", count: 1, percent: 10 },
+      { status: "in_progress", count: 1, percent: 10 },
+      { status: "todo", count: 2, percent: 20 },
+    ]);
+  });
+
   it("is empty with no tickets", () => {
     expect(barSegments(progress())).toEqual([]);
   });

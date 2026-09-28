@@ -41,12 +41,18 @@
 //   column for the shelf (topology.shelf, in ticket order): balanced columns
 //   of their own left of it, still under Ready's header. The Ready column
 //   the linked tickets keep stays the last of Ready, next to Blocked · 1
-//   step. A ticket an agent holds (in_progress or agent_review) stays at the
-//   top of that column with the other held tickets, linked or not. A ticket
-//   in a later column with no edge, which only hidden blockers put there,
-//   sits at the bottom of its column, below every group of linked tickets.
-//   Which tickets are linked is decided on the input alone, so a ticket moves
-//   between the shelf and the graph as it gains or loses edges.
+//   step. A ticket an agent holds (in_progress, needs_user_input or
+//   agent_review) stays at the top of that column with the other held
+//   tickets, linked or not. A ticket in a later column with no edge, which
+//   only hidden blockers put there, sits at the bottom of its column, below
+//   every group of linked tickets. Which tickets are linked is decided on the
+//   input alone, so a ticket moves between the shelf and the graph as it
+//   gains or loses edges.
+// - A ticket waiting on the person (needs_user_input) goes first within its
+//   group: in Ready above the other held tickets, in a later column above
+//   the other linked cards (or, with no edge, the other unlinked ones). Two
+//   waiting tickets go oldest first, by when their request was made
+//   (waiting.ts), so the longest wait is on top.
 // - A forward edge that spans more than one column gets a waypoint (a dummy
 //   node) in every column it crosses. Waypoints are ordered and placed like
 //   cards of no height, so the edge is drawn through a gap of its own rather
@@ -113,7 +119,8 @@
 import type { Ticket, TicketRef } from "../api/client";
 import { DONE_BLOCK_LIMIT, recentDone, type DoneTicket } from "./graphDone";
 import { balanceShelf, placeShelf } from "./graphShelf";
-import { isActive, isDone } from "./status";
+import { isDone, isHeld, isWaiting } from "./status";
+import { compareWaiting, type WaitingTicket } from "./waiting";
 
 // Upstream and downstream chains through a node, for hover highlighting.
 export { chainFinder, chainRole, edgeChainRole, edgeKey, graphChains, showsCyclePill } from "./graphChains";
@@ -124,7 +131,8 @@ export type GraphTicketRef = Pick<TicketRef, "id" | "status">;
 
 /** The part of a Ticket the layout reads. A full Ticket satisfies it. */
 export type GraphTicket = Pick<Ticket, "id" | "projectPrefix" | "number" | "status"> &
-  Pick<DoneTicket, "doneAt" | "createdAt"> & {
+  Pick<DoneTicket, "doneAt" | "createdAt"> &
+  WaitingTicket & {
     dependsOn?: readonly GraphTicketRef[];
   };
 
@@ -137,7 +145,7 @@ export interface GraphNode<T extends GraphTicket = GraphTicket> {
   row: number;
   /** A Ready ticket with no edges that no agent holds, on the shelf left of the linked Ready column. */
   inShelf: boolean;
-  /** Held by an agent: in_progress or agent_review. Sorted to the top of Ready. */
+  /** Held by an agent: in_progress, needs_user_input or agent_review. Sorted to the top of Ready. */
   active: boolean;
   /** Distinct dependencies that are done. */
   satisfiedDependencyCount: number;
@@ -416,8 +424,18 @@ export function computeGraphTopology<T extends GraphTicket>(tickets: readonly T[
     }),
   );
 
-  const active = open.map((t) => isActive(t.status));
+  const active = open.map((t) => isHeld(t.status));
   const inShelf = open.map((_, v) => column[v] === 0 && !linked[v] && !active[v]);
+  // Each waiting ticket's place among the waiting ones, oldest first (a tie
+  // in ticket order), and `waitingTotal` for every other ticket, so a
+  // waiting ticket always sorts above the rest of its group.
+  const waitingOrder = open
+    .map((_, v) => v)
+    .filter((v) => isWaiting(open[v].status))
+    .sort((a, b) => compareWaiting(open[a], open[b]) || a - b);
+  const waitingTotal = waitingOrder.length;
+  const waitRank = new Int32Array(count).fill(waitingTotal);
+  waitingOrder.forEach((v, rank) => (waitRank[v] = rank));
 
   // The layered graph the ordering works on. Entries below `count` are the
   // nodes, shelf ones left unused; the rest are waypoints. `up` and `down`
@@ -464,13 +482,19 @@ export function computeGraphTopology<T extends GraphTicket>(tickets: readonly T[
     }),
   );
 
-  // In column 0, tickets an agent holds are group 0 and everything else group
-  // 1; in later columns a node with no edge is group 1 and everything else,
-  // waypoints included, group 0. A group always sorts above the next. Both
-  // active statuses share a group, so a ticket bouncing between the
-  // implementer and the reviewer keeps its row as it flips.
-  const group = new Uint8Array(entries);
-  for (let v = 0; v < count; v++) group[v] = column[v] === 0 ? (active[v] ? 0 : 1) : linked[v] ? 0 : 1;
+  // In column 0, tickets an agent holds are the top tier and everything else
+  // the bottom one; in later columns a node with no edge is the bottom tier
+  // and everything else, waypoints included, the top one. Within a tier each
+  // waiting ticket is a group of its own, oldest first, above one group for
+  // the rest. A group always sorts above the next. The active statuses share
+  // a group, so a ticket bouncing between the implementer and the reviewer
+  // keeps its row as it flips.
+  const tierSize = waitingTotal + 1;
+  const group = new Int32Array(entries).fill(waitingTotal);
+  for (let v = 0; v < count; v++) {
+    const tier = column[v] === 0 ? (active[v] ? 0 : 1) : linked[v] ? 0 : 1;
+    group[v] = tier * tierSize + waitRank[v];
+  }
   // Seed rows in ticket order, a waypoint by its edge's blocker and then its
   // blocked ticket. No two entries of one column tie.
   const seed = (x: number) => (x < count ? x : edgeFrom[waypointEdge[x - count]]);
@@ -558,7 +582,7 @@ function orderComponent(
   layers: number[][],
   up: readonly number[][],
   down: readonly number[][],
-  group: Uint8Array,
+  group: Int32Array,
   pos: Int32Array,
 ): number[][] {
   const index = (layer: number[]) => layer.forEach((x, i) => (pos[x] = i));
@@ -591,7 +615,7 @@ function orderComponent(
 // one side. An entry with no neighbours there keeps its row, and the others
 // fill the rest of the group's rows in barycentre order, so the barycentre
 // is only ever compared with another barycentre. Ties keep the current order.
-function reorder(layer: number[], neighbours: readonly number[][], group: Uint8Array, pos: Int32Array) {
+function reorder(layer: number[], neighbours: readonly number[][], group: Int32Array, pos: Int32Array) {
   const current = [...layer];
   for (let start = 0, end = 0; start < current.length; start = end) {
     while (end < current.length && group[current[end]] === group[current[start]]) end++;
@@ -618,7 +642,7 @@ function transpose(
   layers: number[][],
   up: readonly number[][],
   down: readonly number[][],
-  group: Uint8Array,
+  group: Int32Array,
   pos: Int32Array,
 ) {
   // Crossings between a's and b's edges while a sits directly above b.

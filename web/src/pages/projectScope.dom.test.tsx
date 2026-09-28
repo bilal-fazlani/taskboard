@@ -477,24 +477,27 @@ describe("Kanban for one project", () => {
     expect(window.location.search).toBe("?project=ACP&repo=acme%2Fweb&repo=other%2Frepo");
   });
 
-  it("leaves out a column the API sends for a status it draws none for", async () => {
-    // The API has a needs_user_input column before the kanban draws one
-    // (ACP-18); its tickets neither show nor count.
+  it("shows and counts the needs_user_input column, and leaves out one for a status it doesn't know", async () => {
+    // A newer server may send a column this build draws none for; its
+    // tickets neither show nor count.
     const waiting = ticket("ACP", 4, { status: "needs_user_input" });
+    const unknown = ticket("ACP", 5, { status: "blocked_on_ci" });
     mockApi.board.get.mockResolvedValue({
       projectId: "",
       columns: [
         { status: "todo", tickets: [ACP2, ACP3] },
         { status: "in_progress", tickets: [ACP1] },
         { status: "needs_user_input", tickets: [waiting] },
+        { status: "blocked_on_ci", tickets: [unknown] },
         { status: "agent_review", tickets: [] },
         { status: "done", tickets: [] },
       ],
     });
     await mount(<Board />, "/kanban?project=ACP");
     expect(shows("ACP ticket 1")).toBe(true);
-    expect(shows("ACP ticket 4")).toBe(false);
-    expect(count()).toBe("3 tickets");
+    expect(shows("ACP ticket 4")).toBe(true);
+    expect(shows("ACP ticket 5")).toBe(false);
+    expect(count()).toBe("4 tickets");
   });
 });
 

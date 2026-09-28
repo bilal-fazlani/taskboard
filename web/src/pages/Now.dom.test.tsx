@@ -75,6 +75,23 @@ const BOARD: Now = {
     active("ACP-155", "Project activity feed", { subtasksDone: 2, subtasksTotal: 4, since: ago(72) }),
     active("IAGML-12", "Batch scoring endpoint", { subtasksDone: 1, subtasksTotal: 5, since: ago(18) }),
   ],
+  // Oldest wait first, as the server sends them.
+  waiting: [
+    active("ACP-209", "Taskboard skill writes back as entries", {
+      status: "needs_user_input",
+      since: ago(12),
+      request: {
+        type: "approval",
+        prompt: "Delete the Agents epic's Decisions document now that its bullets are entries?\nNothing else goes.",
+        createdAt: ago(12),
+      },
+    }),
+    active("IAGML-3", "Reviews as entries", {
+      status: "needs_user_input",
+      since: ago(3),
+      request: { type: "question", prompt: "Mark review subtasks by round only?", createdAt: ago(3) },
+    }),
+  ],
   inReview: [
     active("ACP-158", "A Now page", { status: "agent_review", subtasksDone: 4, subtasksTotal: 4, reviewRounds: 1, review: "approved", since: ago(185) }),
     active("ACP-137", "New epic button on archived projects", { status: "agent_review", subtasksDone: 3, subtasksTotal: 3, reviewRounds: 1, review: "running", since: ago(34) }),
@@ -158,6 +175,49 @@ describe("Now page", () => {
     expect(within(cardOf("Batch scoring endpoint")).getByTestId("running-for").textContent).toBe("18m");
   });
 
+  it("lists what waits on you first, oldest first, each with its request's type, prompt and wait", async () => {
+    await mount();
+    const waiting = group("Waiting on You");
+    // First on the page: before In Progress, Agent Review and Landed.
+    for (const later of ["In Progress", "Agent Review", "Landed"]) {
+      expect(waiting.compareDocumentPosition(group(later)) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    }
+    expect(within(waiting).getByText("oldest first")).toBeTruthy();
+    const rows = within(waiting).getAllByTestId("waiting-row");
+    expect(rows.map((r) => within(r).getAllByText(/-\d+$/)[0].textContent)).toEqual(["ACP-209", "IAGML-3"]);
+    expect(within(rows[0]).getByTestId("waiting-request").textContent).toBe(
+      "Approve: Delete the Agents epic's Decisions document now that its bullets are entries?",
+    );
+    expect(within(rows[0]).getByTestId("waited-for").textContent).toBe("12m");
+    expect(within(rows[1]).getByTestId("waiting-request").textContent).toBe("Question: Mark review subtasks by round only?");
+    expect(within(rows[1]).getByTestId("project-chip").textContent).toBe("IAGML");
+    expect(rows[0].getAttribute("href")).toBe("/?project=ACP&ticket=ACP-209");
+    // Neither shows in the other groups.
+    expect(cards("In Progress")).toHaveLength(3);
+    expect(cards("Agent Review")).toHaveLength(2);
+  });
+
+  it("says so when nothing waits on you, and still leads the page", async () => {
+    mockApi.now.get.mockReset().mockResolvedValue({ ...BOARD, waiting: [] });
+    await mount();
+    const waiting = group("Waiting on You");
+    expect(within(waiting).getByText("Nothing waiting on you")).toBeTruthy();
+    expect(within(waiting).queryAllByTestId("waiting-row")).toHaveLength(0);
+    expect(within(waiting).queryByText("oldest first")).toBeNull();
+  });
+
+  it("brings the waiting group into view and focus when a link names it", async () => {
+    await mount("/now?project=all#waiting");
+    const waiting = group("Waiting on You");
+    expect(waiting.id).toBe("waiting");
+    expect(document.activeElement).toBe(waiting);
+  });
+
+  it("leaves focus alone on an ordinary visit", async () => {
+    await mount("/now?project=all");
+    expect(document.activeElement).not.toBe(group("Waiting on You"));
+  });
+
   it("tells a running review from one approved and waiting on the person", async () => {
     await mount();
     expect(cards("Agent Review")).toHaveLength(2);
@@ -233,9 +293,10 @@ describe("Now page", () => {
     // Every project, by name.
     expect([...select.options].map((o) => o.textContent)).toEqual(["All projects", "Control plane", "Leaderboard", "Scoring"]);
     expect(within(cardOf("Batch scoring endpoint")).getByTestId("project-chip").textContent).toBe("IAGML");
-    expect(screen.getAllByTestId("project-chip")).toHaveLength(8);
+    // Five active cards, two waiting rows and three landed rows.
+    expect(screen.getAllByTestId("project-chip")).toHaveLength(10);
 
-    mockApi.now.get.mockResolvedValue({ ...BOARD, inProgress: [BOARD.inProgress[2]], inReview: [], landed: [] });
+    mockApi.now.get.mockResolvedValue({ ...BOARD, inProgress: [BOARD.inProgress[2]], waiting: [BOARD.waiting[1]], inReview: [], landed: [] });
     fireEvent.change(select, { target: { value: "IAGML" } });
     await settle();
     expect(params().get("project")).toBe("IAGML");
