@@ -65,12 +65,16 @@ func (s *Server) listTicketRequests(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, reqs)
 }
 
-// answerRequest answers POST /api/requests/{id}/answer: the person's answer,
-// and who gave it. answeredBy left out or blank takes the local person
-// (localPerson, entries.go), since an answer is today always the local
-// person's. An unknown request is a 404; an already-answered request, a
-// blank answer, or an answer that isn't one of the request's choices is a
-// 400.
+// answerRequest answers POST /api/requests/{id}/answer: the person's
+// answer, who gave it, and an optional note. answeredBy left out or blank
+// takes the local person (localPerson, entries.go), since an answer is
+// today always the local person's. A question's answer may be any
+// non-empty text, stored as a matching choice is written when it matches
+// one, case-insensitively; an approval's answer is always "approved" or
+// "declined" (models.ApprovalApproved, models.ApprovalDeclined), whatever
+// choices the request offers. An unknown request is a 404; an
+// already-answered request, a blank answer, or an approval answered with
+// anything else, is a 400.
 func (s *Server) answerRequest(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	existing, err := s.store.GetRequest(id)
@@ -85,6 +89,7 @@ func (s *Server) answerRequest(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Answer     string `json:"answer"`
 		AnsweredBy string `json:"answeredBy"`
+		Note       string `json:"note"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON")
@@ -94,7 +99,7 @@ func (s *Server) answerRequest(w http.ResponseWriter, r *http.Request) {
 	if answeredBy == "" {
 		answeredBy = localPerson()
 	}
-	answered, err := s.store.AnswerRequest(id, req.Answer, answeredBy)
+	answered, err := s.store.AnswerRequest(id, req.Answer, answeredBy, req.Note)
 	if err != nil {
 		writeStoreError(w, err)
 		return

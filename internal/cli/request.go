@@ -55,21 +55,23 @@ func requestCommands() *cobra.Command {
 	awaitCmd.Flags().DurationVar(&awaitTimeout, "timeout", defaultAwaitTimeout, "how long to wait before giving up, e.g. 30s or 5m")
 	awaitCmd.Flags().BoolVar(&awaitJSON, "json", false, "print the request as JSON instead of readable text")
 
-	var answer string
+	var answer, answerNote string
 	var answerJSON bool
 	answerCmd := &cobra.Command{
 		Use:   "answer [request-id]",
 		Short: "Answer a request for user input, as the person running this shell",
 		Long: "Answer a request for user input. This is the person's own command: the answer is recorded as " +
-			"given by the local user (the same default author `entry add` uses), never by an agent. When the " +
-			"request offers choices, --answer must match one of them (matched ignoring case).",
+			"given by the local user (the same default author `entry add` uses), never by an agent. A question's " +
+			"--answer may be any non-empty text; when it matches one of the request's choices, case-insensitively, " +
+			"it is stored as the choice is written. An approval's --answer is always \"approved\" or \"declined\", " +
+			"whatever choices the request offers. --note is optional and goes with either.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			store, err := openStore()
 			if err != nil {
 				return err
 			}
-			r, err := store.AnswerRequest(args[0], answer, defaultAuthor())
+			r, err := store.AnswerRequest(args[0], answer, defaultAuthor(), answerNote)
 			if err != nil {
 				return err
 			}
@@ -77,11 +79,17 @@ func requestCommands() *cobra.Command {
 				return encodeJSON(cmd.OutOrStdout(), r)
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "Answered request %s as %s: %s\n", r.ID, r.AnsweredBy, r.Answer)
+			if r.Note != "" {
+				fmt.Fprintf(cmd.OutOrStdout(), "Note: %s\n", r.Note)
+			}
 			return nil
 		},
 	}
-	answerCmd.Flags().StringVar(&answer, "answer", "", "the answer to give (required); must be one of the request's choices when it has any")
+	answerCmd.Flags().StringVar(&answer, "answer", "",
+		"the answer to give (required): free text for a question (stored as the matching choice's own text when "+
+			"it matches one, case-insensitively), or \"approved\"/\"declined\" for an approval, whatever choices it offers")
 	_ = answerCmd.MarkFlagRequired("answer")
+	answerCmd.Flags().StringVar(&answerNote, "note", "", "an optional note to go with the answer")
 	answerCmd.Flags().BoolVar(&answerJSON, "json", false, "print the answered request as JSON instead of readable text")
 
 	cmd.AddCommand(awaitCmd, answerCmd)

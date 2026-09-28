@@ -387,7 +387,7 @@ func TestEveryTicketCallFlagsOpenNotes(t *testing.T) {
 		t.Fatal(err)
 	}
 	flags("await_answer", map[string]any{"request": asked.ID, "agentId": f.agent, "timeoutSeconds": 0})
-	if _, err := st.AnswerRequest(asked.ID, "3014", "Bilal"); err != nil {
+	if _, err := st.AnswerRequest(asked.ID, "3014", "Bilal", ""); err != nil {
 		t.Fatal(err)
 	}
 	flags("release_ticket", map[string]any{"ticket": "ACP-1", "agentId": f.agent, "outcome": "give_back", "handOff": "Stopped at the tests."})

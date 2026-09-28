@@ -71,7 +71,7 @@ func TestTicketReadsCarryTheHoldingAgentAndOpenRequest(t *testing.T) {
 
 	// Answered, the request is no longer open; given back, the agent is
 	// gone.
-	if _, err := f.s.AnswerRequest(reqID, "Land", "Bilal"); err != nil {
+	if _, err := f.s.AnswerRequest(reqID, "approved", "Bilal", ""); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.s.ReleaseTicket(f.ticket.ID, models.ReleaseTicketRequest{AgentID: f.first.ID,

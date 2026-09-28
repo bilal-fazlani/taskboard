@@ -195,7 +195,7 @@ func TestAgentToolsTakeAndTouchTheCallingAgent(t *testing.T) {
 	if got["answered"] != false || !f.lastSeen(t, sub).After(before) {
 		t.Errorf("await_answer by the subagent = %v, last seen %s", got, f.lastSeen(t, sub))
 	}
-	if _, err := f.s.store.AnswerRequest(id, "yes", "Bilal"); err != nil {
+	if _, err := f.s.store.AnswerRequest(id, "approved", "Bilal", ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -287,7 +287,7 @@ func TestRequestUserInputThenAwaitTheAnswer(t *testing.T) {
 	web := f.secondStore(t)
 	go func() {
 		time.Sleep(300 * time.Millisecond)
-		web.AnswerRequest(id, "3014", "Bilal")
+		web.AnswerRequest(id, "3014", "Bilal", "")
 	}()
 	got = callJSON(t, f.s, "await_answer", map[string]any{"request": id, "agentId": agent, "timeoutSeconds": 20})
 	if got["answered"] != true || got["answer"] != "3014" || got["answeredBy"] != "Bilal" {
@@ -397,7 +397,7 @@ func TestServeAnswersOtherCallsWhileOneWaits(t *testing.T) {
 	if resp := next(); resp["id"] != float64(2) {
 		t.Fatalf("first answer = %v, want list_projects' while the wait runs", resp)
 	}
-	if _, err := f.secondStore(t).AnswerRequest(id, "3014", "Bilal"); err != nil {
+	if _, err := f.secondStore(t).AnswerRequest(id, "3014", "Bilal", ""); err != nil {
 		t.Fatal(err)
 	}
 	resp := next()
@@ -470,7 +470,7 @@ func TestServeStopsACancelledWaitAndAnswersNoNotification(t *testing.T) {
 	// The answer comes after the cancellation: a wait still running would
 	// send it within a poll or two.
 	time.Sleep(200 * time.Millisecond)
-	if _, err := f.secondStore(t).AnswerRequest(id, "3014", "Bilal"); err != nil {
+	if _, err := f.secondStore(t).AnswerRequest(id, "3014", "Bilal", ""); err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(1500 * time.Millisecond)

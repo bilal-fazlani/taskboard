@@ -94,27 +94,29 @@ func TestCreateRequestRefusesASecondOpenRequestOrAnUnknownType(t *testing.T) {
 	}
 }
 
-// An answer stores what was answered and who answered, and moves the
-// ticket back to in_progress; a request with choices takes one of them.
-func TestAnswerRequestStoresTheAnswerAndWhoAnswered(t *testing.T) {
+// A question's answer may be any non-empty text; when it matches one of the
+// request's choices, case-insensitively, it is stored as the choice is
+// written, and either way answering moves the ticket back to in_progress.
+// An optional note goes with the answer.
+func TestAnswerRequestQuestionAcceptsFreeTextAndNormalisesAMatchingChoice(t *testing.T) {
 	f := newClaimFixture(t)
 	mustClaim(t, f.s, f.ticket.ID, f.first.ID)
-	id := mustCreateRequest(t, f.s, models.CreateUserInputRequest{TicketID: f.ticket.ID, AgentID: f.first.ID,
-		Type: models.UserInputApproval, Prompt: "Land it?", Choices: []string{"Land", "Hold"}})
+	matching := mustCreateRequest(t, f.s, models.CreateUserInputRequest{TicketID: f.ticket.ID, AgentID: f.first.ID,
+		Type: models.UserInputQuestion, Prompt: "Land it?", Choices: []string{"Land", "Hold"}})
 
-	_, err := f.s.AnswerRequest(id, "maybe", "Bilal")
-	wantInvalidContaining(t, err, `answer "maybe" is not one of the request's choices: Land, Hold`)
-	_, err = f.s.AnswerRequest(id, "land", "")
+	_, err := f.s.AnswerRequest(matching, "land", "", "")
 	wantInvalidContaining(t, err, "answeredBy is required")
-	_, err = f.s.AnswerRequest(id, " ", "Bilal")
+	_, err = f.s.AnswerRequest(matching, " ", "Bilal", "")
 	wantInvalidContaining(t, err, "answer is required")
 
-	r, err := f.s.AnswerRequest(id, "land", "Bilal")
+	// A case-insensitive match to a choice is stored as the choice is
+	// written.
+	r, err := f.s.AnswerRequest(matching, "land", "Bilal", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !r.Answered() || r.Answer != "Land" || r.AnsweredBy != "Bilal" {
-		t.Fatalf("answered request = %+v, want Land by Bilal", r)
+	if !r.Answered() || r.Answer != "Land" || r.AnsweredBy != "Bilal" || r.Note != "" {
+		t.Fatalf("matched answer = %+v, want Land by Bilal with no note", r)
 	}
 	got, _ := f.s.GetTicket(f.ticket.ID)
 	if got.Status != models.StatusInProgress || got.OpenRequest != nil || got.Agent == nil || got.Agent.ID != f.first.ID {
@@ -122,17 +124,57 @@ func TestAnswerRequestStoresTheAnswerAndWhoAnswered(t *testing.T) {
 	}
 	wantHistoryNote(t, f.s, f.ticket.ID, models.StatusNeedsUserInput, models.StatusInProgress, "Answered by Bilal")
 
-	_, err = f.s.AnswerRequest(id, "Hold", "Bilal")
+	_, err = f.s.AnswerRequest(matching, "Hold", "Bilal", "")
 	wantInvalidContaining(t, err, "is already answered, by Bilal")
-	_, err = f.s.AnswerRequest("no-such-request", "yes", "Bilal")
+	_, err = f.s.AnswerRequest("no-such-request", "yes", "Bilal", "")
 	wantInvalidContaining(t, err, `request not found: "no-such-request"`)
 
-	// With the first answered, the ticket can ask again, and a free answer
-	// takes any text.
+	// Free text that matches none of the offered choices is taken as given,
+	// not refused, and an optional note is kept alongside it.
+	free := mustCreateRequest(t, f.s, models.CreateUserInputRequest{TicketID: f.ticket.ID, AgentID: f.first.ID,
+		Type: models.UserInputQuestion, Prompt: "Which port?", Choices: []string{"3011", "3014"}})
+	if r, err := f.s.AnswerRequest(free, "3012, whatever's open", "Bilal", "Neither offered port was free."); err != nil ||
+		r.Answer != "3012, whatever's open" || r.Note != "Neither offered port was free." {
+		t.Fatalf("free-text answer = %+v, %v", r, err)
+	}
+
+	// A question with no choices at all takes any text too.
+	open := mustCreateRequest(t, f.s, models.CreateUserInputRequest{TicketID: f.ticket.ID, AgentID: f.first.ID,
+		Type: models.UserInputQuestion, Prompt: "Anything else?"})
+	if r, err := f.s.AnswerRequest(open, "3012", "Bilal", ""); err != nil || r.Answer != "3012" {
+		t.Fatalf("free answer with no choices: %+v, %v", r, err)
+	}
+}
+
+// An approval's answer is always "approved" or "declined", whatever it is
+// answered with and whatever choices the request offers; anything else,
+// including one of those choices, is refused. An optional note goes with
+// either answer.
+func TestAnswerRequestApprovalAcceptsOnlyApprovedOrDeclined(t *testing.T) {
+	f := newClaimFixture(t)
+	mustClaim(t, f.s, f.ticket.ID, f.first.ID)
+	id := mustCreateRequest(t, f.s, models.CreateUserInputRequest{TicketID: f.ticket.ID, AgentID: f.first.ID,
+		Type: models.UserInputApproval, Prompt: "Land it?", Choices: []string{"yes", "no"}})
+
+	// Free text, and even a choice the request itself offers, is refused:
+	// an approval's answer is always approved or declined.
+	for _, bad := range []string{"maybe", "yes", "no"} {
+		_, err := f.s.AnswerRequest(id, bad, "Bilal", "")
+		wantInvalidContaining(t, err, "is not approved or declined")
+	}
+
+	r, err := f.s.AnswerRequest(id, "Approved", "Bilal", "Ship it once CI is green.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !r.Answered() || r.Answer != models.ApprovalApproved || r.AnsweredBy != "Bilal" || r.Note != "Ship it once CI is green." {
+		t.Fatalf("approval answer = %+v, want approved by Bilal with its note", r)
+	}
+
 	next := mustCreateRequest(t, f.s, models.CreateUserInputRequest{TicketID: f.ticket.ID, AgentID: f.first.ID,
-		Type: models.UserInputQuestion, Prompt: "Which port?"})
-	if r, err := f.s.AnswerRequest(next, "3012", "Bilal"); err != nil || r.Answer != "3012" {
-		t.Fatalf("free answer: %+v, %v", r, err)
+		Type: models.UserInputApproval, Prompt: "Land the other one too?"})
+	if r, err := f.s.AnswerRequest(next, "DECLINED", "Bilal", ""); err != nil || r.Answer != models.ApprovalDeclined || r.Note != "" {
+		t.Fatalf("declined answer = %+v, %v", r, err)
 	}
 }
 
@@ -188,13 +230,13 @@ func TestAwaitAnswerSeesAnAnswerFromASecondConnection(t *testing.T) {
 		t.Fatalf("AwaitAnswer returned before any answer: %+v, %v", got.r, got.err)
 	case <-time.After(30 * time.Millisecond):
 	}
-	if _, err := personSide.AnswerRequest(id, "yes", "Bilal"); err != nil {
+	if _, err := personSide.AnswerRequest(id, "approved", "Bilal", ""); err != nil {
 		t.Fatal(err)
 	}
 	select {
 	case got := <-done:
-		if got.err != nil || got.r == nil || !got.r.Answered() || got.r.Answer != "yes" || got.r.AnsweredBy != "Bilal" {
-			t.Fatalf("AwaitAnswer = %+v, %v; want the answer yes by Bilal", got.r, got.err)
+		if got.err != nil || got.r == nil || !got.r.Answered() || got.r.Answer != models.ApprovalApproved || got.r.AnsweredBy != "Bilal" {
+			t.Fatalf("AwaitAnswer = %+v, %v; want it approved by Bilal", got.r, got.err)
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("AwaitAnswer did not see the answer written by the second connection")
@@ -214,7 +256,7 @@ func TestAwaitAnswerTimesOutOnItsOwnRequest(t *testing.T) {
 	mustClaim(t, f.s, other.ID, f.second.ID)
 	theirs := mustCreateRequest(t, f.s, models.CreateUserInputRequest{TicketID: other.ID, AgentID: f.second.ID,
 		Type: models.UserInputApproval, Prompt: "Ship it?"})
-	if _, err := f.s.AnswerRequest(theirs, "yes", "Bilal"); err != nil {
+	if _, err := f.s.AnswerRequest(theirs, "approved", "Bilal", ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -276,7 +318,7 @@ func TestAwaitAnswerKeepsTheWaitingAgentLive(t *testing.T) {
 		t.Fatal("another session took over the ticket of an agent waiting on its answer")
 	}
 
-	if _, err := f.s.AnswerRequest(id, "yes", "Bilal"); err != nil {
+	if _, err := f.s.AnswerRequest(id, "approved", "Bilal", ""); err != nil {
 		t.Fatal(err)
 	}
 	select {
@@ -341,7 +383,7 @@ func TestAWaitingOrchestratorKeepsItsSessionsTicketLive(t *testing.T) {
 		t.Fatalf("while the orchestrator waits the ticket reads agent %+v, want the live implementer", got.Agent)
 	}
 
-	if _, err := f.s.AnswerRequest(id, "yes", "Bilal"); err != nil {
+	if _, err := f.s.AnswerRequest(id, "approved", "Bilal", ""); err != nil {
 		t.Fatal(err)
 	}
 	select {

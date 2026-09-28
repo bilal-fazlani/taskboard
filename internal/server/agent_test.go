@@ -267,19 +267,24 @@ func TestRequestLifecycle(t *testing.T) {
 		t.Fatalf("history: status %d, %#v", status, history)
 	}
 
-	// An answer outside the offered choices is refused.
-	if _, status := doRequest[map[string]any](t, http.MethodPost, r.url+"/api/requests/"+requestID+"/answer",
-		`{"answer":"maybe","answeredBy":"Bilal"}`); status != http.StatusBadRequest {
-		t.Fatalf("answer not a choice: status %d, want 400", status)
+	// An approval's answer is always approved or declined, whatever it is
+	// answered with and whatever choices the request offers: free text and
+	// one of the request's own choices are both refused.
+	for _, bad := range []string{"maybe", "yes"} {
+		if _, status := doRequest[map[string]any](t, http.MethodPost, r.url+"/api/requests/"+requestID+"/answer",
+			fmt.Sprintf(`{"answer":%q,"answeredBy":"Bilal"}`, bad)); status != http.StatusBadRequest {
+			t.Fatalf("answer %q: status %d, want 400", bad, status)
+		}
 	}
 	if _, status := doRequest[map[string]any](t, http.MethodPost, r.url+"/api/requests/nope/answer",
-		`{"answer":"yes","answeredBy":"Bilal"}`); status != http.StatusNotFound {
+		`{"answer":"approved","answeredBy":"Bilal"}`); status != http.StatusNotFound {
 		t.Fatalf("answer unknown request: status %d, want 404", status)
 	}
 
 	answered, status := doRequest[map[string]any](t, http.MethodPost, r.url+"/api/requests/"+requestID+"/answer",
-		`{"answer":"yes","answeredBy":"Bilal"}`)
-	if status != http.StatusOK || answered["answer"] != "yes" || answered["answeredBy"] != "Bilal" {
+		`{"answer":"approved","answeredBy":"Bilal","note":"Ship it once CI is green."}`)
+	if status != http.StatusOK || answered["answer"] != "approved" || answered["answeredBy"] != "Bilal" ||
+		answered["note"] != "Ship it once CI is green." {
 		t.Fatalf("answer: status %d, %#v", status, answered)
 	}
 
@@ -288,9 +293,10 @@ func TestRequestLifecycle(t *testing.T) {
 		t.Fatalf("ticket after answer: %#v", backToWork["status"])
 	}
 
-	// Awaiting an already-answered request returns at once, answered.
+	// Awaiting an already-answered request returns at once, answered, note
+	// included.
 	awaited, status := doRequest[map[string]any](t, http.MethodGet, r.url+"/api/requests/"+requestID+"/await?timeout=5s", "")
-	if status != http.StatusOK || awaited["answer"] != "yes" {
+	if status != http.StatusOK || awaited["answer"] != "approved" || awaited["note"] != "Ship it once CI is green." {
 		t.Fatalf("await answered: status %d, %#v", status, awaited)
 	}
 	if _, status := doRequest[map[string]any](t, http.MethodGet, r.url+"/api/requests/nope/await", ""); status != http.StatusNotFound {

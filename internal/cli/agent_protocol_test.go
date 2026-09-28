@@ -18,9 +18,9 @@ var askIDRe = regexp.MustCompile(`^Request (\S+) \(approval\) created on`)
 
 // ticket ask creates a request for user input and prints its id, refusing a
 // second one while the first is open; request answer (the person's own
-// command) answers it, refusing an answer outside the request's choices;
-// request await returns once it is answered, or says it is still waiting
-// after --timeout.
+// command) answers it, with an optional --note, refusing an approval's
+// answer that isn't approved or declined; request await returns once it is
+// answered, or says it is still waiting after --timeout.
 func TestTicketAskAndRequestCommands(t *testing.T) {
 	setLiveBuild(t, false)
 	sandboxHome(t)
@@ -84,30 +84,36 @@ func TestTicketAskAndRequestCommands(t *testing.T) {
 		}
 	}
 
-	// answer is the person's, and must be one of the request's choices.
-	if _, err := runCLI(t, "--db", path, "request", "answer", requestID, "--answer", "maybe"); err == nil ||
-		!strings.Contains(err.Error(), "is not one of the request's choices") {
-		t.Fatalf("an answer outside the choices = %v, want it refused", err)
+	// answer is the person's; an approval's answer is always approved or
+	// declined, whatever choices the request offers, so free text and one
+	// of those choices are both refused.
+	for _, bad := range []string{"maybe", "yes"} {
+		if _, err := runCLI(t, "--db", path, "request", "answer", requestID, "--answer", bad); err == nil ||
+			!strings.Contains(err.Error(), "is not approved or declined") {
+			t.Fatalf("answer %q = %v, want it refused", bad, err)
+		}
 	}
-	answerOut := run("request", "answer", requestID, "--answer", "yes")
-	if !strings.Contains(answerOut, "Answered request "+requestID) || !strings.Contains(answerOut, "yes") {
+	answerOut := run("request", "answer", requestID, "--answer", "approved", "--note", "Ship it once CI is green.")
+	if !strings.Contains(answerOut, "Answered request "+requestID) || !strings.Contains(answerOut, "approved") ||
+		!strings.Contains(answerOut, "Note: Ship it once CI is green.") {
 		t.Fatalf("answer = %q", answerOut)
 	}
-	if _, err := runCLI(t, "--db", path, "request", "answer", requestID, "--answer", "yes"); err == nil ||
+	if _, err := runCLI(t, "--db", path, "request", "answer", requestID, "--answer", "approved"); err == nil ||
 		!strings.Contains(err.Error(), "already answered") {
 		t.Fatalf("answering twice = %v, want it refused", err)
 	}
 
 	// await now returns immediately with the answer.
 	awaitOut := run("request", "await", requestID, "--timeout", "5s")
-	if !strings.Contains(awaitOut, "answered by") || !strings.Contains(awaitOut, "yes") {
+	if !strings.Contains(awaitOut, "answered by") || !strings.Contains(awaitOut, "approved") {
 		t.Fatalf("await after an answer = %q", awaitOut)
 	}
 
-	// --json prints the answered request.
+	// --json prints the answered request, note included.
 	jsonOut := run("request", "await", requestID, "--json")
 	var answered models.TicketRequest
-	if err := json.Unmarshal([]byte(jsonOut), &answered); err != nil || answered.Answer != "yes" {
+	if err := json.Unmarshal([]byte(jsonOut), &answered); err != nil || answered.Answer != "approved" ||
+		answered.Note != "Ship it once CI is green." {
 		t.Fatalf("await --json = %q: %v", jsonOut, err)
 	}
 }

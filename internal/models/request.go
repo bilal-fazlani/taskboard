@@ -25,9 +25,18 @@ func ValidUserInputType(t string) bool {
 	return slices.Contains(UserInputTypes, t)
 }
 
+// ApprovalApproved and ApprovalDeclined are the only two answers an
+// approval request accepts, whatever choices it offers: AnswerRequest
+// matches them ignoring case and stores the value written here.
+const (
+	ApprovalApproved = "approved"
+	ApprovalDeclined = "declined"
+)
+
 // TicketRequest is an agent's request for user input on a ticket. A ticket
 // has at most one unanswered request. Answer, AnsweredBy and AnsweredAt are
-// set together, once the person answers.
+// set together, once the person answers; Note is set then too, but stays
+// optional even so.
 type TicketRequest struct {
 	ID       string `json:"id"`
 	TicketID string `json:"ticketId"`
@@ -38,18 +47,26 @@ type TicketRequest struct {
 	// Type is the type of user input, one of UserInputTypes.
 	Type   string `json:"type"`
 	Prompt string `json:"prompt"`
-	// Choices are the answers offered, empty when the answer is free.
+	// Choices are the answers offered. For a question they are suggestions:
+	// the person may answer with any non-empty text instead, and an answer
+	// that matches one, case-insensitively, is stored as the choice is
+	// written. For an approval they change nothing: its answer is always
+	// ApprovalApproved or ApprovalDeclined.
 	Choices []string `json:"choices"`
 	Answer  string   `json:"answer,omitempty"`
 	// AnsweredBy is who answered: the local person today, the account once
 	// there are teams.
-	AnsweredBy string     `json:"answeredBy,omitempty"`
+	AnsweredBy string `json:"answeredBy,omitempty"`
+	// Note is an optional note the person leaves alongside the answer.
+	Note       string     `json:"note,omitempty"`
 	CreatedAt  time.Time  `json:"createdAt"`
 	AnsweredAt *time.Time `json:"answeredAt,omitempty"`
 }
 
 // CreateUserInputRequest is an agent asking the person for user input on a
-// ticket. Choices, when given, are the only answers the person can give.
+// ticket. For a question, choices are suggestions the person may answer
+// with something else instead. For an approval they change nothing: its
+// answer is always ApprovalApproved or ApprovalDeclined.
 type CreateUserInputRequest struct {
 	TicketID string `json:"ticketId"`
 	// AgentID is the agent asking, which collects the answer.

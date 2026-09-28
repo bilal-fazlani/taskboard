@@ -16,10 +16,20 @@ import (
 // polling the database is the only way to see it.
 const DefaultAwaitPoll = 500 * time.Millisecond
 
+// nullIfEmpty is s as a NULL write when it is empty, or itself otherwise:
+// for an optional column, such as a request's note, where "" and "never
+// given" mean the same thing.
+func nullIfEmpty(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
+}
+
 // requestSelect reads a request for user input. A request on a ticket in a
 // deleted project is not read.
 const requestSelect = `SELECT r.id, r.ticket_id, r.agent_id, r.type, r.prompt, r.choices,
-		r.answer, r.answered_by, r.created_at, r.answered_at
+		r.answer, r.answered_by, r.note, r.created_at, r.answered_at
 	FROM ticket_requests r`
 
 // liveRequest keeps requestSelect to requests on live tickets.
@@ -28,15 +38,15 @@ const liveRequest = ` r.ticket_id IN (` + liveTicketIDs + `)`
 func scanRequest(row interface{ Scan(...any) error }) (models.TicketRequest, error) {
 	var r models.TicketRequest
 	var choices string
-	var answer, answeredBy sql.NullString
+	var answer, answeredBy, note sql.NullString
 	if err := row.Scan(&r.ID, &r.TicketID, &r.AgentID, &r.Type, &r.Prompt, &choices,
-		&answer, &answeredBy, &r.CreatedAt, &r.AnsweredAt); err != nil {
+		&answer, &answeredBy, &note, &r.CreatedAt, &r.AnsweredAt); err != nil {
 		return r, err
 	}
 	if err := json.Unmarshal([]byte(choices), &r.Choices); err != nil {
 		return r, fmt.Errorf("reading request %s's choices: %w", r.ID, err)
 	}
-	r.Answer, r.AnsweredBy = answer.String, answeredBy.String
+	r.Answer, r.AnsweredBy, r.Note = answer.String, answeredBy.String, note.String
 	return r, nil
 }
 
@@ -173,17 +183,22 @@ func (s *Store) CreateRequest(req models.CreateUserInputRequest) (string, error)
 	return id, nil
 }
 
-// AnswerRequest stores the person's answer to a request and who gave it,
-// and moves the request's ticket from needs_user_input back to
-// in_progress; a ticket someone has since moved elsewhere stays where it
-// is. When the request offers choices the answer must be one of them,
-// matched ignoring case and stored as the choice is written. It answers
-// with the answered request. An unknown request, one already answered, or a
-// blank answer or answerer is an ErrInvalidInput and writes nothing.
-func (s *Store) AnswerRequest(requestID, answer, answeredBy string) (*models.TicketRequest, error) {
+// AnswerRequest stores the person's answer to a request, who gave it and an
+// optional note, and moves the request's ticket from needs_user_input back
+// to in_progress; a ticket someone has since moved elsewhere stays where it
+// is. A question's answer may be any non-empty text; when it matches one of
+// the request's choices, matched ignoring case, it is stored as the choice
+// is written. An approval's answer is always models.ApprovalApproved or
+// models.ApprovalDeclined, matched ignoring case and stored as those are
+// written, whatever choices the request offers. It answers with the
+// answered request. An unknown request, one already answered, a blank
+// answer or answerer, or an approval answered with anything else, is an
+// ErrInvalidInput and writes nothing.
+func (s *Store) AnswerRequest(requestID, answer, answeredBy, note string) (*models.TicketRequest, error) {
 	requestID = strings.TrimSpace(requestID)
 	answer = strings.TrimSpace(answer)
 	answeredBy = strings.TrimSpace(answeredBy)
+	note = strings.TrimSpace(note)
 	if answer == "" {
 		return nil, invalidInput("answer is required")
 	}
@@ -207,23 +222,29 @@ func (s *Store) AnswerRequest(requestID, answer, answeredBy string) (*models.Tic
 	if r.Answered() {
 		return nil, invalidInput("request %s is already answered, by %s", r.ID, r.AnsweredBy)
 	}
-	if len(r.Choices) > 0 {
-		chosen := ""
+	switch r.Type {
+	case models.UserInputApproval:
+		switch {
+		case strings.EqualFold(answer, models.ApprovalApproved):
+			answer = models.ApprovalApproved
+		case strings.EqualFold(answer, models.ApprovalDeclined):
+			answer = models.ApprovalDeclined
+		default:
+			return nil, invalidInput("answer %q is not %s or %s: an approval's answer is always one of the two",
+				answer, models.ApprovalApproved, models.ApprovalDeclined)
+		}
+	default:
 		for _, c := range r.Choices {
 			if strings.EqualFold(c, answer) {
-				chosen = c
+				answer = c
 				break
 			}
 		}
-		if chosen == "" {
-			return nil, invalidInput("answer %q is not one of the request's choices: %s", answer, strings.Join(r.Choices, ", "))
-		}
-		answer = chosen
 	}
 
 	now := time.Now().UTC()
-	if _, err := tx.Exec(`UPDATE ticket_requests SET answer = ?, answered_by = ?, answered_at = ? WHERE id = ? AND answered_at IS NULL`,
-		answer, answeredBy, stamp(now), r.ID); err != nil {
+	if _, err := tx.Exec(`UPDATE ticket_requests SET answer = ?, answered_by = ?, note = ?, answered_at = ? WHERE id = ? AND answered_at IS NULL`,
+		answer, answeredBy, nullIfEmpty(note), stamp(now), r.ID); err != nil {
 		return nil, fmt.Errorf("answering request: %w", err)
 	}
 	status, _, err := ticketHolding(tx, r.TicketID)
