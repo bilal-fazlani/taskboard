@@ -6,7 +6,9 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/tcarac/taskboard/internal/db"
 	"github.com/tcarac/taskboard/internal/models"
 )
 
@@ -180,5 +182,81 @@ func TestTicketReleaseCommand(t *testing.T) {
 	var finished models.Ticket
 	if err := json.Unmarshal([]byte(finishOut), &finished); err != nil || finished.Status != models.StatusDone {
 		t.Fatalf("finish --json = %q: %v", finishOut, err)
+	}
+}
+
+// ticket start claims the ticket for --agent and prints the start as
+// compact JSON, with or without --json, the shape MCP and HTTP answer;
+// another session's live agent
+// is refused, naming the holder, and once it is stale the ticket is taken
+// over and the start says from whom.
+func TestTicketStartCommand(t *testing.T) {
+	setLiveBuild(t, false)
+	sandboxHome(t)
+	path := filepath.Join(t.TempDir(), "dev.db")
+	runArgs := func(args ...string) (string, error) {
+		t.Helper()
+		return runCLI(t, append([]string{"--db", path}, args...)...)
+	}
+	run := func(args ...string) string {
+		t.Helper()
+		out, err := runArgs(args...)
+		if err != nil {
+			t.Fatalf("%v: %q, %v", args, out, err)
+		}
+		return out
+	}
+	identifyIn := func(session string) string {
+		t.Helper()
+		out := run("agent", "identify", "--vendor", "claude_code", "--session-id", session,
+			"--role", "implementer", "--model", "claude-sonnet", "--provider", "anthropic")
+		return identifyIDRe.FindStringSubmatch(out)[1]
+	}
+	run("project", "create", "Billing", "--prefix", "BILL")
+	run("ticket", "create", "--project", "BILL", "--title", "Invoice")
+	first, second := identifyIn("3da2c294"), identifyIn("b10d8a02")
+
+	if out, err := runArgs("ticket", "start", "BILL-1"); err == nil || !strings.Contains(out+err.Error(), "agent") {
+		t.Fatalf("ticket start without --agent: %q, %v", out, err)
+	}
+
+	out := run("ticket", "start", "bill-1", "--agent", first)
+	if strings.Count(out, "\n") != 1 {
+		t.Errorf("ticket start printed %q, want one line of compact JSON", out)
+	}
+	var start models.Start
+	if err := json.Unmarshal([]byte(out), &start); err != nil || start.Ticket == nil || start.Ticket.DisplayKey() != "BILL-1" ||
+		start.Ticket.Status != models.StatusInProgress || start.Ticket.URL == "" || start.Ticket.Agent != nil ||
+		start.Project.Name != "Billing" || start.TakenFrom != nil {
+		t.Fatalf("ticket start = %q: %v", out, err)
+	}
+
+	// --json, which every agent command takes, prints the same compact JSON:
+	// the holder starting its ticket again continues it.
+	jsonOut := run("ticket", "start", "BILL-1", "--agent", first, "--json")
+	var again models.Start
+	if strings.Count(jsonOut, "\n") != 1 || json.Unmarshal([]byte(jsonOut), &again) != nil ||
+		again.Ticket == nil || again.Ticket.ID != start.Ticket.ID || again.TakenFrom != nil {
+		t.Fatalf("ticket start --json = %q, want the same start as one line of compact JSON", jsonOut)
+	}
+
+	if out, err := runArgs("ticket", "start", "BILL-1", "--agent", second); err == nil ||
+		!strings.Contains(err.Error(), "held by agent "+first) || !strings.Contains(err.Error(), "last seen") {
+		t.Fatalf("ticket start of a live agent's ticket: %q, %v; want the holder and its last seen", out, err)
+	}
+
+	database, err := db.OpenAt(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = database.Exec(`UPDATE agents SET last_seen_at = ? WHERE id = ?`,
+		time.Now().Add(-time.Hour).UTC().Format("2006-01-02T15:04:05.000000000Z"), first)
+	database.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	out = run("ticket", "start", "BILL-1", "--agent", second)
+	if err := json.Unmarshal([]byte(out), &start); err != nil || start.TakenFrom == nil || start.TakenFrom.ID != first {
+		t.Fatalf("ticket start of a stale agent's ticket = %q: %v; want takenFrom %s", out, err, first)
 	}
 }

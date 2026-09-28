@@ -11,12 +11,14 @@ import (
 	"time"
 
 	"github.com/tcarac/taskboard/internal/models"
+	"github.com/tcarac/taskboard/internal/weburl"
 )
 
-// The agent protocol over MCP: an agent identifies once, asks the person for
-// user input and collects the answer, and releases the ticket it holds with
-// its record. Claiming is the one-call start's (ACP-202), so no tool here
-// claims. Subagents share their parent's MCP connection, so the server
+// The agent protocol over MCP: an agent identifies once, starts a ticket
+// (claiming it and reading everything needed to begin, in one call), asks
+// the person for user input and collects the answer, and releases the ticket
+// it holds with its record. No tool claims on its own: claiming is part of
+// start_ticket. Subagents share their parent's MCP connection, so the server
 // remembers no agent per connection: every tool but identify_agent takes the
 // calling agent's id, and each call touches that agent.
 
@@ -32,6 +34,12 @@ const (
 // identifyArgs is identify_agent's arguments: the session, then the agent.
 type identifyArgs struct {
 	models.IdentifyAgentRequest
+}
+
+// startArgs is start_ticket's arguments.
+type startArgs struct {
+	Ticket  string `json:"ticket"`
+	AgentID string `json:"agentId"`
 }
 
 // releaseArgs is release_ticket's arguments.
@@ -78,7 +86,7 @@ var agentIDProp = schemaProp{Type: "string", Description: "Your agentId, from id
 
 // agentToolDefs are the agent protocol's tools, listed after the entry
 // tools.
-var agentToolDefs = [4]toolDef{
+var agentToolDefs = [5]toolDef{
 	{
 		Name: "identify_agent",
 		Description: "Call once when you start, before any tool that takes agentId: names your session and you as one agent " +
@@ -98,6 +106,27 @@ var agentToolDefs = [4]toolDef{
 				"provider":        {Type: "string", Description: "Your model's provider.", Enum: models.Providers},
 			},
 			Required: []string{"vendor", "vendorSessionId", "role", "model", "provider"},
+		},
+	},
+	{
+		Name: "start_ticket",
+		Description: "How you begin work on a ticket: one call claims it for you and answers everything needed to begin, " +
+			"so read nothing else first. Answers {ticket, project: {name, description, agentInstructions, entries}} and, " +
+			"each only when there is one: takenFrom; handOff, where the work stands; entries, the ticket's other current " +
+			"entries; notes, the person's open notes on the ticket, its epic and its project (act on each, then handle_note); " +
+			"epic {description, documents, entries}; unfinishedDependencies, keys that never block you (decide whether to go " +
+			"on). project.entries is the newest page of the project's entries: older ones with list_entries, project and " +
+			"before: nextBefore. Refused while an agent of another session holds the ticket and is live: the error names it " +
+			"and when its session was last seen; leave the ticket to it. Once that session has gone stale, the start takes " +
+			"the ticket over: takenFrom names the agent it was taken from and handOff says where its work stood; carry on " +
+			"from there. Starting a ticket your session holds continues it.",
+		InputSchema: jsonSchema{
+			Type: "object",
+			Properties: map[string]schemaProp{
+				"ticket":  {Type: "string", Description: ticketIDDescription},
+				"agentId": agentIDProp,
+			},
+			Required: []string{"ticket", "agentId"},
 		},
 	},
 	{
@@ -167,6 +196,13 @@ func (s *MCPServer) callAgentTool(ctx context.Context, name string, args json.Ra
 		}
 		result, err := s.identifyAgent(a)
 		return result, true, err
+	case "start_ticket":
+		var a startArgs
+		if err := decodeArgs(args, &a); err != nil {
+			return nil, true, err
+		}
+		result, err := s.startTicket(a)
+		return result, true, err
 	case "release_ticket":
 		var a releaseArgs
 		if err := decodeArgs(args, &a); err != nil {
@@ -204,6 +240,18 @@ func (s *MCPServer) identifyAgent(a identifyArgs) (map[string]string, error) {
 		return nil, err
 	}
 	return map[string]string{"agentId": agent.ID}, nil
+}
+
+func (s *MCPServer) startTicket(a startArgs) (*models.Start, error) {
+	if strings.TrimSpace(a.Ticket) == "" {
+		return nil, errors.New("ticket is required: the ticket to begin work on")
+	}
+	start, err := s.store.StartTicket(a.Ticket, a.AgentID)
+	if err != nil {
+		return nil, err
+	}
+	weburl.Fill(start.Ticket)
+	return start, nil
 }
 
 func (s *MCPServer) releaseTicket(a releaseArgs) (releaseAnswer, error) {

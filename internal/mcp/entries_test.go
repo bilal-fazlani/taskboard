@@ -391,6 +391,19 @@ func TestEveryTicketCallFlagsOpenNotes(t *testing.T) {
 		t.Fatal(err)
 	}
 	flags("release_ticket", map[string]any{"ticket": "ACP-1", "agentId": f.agent, "outcome": "give_back", "handOff": "Stopped at the tests."})
+	// start_ticket carries the open notes themselves, as get_ticket carries
+	// their count, so no flag rides on it.
+	covered["start_ticket"] = true
+	startTexts := callAllText(t, f.s, "start_ticket", map[string]any{"ticket": "ACP-1", "agentId": f.agent})
+	var start struct {
+		Notes struct {
+			Ticket []models.Entry `json:"ticket"`
+		} `json:"notes"`
+	}
+	if len(startTexts) != 1 || strings.Contains(startTexts[0], `"openNotes"`) || json.Unmarshal([]byte(startTexts[0]), &start) != nil ||
+		len(start.Notes.Ticket) != 1 || !start.Notes.Ticket[0].Open() {
+		t.Errorf("start_ticket = %v, want the one open note under notes.ticket and no openNotes flag", startTexts)
+	}
 	// Every registered tool is either checked by a call above or is on this
 	// list of tools that are not about one existing ticket, so a new tool
 	// fails here until it is classified: one that takes a ticket, however it

@@ -263,7 +263,8 @@ func (s *MCPServer) listEntries(a listEntriesArgs) (models.EntryPage, error) {
 
 // ticketOfCall returns the ticket a tool call is on, read from its
 // arguments, or "" when it is on no one ticket or names none that exists.
-// get_ticket is left out: its answer carries openNotes itself.
+// get_ticket and start_ticket are left out: get_ticket's answer carries
+// openNotes itself, and start_ticket's the open notes themselves.
 func (s *MCPServer) ticketOfCall(name string, args json.RawMessage) string {
 	var a struct {
 		idOrKeyArg

@@ -472,6 +472,9 @@ func (s *Store) listEntries(owner models.EntryOwner, filter models.EntryFilter, 
 	if !filter.IncludeReplaced {
 		where += ` AND r.id IS NULL`
 	}
+	if filter.ExcludeOpenNotes {
+		where += ` AND NOT (` + openNote + `)`
+	}
 	if len(filter.Types) > 0 {
 		for _, t := range filter.Types {
 			if !models.ValidEntryType(t) {

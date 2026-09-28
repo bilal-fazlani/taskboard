@@ -381,6 +381,38 @@ func ticketCommands() *cobra.Command {
 	updateCmd.Flags().StringVar(&updPRURL, "pr-url", "", "the pull request's http or https url; empty value clears")
 	updateCmd.Flags().StringSliceVar(&updLandedCommits, "landed-commit", nil, "replace the landed commits, in order, each [repo@]sha; comma-separated or repeated, empty value clears")
 
+	var startAgent string
+	var startJSON bool
+	startCmd := &cobra.Command{
+		Use:   "start [id-or-key]",
+		Short: "Begin work on a ticket as an agent: claim it and print everything needed to begin, as JSON",
+		Long: "Begin work on a ticket: claim it for --agent and print, as compact JSON, the same answer the MCP " +
+			"start_ticket tool and POST /api/tickets/{id}/start give: the ticket, its project (with agent " +
+			"instructions) and epic, their entries, the latest hand-off, every open note, the agent it was taken " +
+			"over from and the unfinished dependencies, each only when there is one. Refused while an agent of " +
+			"another session holds the ticket and is live, naming it and when its session was last seen; once that " +
+			"session is stale, the ticket is taken over. There is no separate claim command.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			store, err := openStore()
+			if err != nil {
+				return err
+			}
+			start, err := store.StartTicket(args[0], startAgent)
+			if err != nil {
+				return err
+			}
+			weburl.Fill(start.Ticket)
+			// Compact, as MCP sends it, with or without --json: the start is
+			// read by agents, and indentation is only tokens.
+			return json.NewEncoder(cmd.OutOrStdout()).Encode(start)
+		},
+	}
+	startCmd.Flags().StringVar(&startAgent, "agent", "", "the id of the agent beginning work (required)")
+	_ = startCmd.MarkFlagRequired("agent")
+	startCmd.Flags().BoolVar(&startJSON, "json", false,
+		"print the start as JSON, like the other agent commands; it is compact JSON either way")
+
 	var releaseAgent, releaseStopped, releaseNext, releaseProof string
 	var releaseDone, releaseJSON bool
 	releaseCmd := &cobra.Command{
@@ -493,7 +525,7 @@ func ticketCommands() *cobra.Command {
 	askCmd.Flags().StringArrayVar(&askChoices, "choice", nil, "an answer the person can give; repeatable; leave out for a free answer")
 	askCmd.Flags().BoolVar(&askJSON, "json", false, "print the new request as JSON instead of readable text")
 
-	cmd.AddCommand(listCmd, getCmd, createCmd, moveCmd, deleteCmd, updateCmd, historyCmd, releaseCmd, askCmd,
+	cmd.AddCommand(listCmd, getCmd, createCmd, moveCmd, deleteCmd, updateCmd, historyCmd, startCmd, releaseCmd, askCmd,
 		findByCommitCommand(), subtaskCommands())
 	return cmd
 }

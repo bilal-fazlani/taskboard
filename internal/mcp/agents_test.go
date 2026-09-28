@@ -164,6 +164,7 @@ func TestAgentToolsTakeAndTouchTheCallingAgent(t *testing.T) {
 		tool string
 		args map[string]any
 	}{
+		{"start_ticket", map[string]any{"ticket": "ACP-1"}},
 		{"request_user_input", map[string]any{"ticket": "ACP-1", "type": "question", "prompt": "Which port?"}},
 		{"await_answer", map[string]any{"request": "nope", "timeoutSeconds": 0}},
 		{"release_ticket", map[string]any{"ticket": "ACP-1", "outcome": "give_back", "handOff": "Stopped."}},
@@ -599,11 +600,48 @@ func TestAgentToolDescriptionsSayWhenToUseThem(t *testing.T) {
 		"request_user_input": {"await_answer", "{id, created: true}", "act only on that approval", "own words"},
 		"await_answer":       {"request you made", "answered: false", "call again", "keeps your session live"},
 		"get_now":            {"waiting on the person"},
+		"start_ticket": {"How you begin work on a ticket", "claims it for you", "Refused while an agent of another session",
+			"last seen", "takes the ticket over", "takenFrom", "handOff", "never block you"},
 	} {
 		for _, w := range want {
 			if !strings.Contains(descriptions[tool], w) {
 				t.Errorf("%s's description does not say %q:\n%s", tool, w, descriptions[tool])
 			}
 		}
+	}
+}
+
+// start_ticket claims the ticket and answers the store's start, the ticket
+// with its link; another session's live agent is refused, naming the
+// holder, and once it is stale the ticket is taken over and the answer says
+// from whom.
+func TestStartTicketToolBeginsWork(t *testing.T) {
+	f := newAgentServer(t)
+	first := f.identify(t, "3da2c294", "implementer")
+	second := f.identify(t, "b10d8a02", "implementer")
+
+	if text := callError(t, f.s, "start_ticket", map[string]any{"agentId": first}); !strings.Contains(text, "ticket is required") {
+		t.Errorf("start_ticket without a ticket: %s", text)
+	}
+
+	got := callJSON(t, f.s, "start_ticket", map[string]any{"ticket": "acp-1", "agentId": first})
+	wantKeys(t, "start_ticket", got, "ticket", "project")
+	ticket := got["ticket"].(map[string]any)
+	if ticket["id"] != f.ticket.ID || ticket["status"] != models.StatusInProgress || ticket["url"] == nil || ticket["agent"] != nil {
+		t.Fatalf("start_ticket's ticket = %v, want ACP-1 in progress with its url and no agent", ticket)
+	}
+	if held, _ := f.s.store.GetTicket(f.ticket.ID); held.Agent == nil || held.Agent.ID != first {
+		t.Fatalf("after start_ticket the ticket is held by %+v, want %s", held.Agent, first)
+	}
+
+	text := callError(t, f.s, "start_ticket", map[string]any{"ticket": "ACP-1", "agentId": second})
+	if !strings.Contains(text, "held by agent "+first) || !strings.Contains(text, "last seen") {
+		t.Errorf("start_ticket on a live agent's ticket: %s; want the holder and its last seen", text)
+	}
+
+	f.ageAgent(t, first)
+	got = callJSON(t, f.s, "start_ticket", map[string]any{"ticket": "ACP-1", "agentId": second})
+	if from, _ := got["takenFrom"].(map[string]any); from == nil || from["id"] != first {
+		t.Fatalf("start_ticket on a stale agent's ticket: takenFrom %v, want %s", got["takenFrom"], first)
 	}
 }

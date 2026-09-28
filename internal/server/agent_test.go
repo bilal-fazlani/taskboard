@@ -163,6 +163,60 @@ func TestReleaseTicket(t *testing.T) {
 	}
 }
 
+// TestStartTicket covers POST /api/tickets/{id}/start: it claims the ticket
+// and answers the store's start; another session's live agent is a 409
+// naming the holder and its last seen, and once that agent is stale the
+// ticket is taken over and the answer says from whom.
+func TestStartTicket(t *testing.T) {
+	r := serve(t)
+	first := identify(t, r, "7", "implementer")["id"].(string)
+	second := identify(t, r, "8", "implementer")["id"].(string)
+	project, _ := doRequest[map[string]any](t, http.MethodPost, r.url+"/api/projects", `{"name":"Billing","prefix":"BILL"}`)
+	ticket, _ := doRequest[map[string]any](t, http.MethodPost, r.url+"/api/tickets",
+		fmt.Sprintf(`{"projectId":%q,"title":"Invoice"}`, project["id"]))
+	ticketID := ticket["id"].(string)
+	start := func(ref, body string) (map[string]any, int) {
+		return doRequest[map[string]any](t, http.MethodPost, r.url+"/api/tickets/"+ref+"/start", body)
+	}
+
+	got, status := start("bill-1", fmt.Sprintf(`{"agentId":%q}`, first))
+	if status != http.StatusOK || len(got) != 2 || got["ticket"] == nil || got["project"] == nil {
+		t.Fatalf("start: status %d, %#v; want only ticket and project", status, got)
+	}
+	if tk := got["ticket"].(map[string]any); tk["id"] != ticketID || tk["status"] != "in_progress" || tk["agent"] != nil {
+		t.Fatalf("start's ticket = %#v, want BILL-1 in progress with no agent", tk)
+	}
+	if held, _ := r.srv.store.GetTicket(ticketID); held.Agent == nil || held.Agent.ID != first {
+		t.Fatalf("after the start the ticket is held by %+v, want %s", held.Agent, first)
+	}
+
+	got, status = start(ticketID, fmt.Sprintf(`{"agentId":%q}`, second))
+	if msg, _ := got["error"].(string); status != http.StatusConflict || !strings.Contains(msg, "held by agent "+first) ||
+		!strings.Contains(msg, "last seen") {
+		t.Fatalf("start of a live agent's ticket: status %d, %#v; want 409 naming the holder and its last seen", status, got)
+	}
+
+	execOnServed(t, r, `UPDATE agents SET last_seen_at = ? WHERE id = ?`, storedTime(time.Now().Add(-time.Hour)), first)
+	got, status = start(ticketID, fmt.Sprintf(`{"agentId":%q}`, second))
+	if from, _ := got["takenFrom"].(map[string]any); status != http.StatusOK || from == nil || from["id"] != first {
+		t.Fatalf("start of a stale agent's ticket: status %d, %#v; want takenFrom %s", status, got, first)
+	}
+
+	for _, c := range []struct {
+		name, ref, body string
+		want            int
+	}{
+		{"unknown ticket", "BILL-99", fmt.Sprintf(`{"agentId":%q}`, second), http.StatusNotFound},
+		{"no agent", ticketID, `{}`, http.StatusBadRequest},
+		{"unknown agent", ticketID, `{"agentId":"ghost"}`, http.StatusBadRequest},
+		{"not json", ticketID, `not json`, http.StatusBadRequest},
+	} {
+		if body, status := start(c.ref, c.body); status != c.want {
+			t.Errorf("%s: status %d, %#v; want %d", c.name, status, body, c.want)
+		}
+	}
+}
+
 // TestRequestLifecycle covers the request routes: creating a request moves
 // the ticket to needs_user_input, its history lists it, answering moves the
 // ticket back to in_progress, and awaiting an already-answered request

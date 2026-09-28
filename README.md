@@ -135,9 +135,11 @@ Entries are short typed records of why the work is as it is, on a project, an ep
 
 `POST /api/agents` identifies a session and a new agent within it: `vendor` and `vendorSessionId` name the session (found again by that pair, or created with `machine`, `resumeCommand` and `webUrl`), and `role`, `model` and `provider` (one of `anthropic`, `openai`, `google`, `other`) name the agent; identifying always creates a new agent, never an upsert by name, since agents have none. It answers with the new agent. `GET /api/agents` lists every agent, most recently seen first, each with its `session`, `stale` (worked out from the install's stale threshold, not stored) and `heldTickets` (the tickets it holds now, by key, title and status); `GET /api/agents/{id}` answers one, the same shape. There is no claim route: the one-call start claims. `POST /api/tickets/{id}/release` gives a ticket back, with `{"agentId":"...","outcome":"give_back","handOff":"..."}`, or finishes it, with `"outcome":"finish"` and `proof` instead of `handOff`; a release missing its hand-off or proof, mixing the two, or from an agent outside the holder's session, is refused, naming what is wrong.
 
+`POST /api/tickets/{id}/start` with `{"agentId":"..."}` is how an agent begins a ticket, in one call: it claims the ticket and answers everything needed to begin. That is `ticket` (without `agent`, the caller) and `project` (`name`, `description`, `agentInstructions`, and `entries`: its 10 newest current entries other than open notes, with `total`, `hasMore` and `nextBefore` for the rest; `total` leaves out the open notes, which `list_entries` counts), plus, each only when there is one: `takenFrom`, `handOff` (the latest hand-off), `entries` (the ticket's other current entries, all of them), `notes` (the person's open notes on the ticket, epic and project), `epic` (`description`, `documents` by name, `entries`) and `unfinishedDependencies` (keys; they never block a start). No entry names its owner, and open notes appear only under `notes`. A ticket an agent of another session holds is refused while that session is live, naming the holder and when its session was last seen; once it is stale, the start takes the ticket over and `takenFrom` names the agent it came from. What a start costs is mostly its text: on a ticket shaped like this project's own (3.9 KB of agent instructions, a 2 KB description, ten project entries of about 400 bytes) it is about 19 KB, some 5k tokens. A test holds the start's structure, every part with one sentence of text, under 6 KB.
+
 An agent asks the person for user input with `POST /api/tickets/{id}/requests`: `type` (`approval` or `question` today), `prompt`, and optional `choices`. It moves the ticket to `needs_user_input` and answers with the new request; a ticket already waiting on an unanswered request, or held by no agent, refuses a second. `GET /api/tickets/{id}/requests` reads a ticket's whole history, newest first, answered and unanswered alike. `POST /api/requests/{id}/answer` takes `answer` (matched, case-insensitively, against the request's `choices` when it offered any) and `answeredBy`; left out or blank, `answeredBy` defaults to the local person (the OS user), since an answer is today always the local person's. `GET /api/requests/{id}/await?timeout=30s` long-polls that one request only, never whatever else is open on its ticket: the timeout defaults to 30s and is capped at 60s, and its own passing is never an error — the request comes back unanswered, with a 200, rather than as a timeout error. Ticket JSON gains `agent` (the agent holding it, if any) and `openRequest` (the request it waits on, if any).
 
-Across the agent and request routes, an unresolved ticket or request id is a 404, a request these routes refuse (bad input, a missing hand-off or proof, an unknown type, a second open request) is a 400, and a ticket held by another session (a release from outside the holder's session) is a 409 — each with the store's own message.
+Across the agent and request routes, an unresolved ticket or request id is a 404, a request these routes refuse (bad input, a missing hand-off or proof, an unknown type, a second open request) is a 400, and a ticket held by another session (a start while it is live, or a release from outside the holder's session) is a 409 — each with the store's own message.
 
 ### CLI
 
@@ -233,6 +235,10 @@ taskboard agent identify --vendor claude_code --session-id 3da2c294 \
   --role orchestrator --model claude-opus-5-5 --provider anthropic
 
 taskboard agent list   # every agent: last seen, stale, and the tickets it holds
+
+# Begin work on a ticket: claims it and prints the start (see the HTTP API),
+# the same answer as MCP start_ticket, as compact JSON with or without --json.
+taskboard ticket start AUTH-1 --agent <agent-id>
 
 # Ask the person for user input on a ticket the agent (or its session) holds;
 # prints the new request's id. A ticket has one open request at a time.
@@ -342,6 +348,7 @@ The reverse direction is derived, not stored. When `BILL-5` depends on `BILL-2`,
 | `handle_note`            | Mark one of the person's notes handled           |
 | **Agents**               |                                                  |
 | `identify_agent`         | Name your session and yourself in it; answers your `agentId` |
+| `start_ticket`           | Begin a ticket: claim it and get everything needed to begin, in one call |
 | `request_user_input`     | Ask the person for an approval or an answer; answers the request's id at once |
 | `await_answer`           | Wait on your request's answer, or time out unanswered to call again |
 | `release_ticket`         | Give a ticket back with a hand-off, or finish it with proof |
@@ -352,7 +359,8 @@ An agent calls `identify_agent` once when it starts, with its session (vendor,
 the vendor's session ID, resume command, machine, web link) and its role,
 model and provider, and passes the `agentId` it gets on every call that takes
 one. Subagents share their parent's MCP connection and session ID, so each
-identifies as its own agent. `request_user_input` puts the ticket in
+identifies as its own agent. It begins each ticket with `start_ticket`, which
+answers what `POST /api/tickets/{id}/start` does. `request_user_input` puts the ticket in
 `needs_user_input` until the person answers; `await_answer` waits on that one
 request (50 seconds by default, at most 600) without holding up other calls
 on the connection, and keeps the session live while it waits. Only a request

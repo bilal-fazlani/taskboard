@@ -55,6 +55,33 @@ func (s *Server) getAgent(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, a)
 }
 
+// startTicket answers POST /api/tickets/{id}/start, with {"agentId": "..."}:
+// an agent beginning work on a ticket. It claims the ticket and answers with
+// everything needed to begin (db.StartTicket), the same answer the MCP tool
+// and the CLI give. An unknown ticket is a 404; a ticket another session's
+// live agent holds is a 409 naming the holder and its last seen; a missing
+// or unknown agent is a 400.
+func (s *Server) startTicket(w http.ResponseWriter, r *http.Request) {
+	id, err := s.store.ResolveTicketID(chi.URLParam(r, "id"))
+	if err != nil {
+		writeLookupError(w, err)
+		return
+	}
+	var req struct {
+		AgentID string `json:"agentId"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	start, err := s.store.StartTicket(id, req.AgentID)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, start)
+}
+
 // releaseTicket answers POST /api/tickets/{id}/release: an agent giving a
 // ticket back (with its hand-off) or finishing it (with its proof). The
 // ticket id or display key is resolved first, so an unknown one is a 404;

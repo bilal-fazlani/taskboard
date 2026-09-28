@@ -213,6 +213,7 @@ func (s *Server) setupRoutes(webFS fs.FS) {
 			r.Get("/{id}/documents", s.listTicketDocuments)
 			r.Get("/{id}/entries", s.listEntries(entryOnTicket))
 			r.Post("/{id}/entries", s.createEntry(entryOnTicket))
+			r.Post("/{id}/start", s.startTicket)
 			r.Post("/{id}/release", s.releaseTicket)
 			r.Post("/{id}/requests", s.createRequest)
 			r.Get("/{id}/requests", s.listTicketRequests)

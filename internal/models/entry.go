@@ -168,10 +168,12 @@ type CreateEntryRequest struct {
 
 // EntryFilter narrows a read of one owner's entries. Replaced entries are
 // left out unless IncludeReplaced is set; Types, when not empty, keeps only
-// entries of those types.
+// entries of those types. ExcludeOpenNotes leaves out the open notes (Open),
+// for a read that gives them apart.
 type EntryFilter struct {
-	IncludeReplaced bool
-	Types           []string
+	IncludeReplaced  bool
+	Types            []string
+	ExcludeOpenNotes bool
 }
 
 // EntryPage is a run of one owner's entries, newest first. When HasMore is
