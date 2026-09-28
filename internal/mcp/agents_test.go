@@ -207,6 +207,55 @@ func TestAgentToolsTakeAndTouchTheCallingAgent(t *testing.T) {
 	}
 }
 
+// update_ticket, move_ticket and toggle_subtask require the calling agent's
+// id, over MCP only: without one, or with one that is no agent, the call is
+// refused, telling the caller to identify_agent first, and changes nothing.
+// A given agentId touches its agent, a no-op tick included.
+func TestTicketWritesRequireAndTouchTheCallingAgent(t *testing.T) {
+	f := newAgentServer(t)
+	agent := f.identify(t, "3da2c294", "orchestrator")
+	sub, err := f.s.store.AddSubtask(f.ticket.ID, models.CreateSubtaskRequest{Title: "Store"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := []struct {
+		tool string
+		args func() map[string]any
+	}{
+		{"update_ticket", func() map[string]any { return map[string]any{"id": "ACP-1", "title": "Renamed"} }},
+		{"move_ticket", func() map[string]any { return map[string]any{"id": "ACP-1", "status": "in_progress"} }},
+		{"toggle_subtask", func() map[string]any { return map[string]any{"id": sub.ID, "completed": true} }},
+	}
+	for _, c := range calls {
+		if req := findToolDef(t, f.s, c.tool).InputSchema.Required; !contains(req, "agentId") {
+			t.Errorf("%s's schema requires %v, want agentId among them", c.tool, req)
+		}
+		for agentID, want := range map[string]string{"": "agentId is required", "ghost": `agentId "ghost" is not an agent`} {
+			args := c.args()
+			if agentID != "" {
+				args["agentId"] = agentID
+			}
+			text := callError(t, f.s, c.tool, args)
+			if !strings.Contains(text, want) || !strings.Contains(text, "call identify_agent first") {
+				t.Errorf("%s with agentId %q: %s; want %q and to call identify_agent first", c.tool, agentID, text, want)
+			}
+		}
+	}
+	if tk, _ := f.s.store.GetTicket(f.ticket.ID); tk.Title != "Agent tools" || tk.Status != models.StatusTodo || tk.Subtasks[0].Completed {
+		t.Fatalf("refused calls changed the ticket: %+v", tk)
+	}
+
+	for _, c := range append(calls, calls[2]) { // the repeated tick changes nothing but still touches
+		before := f.ageAgent(t, agent)
+		args := c.args()
+		args["agentId"] = agent
+		callJSON(t, f.s, c.tool, args)
+		if !f.lastSeen(t, agent).After(before) {
+			t.Errorf("%s did not touch its agent", c.tool)
+		}
+	}
+}
+
 // release_ticket finishes with proof, or gives back with a hand-off, and
 // answers with a short confirmation; without its record, or with the wrong
 // one, it is refused, naming what is missing, and changes nothing.
@@ -571,8 +620,8 @@ func TestWaitingTicketShowsInEveryRead(t *testing.T) {
 		tool string
 		args map[string]any
 	}{
-		{"move_ticket", map[string]any{"id": "ACP-1", "status": "needs_user_input"}},
-		{"update_ticket", map[string]any{"id": "ACP-1", "status": "needs_user_input"}},
+		{"move_ticket", map[string]any{"id": "ACP-1", "status": "needs_user_input", "agentId": agent}},
+		{"update_ticket", map[string]any{"id": "ACP-1", "status": "needs_user_input", "agentId": agent}},
 		{"create_ticket", map[string]any{"project": "ACP", "title": "x", "status": "needs_user_input"}},
 	} {
 		if text := callError(t, f.s, c.tool, c.args); !strings.Contains(text, "request user input") {
@@ -596,8 +645,12 @@ func TestAgentToolDescriptionsSayWhenToUseThem(t *testing.T) {
 		descriptions[def.Name] = def.Description
 	}
 	for tool, want := range map[string][]string{
-		"identify_agent":     {"Call once when you start", "{agentId}", "parent's vendor and vendorSessionId"},
-		"release_ticket":     {"finish with proof", "give_back with handOff", "{key, status, released: true}"},
+		"identify_agent": {"Call once when you start", "{agentId}", "parent's vendor and vendorSessionId"},
+		"release_ticket": {"finish with proof", "give_back with handOff", "{key, status, released: true}",
+			"Once the person stops your session's work on the ticket, you can only leave your hand-off"},
+		"update_ticket":      {"Requires your agentId, from identify_agent", "refused once the person stops"},
+		"move_ticket":        {"Requires your agentId, from identify_agent", "refused once the person stops"},
+		"toggle_subtask":     {"Requires your agentId, from identify_agent", "refused once the person stops"},
 		"request_user_input": {"await_answer", "{id, created: true}", "act only on that approval", "own words"},
 		"await_answer":       {"request you made", "answered: false", "call again", "keeps your session live"},
 		"get_now": {"waiting on the person", "unattended: true", "newest request is answered", "held by a live agent or not",

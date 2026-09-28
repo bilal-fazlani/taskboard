@@ -24,6 +24,18 @@ func newTestServer(t *testing.T) *MCPServer {
 	return NewServer(db.NewStore(database))
 }
 
+// testAgent identifies an agent on s and answers its id, for the tools that
+// require one: update_ticket, move_ticket and toggle_subtask.
+func testAgent(t *testing.T, s *MCPServer) string {
+	t.Helper()
+	a, err := s.store.IdentifyAgent(models.IdentifyAgentRequest{Vendor: "claude_code", VendorSessionID: "test-session",
+		Role: "orchestrator", Model: "opus", Provider: "anthropic"})
+	if err != nil {
+		t.Fatalf("identifying a test agent: %v", err)
+	}
+	return a.ID
+}
+
 func mustJSON(t *testing.T, v any) json.RawMessage {
 	t.Helper()
 	data, err := json.Marshal(v)
@@ -281,10 +293,12 @@ func TestTicketToolsIncludeTheTicketURL(t *testing.T) {
 		t.Fatalf("get_ticket URL = %q, want %q", url, want)
 	}
 
+	agent := testAgent(t, s)
 	updated, err := s.callTool("update_ticket", mustJSON(t, map[string]any{
 		"full":     true,
 		"id":       ticket.ID,
 		"priority": "high",
+		"agentId":  agent,
 	}))
 	if err != nil {
 		t.Fatalf("update_ticket: %v", err)
@@ -294,9 +308,10 @@ func TestTicketToolsIncludeTheTicketURL(t *testing.T) {
 	}
 
 	moved, err := s.callTool("move_ticket", mustJSON(t, map[string]any{
-		"full":   true,
-		"id":     ticket.ID,
-		"status": "in_progress",
+		"full":    true,
+		"id":      ticket.ID,
+		"status":  "in_progress",
+		"agentId": agent,
 	}))
 	if err != nil {
 		t.Fatalf("move_ticket: %v", err)
@@ -340,13 +355,14 @@ func TestGetTicketToolStillReportsNotFound(t *testing.T) {
 // update_ticket does for the same key, not a silently empty result.
 func TestMoveTicketToolNotFoundMatchesUpdateTicket(t *testing.T) {
 	s := newTestServer(t)
+	agent := testAgent(t, s)
 
-	_, updateErr := s.callTool("update_ticket", mustJSON(t, map[string]any{"id": "nope", "priority": "high"}))
+	_, updateErr := s.callTool("update_ticket", mustJSON(t, map[string]any{"id": "nope", "priority": "high", "agentId": agent}))
 	if updateErr == nil {
 		t.Fatal("update_ticket: expected an error for a ticket that does not exist")
 	}
 
-	_, moveErr := s.callTool("move_ticket", mustJSON(t, map[string]any{"id": "nope", "status": "in_progress"}))
+	_, moveErr := s.callTool("move_ticket", mustJSON(t, map[string]any{"id": "nope", "status": "in_progress", "agentId": agent}))
 	if moveErr == nil {
 		t.Fatal("move_ticket: expected an error for a ticket that does not exist")
 	}
@@ -375,8 +391,9 @@ func TestToggleSubtaskToolOmittingCompletedStillFlips(t *testing.T) {
 	if st.Completed {
 		t.Fatalf("new subtask started completed")
 	}
+	agent := testAgent(t, s)
 
-	result, err := s.callTool("toggle_subtask", mustJSON(t, map[string]any{"id": st.ID}))
+	result, err := s.callTool("toggle_subtask", mustJSON(t, map[string]any{"id": st.ID, "agentId": agent}))
 	if err != nil {
 		t.Fatalf("toggle_subtask (no completed): %v", err)
 	}
@@ -384,7 +401,7 @@ func TestToggleSubtaskToolOmittingCompletedStillFlips(t *testing.T) {
 		t.Fatalf("first flip left completed = false, want true")
 	}
 
-	result, err = s.callTool("toggle_subtask", mustJSON(t, map[string]any{"id": st.ID}))
+	result, err = s.callTool("toggle_subtask", mustJSON(t, map[string]any{"id": st.ID, "agentId": agent}))
 	if err != nil {
 		t.Fatalf("toggle_subtask (no completed), second call: %v", err)
 	}
@@ -411,8 +428,10 @@ func TestToggleSubtaskToolWithCompletedSetsState(t *testing.T) {
 		t.Fatalf("AddSubtask: %v", err)
 	}
 
+	agent := testAgent(t, s)
+
 	// Setting it true from an already-false state.
-	result, err := s.callTool("toggle_subtask", mustJSON(t, map[string]any{"id": st.ID, "completed": true}))
+	result, err := s.callTool("toggle_subtask", mustJSON(t, map[string]any{"id": st.ID, "completed": true, "agentId": agent}))
 	if err != nil {
 		t.Fatalf("toggle_subtask completed=true: %v", err)
 	}
@@ -421,7 +440,7 @@ func TestToggleSubtaskToolWithCompletedSetsState(t *testing.T) {
 	}
 
 	// Setting it true again is a no-op that still succeeds.
-	result, err = s.callTool("toggle_subtask", mustJSON(t, map[string]any{"id": st.ID, "completed": true}))
+	result, err = s.callTool("toggle_subtask", mustJSON(t, map[string]any{"id": st.ID, "completed": true, "agentId": agent}))
 	if err != nil {
 		t.Fatalf("toggle_subtask completed=true (repeat): %v", err)
 	}
@@ -430,7 +449,7 @@ func TestToggleSubtaskToolWithCompletedSetsState(t *testing.T) {
 	}
 
 	// Setting it false.
-	result, err = s.callTool("toggle_subtask", mustJSON(t, map[string]any{"id": st.ID, "completed": false}))
+	result, err = s.callTool("toggle_subtask", mustJSON(t, map[string]any{"id": st.ID, "completed": false, "agentId": agent}))
 	if err != nil {
 		t.Fatalf("toggle_subtask completed=false: %v", err)
 	}
@@ -439,7 +458,7 @@ func TestToggleSubtaskToolWithCompletedSetsState(t *testing.T) {
 	}
 
 	// Setting it false again is a no-op that still succeeds.
-	if _, err := s.callTool("toggle_subtask", mustJSON(t, map[string]any{"id": st.ID, "completed": false})); err != nil {
+	if _, err := s.callTool("toggle_subtask", mustJSON(t, map[string]any{"id": st.ID, "completed": false, "agentId": agent})); err != nil {
 		t.Fatalf("toggle_subtask completed=false (repeat): %v", err)
 	}
 }
@@ -448,8 +467,11 @@ func TestToggleSubtaskToolWithCompletedSetsState(t *testing.T) {
 // when completed is given.
 func TestToggleSubtaskToolWithCompletedReportsUnknownID(t *testing.T) {
 	s := newTestServer(t)
-	if _, err := s.callTool("toggle_subtask", mustJSON(t, map[string]any{"id": "nope", "completed": true})); err == nil {
+	agent := testAgent(t, s)
+	if _, err := s.callTool("toggle_subtask", mustJSON(t, map[string]any{"id": "nope", "completed": true, "agentId": agent})); err == nil {
 		t.Fatal("expected an error for a subtask that does not exist")
+	} else if !strings.Contains(err.Error(), `subtask not found: "nope"`) {
+		t.Fatalf("error = %q, want it to say the subtask was not found", err.Error())
 	} else if strings.Contains(err.Error(), "no rows") {
 		t.Fatalf("error leaked the raw sql.ErrNoRows: %v", err)
 	}
@@ -490,7 +512,7 @@ func TestToggleSubtaskToolRejectsNonBooleanCompleted(t *testing.T) {
 		t.Fatalf("AddSubtask: %v", err)
 	}
 
-	if _, err := s.callTool("toggle_subtask", mustJSON(t, map[string]any{"id": st.ID, "completed": "true"})); err == nil {
+	if _, err := s.callTool("toggle_subtask", mustJSON(t, map[string]any{"id": st.ID, "completed": "true", "agentId": testAgent(t, s)})); err == nil {
 		t.Fatal("expected an error for a non-boolean completed value")
 	}
 
@@ -537,10 +559,12 @@ func TestTicketToolsAcceptDisplayKeysAndProjectPrefix(t *testing.T) {
 	}
 
 	// update_ticket by display key.
+	agent := testAgent(t, s)
 	updated, err := s.callTool("update_ticket", mustJSON(t, map[string]any{
 		"full":     true,
 		"id":       "BILL-1",
 		"priority": "high",
+		"agentId":  agent,
 	}))
 	if err != nil {
 		t.Fatalf("update_ticket BILL-1: %v", err)
@@ -593,8 +617,9 @@ func TestTicketToolsAcceptDisplayKeysAndProjectPrefix(t *testing.T) {
 
 	// move_ticket by display key.
 	if _, err := s.callTool("move_ticket", mustJSON(t, map[string]any{
-		"id":     "BILL-1",
-		"status": "in_progress",
+		"id":      "BILL-1",
+		"status":  "in_progress",
+		"agentId": agent,
 	})); err != nil {
 		t.Fatalf("move_ticket BILL-1: %v", err)
 	}
@@ -624,8 +649,9 @@ func TestTicketToolsRejectUnresolvableKeyOrProject(t *testing.T) {
 		t.Fatal("expected an error for an unknown project prefix")
 	}
 
+	agent := testAgent(t, s)
 	for _, tool := range []string{"update_ticket", "move_ticket", "delete_ticket"} {
-		args := map[string]any{"id": "BILL-99"}
+		args := map[string]any{"id": "BILL-99", "agentId": agent}
 		if tool == "move_ticket" {
 			args["status"] = "in_progress"
 		}
@@ -997,10 +1023,12 @@ func TestTicketToolsTakeAndReportEpic(t *testing.T) {
 
 	// Omitting the epic field on an update leaves the ticket's epic
 	// unchanged, the same as it does for dueDate.
+	agent := testAgent(t, s)
 	omitted, err := s.callTool("update_ticket", mustJSON(t, map[string]any{
 		"full":     true,
 		"id":       ticket.ID,
 		"priority": "high",
+		"agentId":  agent,
 	}))
 	if err != nil {
 		t.Fatalf("update_ticket with epic omitted: %v", err)
@@ -1012,9 +1040,10 @@ func TestTicketToolsTakeAndReportEpic(t *testing.T) {
 	// An explicit JSON null decodes to the same nil pointer as an omitted
 	// field, so it also leaves the epic unchanged.
 	withNull, err := s.callTool("update_ticket", mustJSON(t, map[string]any{
-		"full": true,
-		"id":   ticket.ID,
-		"epic": nil,
+		"full":    true,
+		"id":      ticket.ID,
+		"epic":    nil,
+		"agentId": agent,
 	}))
 	if err != nil {
 		t.Fatalf("update_ticket with epic=null: %v", err)
@@ -1025,9 +1054,10 @@ func TestTicketToolsTakeAndReportEpic(t *testing.T) {
 
 	// An empty string clears it.
 	cleared, err := s.callTool("update_ticket", mustJSON(t, map[string]any{
-		"full": true,
-		"id":   ticket.ID,
-		"epic": "",
+		"full":    true,
+		"id":      ticket.ID,
+		"epic":    "",
+		"agentId": agent,
 	}))
 	if err != nil {
 		t.Fatalf("update_ticket with epic=\"\": %v", err)
@@ -1043,9 +1073,10 @@ func TestTicketToolsTakeAndReportEpic(t *testing.T) {
 		t.Fatalf("UpdateTicket restoring epic: %v", err)
 	}
 	updated, err := s.callTool("update_ticket", mustJSON(t, map[string]any{
-		"full": true,
-		"id":   ticket.ID,
-		"epic": "NONE",
+		"full":    true,
+		"id":      ticket.ID,
+		"epic":    "NONE",
+		"agentId": agent,
 	}))
 	if err != nil {
 		t.Fatalf("update_ticket clearing epic: %v", err)

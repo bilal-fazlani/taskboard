@@ -51,4 +51,17 @@ func TestStopWork(t *testing.T) {
 	if status != http.StatusOK || body["status"] != "todo" {
 		t.Fatalf("the stopped agent's hand-off: status %d, %#v; want 200 and todo", status, body)
 	}
+
+	// The person's own writes on the stopped ticket take no agent and are
+	// never refused: editing it, moving it, ticking its subtasks.
+	subtask, _ := doRequest[map[string]any](t, http.MethodPost, r.url+"/api/tickets/"+ticketID+"/subtasks", `{"title":"Tax"}`)
+	for _, c := range []struct{ method, path, body string }{
+		{http.MethodPut, "/api/tickets/" + ticketID, `{"title":"Invoice v2"}`},
+		{http.MethodPost, "/api/tickets/" + ticketID + "/move", `{"status":"in_progress"}`},
+		{http.MethodPost, "/api/subtasks/" + subtask["id"].(string) + "/toggle", ""},
+	} {
+		if body, status := doRequest[map[string]any](t, c.method, r.url+c.path, c.body); status != http.StatusOK {
+			t.Fatalf("the person's %s %s after the stop: status %d, %#v; want 200", c.method, c.path, status, body)
+		}
+	}
 }

@@ -75,3 +75,52 @@ func TestAwaitAnswerOnAStoppedApproval(t *testing.T) {
 			fromGetTicket["answeredRequests"], ticket["answeredRequests"])
 	}
 }
+
+// Once the person stops the work, the stopped session's update_ticket,
+// move_ticket and toggle_subtask on the ticket are refused like its other
+// writes, pointing it at its hand-off, and change nothing; the hand-off is
+// still accepted. The person's own writes, which take no agent, go through.
+func TestAStoppedAgentsTicketWritesAreRefused(t *testing.T) {
+	f := newAgentServer(t)
+	agent := f.identify(t, "3da2c294", "implementer")
+	orchestrator := f.identify(t, "3da2c294", "orchestrator")
+	sub, err := f.s.store.AddSubtask(f.ticket.ID, models.CreateSubtaskRequest{Title: "Store"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.claim(t, agent)
+	if _, err := f.secondStore(t).StopWork("ACP-1", "bilal"); err != nil {
+		t.Fatal(err)
+	}
+
+	// The whole session is stopped on the ticket, its orchestrator too.
+	for _, id := range []string{agent, orchestrator} {
+		for _, c := range []struct {
+			tool string
+			args map[string]any
+		}{
+			{"update_ticket", map[string]any{"id": "ACP-1", "title": "Renamed", "agentId": id}},
+			{"move_ticket", map[string]any{"id": "ACP-1", "status": "agent_review", "agentId": id}},
+			{"toggle_subtask", map[string]any{"id": sub.ID, "completed": true, "agentId": id}},
+		} {
+			text := callError(t, f.s, c.tool, c.args)
+			if !strings.Contains(text, "stopped by the person") || !strings.Contains(text, "hand-off") {
+				t.Errorf("%s by stopped agent %s: %s; want it refused as stopped by the person", c.tool, id, text)
+			}
+		}
+	}
+	got, err := f.s.store.GetTicket(f.ticket.ID)
+	if err != nil || got.Title != "Agent tools" || got.Status != models.StatusTodo || got.Subtasks[0].Completed {
+		t.Fatalf("the refused writes changed the ticket: %+v, %v", got, err)
+	}
+
+	callJSON(t, f.s, "release_ticket", map[string]any{"ticket": "ACP-1", "agentId": agent, "outcome": "give_back",
+		"handOff": "Store done; the MCP tools are next"})
+	title := "Renamed by the person"
+	if _, err := f.s.store.UpdateTicket(f.ticket.ID, models.UpdateTicketRequest{Title: &title}); err != nil {
+		t.Fatalf("the person's update after the stop: %v", err)
+	}
+	if _, err := f.s.store.SetSubtaskState(sub.ID, true); err != nil {
+		t.Fatalf("the person's tick after the stop: %v", err)
+	}
+}

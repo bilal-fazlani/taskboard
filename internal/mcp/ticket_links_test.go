@@ -55,9 +55,10 @@ func TestTicketToolsSetAndReadDependencyKindsAndNotes(t *testing.T) {
 
 	// Changing only a note is a dependsOn change; resending the same list is none.
 	same := []map[string]string{{"ticket": "ACP-1", "kind": "conflict_only", "note": "internal/models/models.go"}, {"ticket": "ACP-2"}}
-	short := callJSON(t, s, "update_ticket", map[string]any{"id": "ACP-3", "dependsOn": same})
+	agent := testAgent(t, s)
+	short := callJSON(t, s, "update_ticket", map[string]any{"id": "ACP-3", "dependsOn": same, "agentId": agent})
 	wantChanged(t, "update_ticket", short)
-	short = callJSON(t, s, "update_ticket", map[string]any{"id": "ACP-3", "dependsOn": []map[string]string{
+	short = callJSON(t, s, "update_ticket", map[string]any{"id": "ACP-3", "agentId": agent, "dependsOn": []map[string]string{
 		{"ticket": "ACP-1", "kind": "conflict_only", "note": "internal/mcp/mcp.go"}, {"ticket": "ACP-2"},
 	}})
 	wantChanged(t, "update_ticket", short, "dependsOn")
@@ -91,7 +92,7 @@ func TestTicketToolsSetAndReadDependencyKindsAndNotes(t *testing.T) {
 		{[]string{"ACP-1"}, "each dependsOn entry is an object"},
 		{[]map[string]string{{"ticket": "ACP-1", "kind": "blocked"}}, "needs_work, conflict_only"},
 	} {
-		text, isError := callToolText(t, s, "update_ticket", map[string]any{"id": "ACP-3", "dependsOn": tc.deps})
+		text, isError := callToolText(t, s, "update_ticket", map[string]any{"id": "ACP-3", "dependsOn": tc.deps, "agentId": agent})
 		if !isError || !strings.Contains(text, tc.want) {
 			t.Fatalf("update_ticket dependsOn %v = %q (error %v), want an error containing %q", tc.deps, text, isError, tc.want)
 		}
@@ -132,16 +133,17 @@ func TestTicketToolsSetAndReadSurfacedFrom(t *testing.T) {
 
 	// update_ticket reports it among the changed fields, and "none" removes it.
 	callJSON(t, s, "create_ticket", map[string]any{"projectId": "ACP", "title": "Second run"}) // ACP-3
-	short := callJSON(t, s, "update_ticket", map[string]any{"id": "ACP-2", "surfacedFrom": "ACP-3"})
+	agent := testAgent(t, s)
+	short := callJSON(t, s, "update_ticket", map[string]any{"id": "ACP-2", "surfacedFrom": "ACP-3", "agentId": agent})
 	wantChanged(t, "update_ticket", short, "surfacedFrom")
-	short = callJSON(t, s, "update_ticket", map[string]any{"id": "ACP-2", "title": "Renamed"})
+	short = callJSON(t, s, "update_ticket", map[string]any{"id": "ACP-2", "title": "Renamed", "agentId": agent})
 	wantChanged(t, "update_ticket", short, "title")
-	full := callJSON(t, s, "update_ticket", map[string]any{"id": "ACP-2", "surfacedFrom": "none", "full": true})
+	full := callJSON(t, s, "update_ticket", map[string]any{"id": "ACP-2", "surfacedFrom": "none", "full": true, "agentId": agent})
 	if _, has := full["surfacedFrom"]; has {
 		t.Fatalf("surfacedFrom = %v after none, want it gone", full["surfacedFrom"])
 	}
 
-	text, isError := callToolText(t, s, "update_ticket", map[string]any{"id": "ACP-2", "surfacedFrom": "ACP-2"})
+	text, isError := callToolText(t, s, "update_ticket", map[string]any{"id": "ACP-2", "surfacedFrom": "ACP-2", "agentId": agent})
 	if !isError || !strings.Contains(text, "itself") {
 		t.Fatalf("update_ticket surfaced from itself = %q (error %v), want an error", text, isError)
 	}

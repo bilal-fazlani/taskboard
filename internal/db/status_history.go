@@ -9,20 +9,45 @@ import (
 	"github.com/tcarac/taskboard/internal/models"
 )
 
-// WriteOption adjusts how UpdateTicket and MoveTicket write a ticket. The
-// store applies the rules; which callers ask for them is up to the callers.
+// WriteOption adjusts how UpdateTicket, MoveTicket, SetSubtaskState and
+// ToggleSubtask write. The store applies the rules; which callers ask for
+// them is up to the callers.
 type WriteOption func(*writeOptions)
 
 type writeOptions struct {
 	requireNoteLeavingReview bool
+	byAgent                  bool
+	agentID                  string
 }
 
 // RequireNoteLeavingReview makes a status change that leaves agent_review
 // for any other status fail with an ErrInvalidInput unless it carries a note
 // that is not blank. The check runs inside the write's transaction, against
-// the status the ticket has at that moment.
+// the status the ticket has at that moment. Only UpdateTicket and MoveTicket
+// apply it.
 func RequireNoteLeavingReview() WriteOption {
 	return func(o *writeOptions) { o.requireNoteLeavingReview = true }
+}
+
+// ByAgent makes the write agentID's, like the other writes an agent makes:
+// inside the write's transaction it touches the agent, a missing or unknown
+// one being an ErrInvalidInput, and refuses the write with an ErrStopped when
+// the person stopped the work the agent's session held on the ticket
+// (checkNotStopped). A write without it, the person's own, is never checked.
+func ByAgent(agentID string) WriteOption {
+	return func(o *writeOptions) { o.byAgent, o.agentID = true, strings.TrimSpace(agentID) }
+}
+
+// checkAgent applies ByAgent to a write on the ticket, inside its
+// transaction; without ByAgent it does nothing.
+func (o writeOptions) checkAgent(q dbtx, ticketID string, now time.Time) error {
+	if !o.byAgent {
+		return nil
+	}
+	if err := touchAgent(q, o.agentID, now); err != nil {
+		return err
+	}
+	return checkNotStopped(q, ticketID, o.agentID)
 }
 
 func collectWriteOptions(opts []WriteOption) writeOptions {

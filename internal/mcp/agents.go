@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tcarac/taskboard/internal/db"
 	"github.com/tcarac/taskboard/internal/models"
 	"github.com/tcarac/taskboard/internal/weburl"
 )
@@ -85,6 +86,31 @@ type awaitAnswerResult struct {
 // itself.
 var agentIDProp = schemaProp{Type: "string", Description: "Your agentId, from identify_agent."}
 
+// agentWriteHelp is what update_ticket, move_ticket and toggle_subtask say
+// about the agentId they require: over MCP every such write is an agent's.
+const agentWriteHelp = " Requires your agentId, from identify_agent; refused once the person stops your session's work on the ticket."
+
+// agentWrite checks the agentId that update_ticket, move_ticket and
+// toggle_subtask require, telling a caller without a known one to identify
+// first, and answers the store option that makes the write that agent's:
+// it touches the agent and is refused once the person stopped its session's
+// work on the ticket. The person's own writes, over the web, HTTP and CLI,
+// never pass it.
+func (s *MCPServer) agentWrite(agentID string) (db.WriteOption, error) {
+	agentID = strings.TrimSpace(agentID)
+	if agentID == "" {
+		return nil, errors.New("agentId is required: call identify_agent first, then pass the agentId it answers")
+	}
+	if err := s.store.TouchAgent(agentID); err != nil {
+		var invalid *db.ErrInvalidInput
+		if errors.As(err, &invalid) {
+			return nil, fmt.Errorf("agentId %q is not an agent: call identify_agent first, then pass the agentId it answers", agentID)
+		}
+		return nil, err
+	}
+	return db.ByAgent(agentID), nil
+}
+
 // answeredRequestsHelp is what start_ticket's and get_ticket's descriptions
 // say about a ticket's answeredRequests: every answer the person gave on it,
 // including one given after the asking session ended, since OpenRequest
@@ -151,7 +177,9 @@ var agentToolDefs = [5]toolDef{
 		Description: "Let go of the ticket you hold, leaving its record: outcome finish with proof (what was verified, how, " +
 			"and the result) moves it to done; give_back with handOff (where the work stopped and the next step) returns " +
 			"it to todo for the next agent. Refused without that record, while a request waits on the person, or for " +
-			"an agent outside the holder's session. Answers {key, status, released: true}.",
+			"an agent outside the holder's session. Once the person stops your session's work on the ticket, you can " +
+			"only leave your hand-off: give_back is accepted, finish and your other writes on it are refused. " +
+			"Answers {key, status, released: true}.",
 		InputSchema: jsonSchema{
 			Type: "object",
 			Properties: map[string]schemaProp{

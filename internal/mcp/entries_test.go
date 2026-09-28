@@ -338,11 +338,11 @@ func TestEveryTicketCallFlagsOpenNotes(t *testing.T) {
 		args map[string]any
 	}{
 		{"get_ticket", map[string]any{"id": "ACP-1"}},
-		{"update_ticket", map[string]any{"key": "ACP-1", "priority": "high"}},
-		{"move_ticket", map[string]any{"id": f.ticket.ID, "status": "in_progress"}},
+		{"update_ticket", map[string]any{"key": "ACP-1", "priority": "high", "agentId": f.agent}},
+		{"move_ticket", map[string]any{"id": f.ticket.ID, "status": "in_progress", "agentId": f.agent}},
 		{"create_subtask", map[string]any{"ticketId": "ACP-1", "title": "Three"}},
 		{"batch_create_subtasks", map[string]any{"ticketId": "ACP-1", "subtasks": []map[string]any{{"title": "Four"}}}},
-		{"toggle_subtask", map[string]any{"id": sub1.ID, "completed": true}},
+		{"toggle_subtask", map[string]any{"id": sub1.ID, "completed": true, "agentId": f.agent}},
 		{"delete_subtask", map[string]any{"id": sub2.ID}},
 		{"list_documents", map[string]any{"ticket": "ACP-1"}},
 		{"get_document", map[string]any{"id": plan.ID}},
@@ -433,7 +433,7 @@ func TestEveryTicketCallFlagsOpenNotes(t *testing.T) {
 		args map[string]any
 	}{
 		{"get_ticket", map[string]any{"id": quiet.ID}},
-		{"update_ticket", map[string]any{"id": quiet.ID, "priority": "low"}},
+		{"update_ticket", map[string]any{"id": quiet.ID, "priority": "low", "agentId": f.agent}},
 		{"get_project", map[string]any{"id": "ACP"}},
 		{"list_entries", map[string]any{"project": "ACP"}},
 		{"list_tickets", map[string]any{"projectId": "ACP", "summary": true}},

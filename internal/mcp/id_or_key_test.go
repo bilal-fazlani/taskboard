@@ -52,8 +52,9 @@ func TestSingleItemToolsAcceptKeyAlias(t *testing.T) {
 		}
 	})
 
+	agent := testAgent(t, s)
 	t.Run("update_ticket", func(t *testing.T) {
-		result, err := s.callTool("update_ticket", mustJSON(t, map[string]any{"key": ticketKey, "priority": "high", "full": true}))
+		result, err := s.callTool("update_ticket", mustJSON(t, map[string]any{"key": ticketKey, "priority": "high", "full": true, "agentId": agent}))
 		if err != nil {
 			t.Fatalf("update_ticket by key: %v", err)
 		}
@@ -63,7 +64,7 @@ func TestSingleItemToolsAcceptKeyAlias(t *testing.T) {
 	})
 
 	t.Run("move_ticket", func(t *testing.T) {
-		result, err := s.callTool("move_ticket", mustJSON(t, map[string]any{"key": ticketKey, "status": "in_progress", "full": true}))
+		result, err := s.callTool("move_ticket", mustJSON(t, map[string]any{"key": ticketKey, "status": "in_progress", "full": true, "agentId": agent}))
 		if err != nil {
 			t.Fatalf("move_ticket by key: %v", err)
 		}
@@ -215,13 +216,14 @@ func TestSingleItemToolsAcceptKeyAlias(t *testing.T) {
 // rather than the pre-ACP-182 "id is required" that never mentioned key.
 func TestIDOrKeyRequiredError(t *testing.T) {
 	s := newTestServer(t)
+	agent := testAgent(t, s)
 	for _, tc := range []struct {
 		tool string
 		args map[string]any
 	}{
 		{"get_ticket", nil},
-		{"update_ticket", nil},
-		{"move_ticket", map[string]any{"status": "in_progress"}},
+		{"update_ticket", map[string]any{"agentId": agent}},
+		{"move_ticket", map[string]any{"status": "in_progress", "agentId": agent}},
 		{"delete_ticket", nil},
 		{"get_project", nil},
 		{"update_project", nil},
@@ -291,7 +293,7 @@ func TestKeyWinsOverID(t *testing.T) {
 
 	t.Run("update_ticket", func(t *testing.T) {
 		result, err := s.callTool("update_ticket", mustJSON(t, map[string]any{
-			"id": idTicket.ID, "key": keyTicket.DisplayKey(), "priority": "urgent", "full": true,
+			"id": idTicket.ID, "key": keyTicket.DisplayKey(), "priority": "urgent", "full": true, "agentId": testAgent(t, s),
 		}))
 		if err != nil {
 			t.Fatalf("update_ticket with id and key: %v", err)

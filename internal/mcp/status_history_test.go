@@ -46,6 +46,7 @@ func TestMoveAndUpdateToolsRequireANoteLeavingReview(t *testing.T) {
 		s := newTestServer(t)
 		tk := seedTicketInReview(t, s)
 		tc.args["id"] = "ACP-1"
+		tc.args["agentId"] = testAgent(t, s)
 
 		text, isError := callToolText(t, s, tc.tool, tc.args)
 		if !isError {
@@ -68,18 +69,19 @@ func TestMoveAndUpdateToolsRequireANoteLeavingReview(t *testing.T) {
 func TestMoveAndUpdateToolsSaveTheNote(t *testing.T) {
 	s := newTestServer(t)
 	tk := seedTicketInReview(t, s)
+	agent := testAgent(t, s)
 
 	if _, err := s.callTool("move_ticket", mustJSON(t, map[string]any{
-		"id": "ACP-1", "status": "in_progress", "note": "bounced: the migration has no index",
+		"id": "ACP-1", "status": "in_progress", "note": "bounced: the migration has no index", "agentId": agent,
 	})); err != nil {
 		t.Fatalf("move_ticket with a note: %v", err)
 	}
 	// Into review, and anything else not leaving it, needs no note.
-	if _, err := s.callTool("update_ticket", mustJSON(t, map[string]any{"id": "ACP-1", "status": "agent_review"})); err != nil {
+	if _, err := s.callTool("update_ticket", mustJSON(t, map[string]any{"id": "ACP-1", "status": "agent_review", "agentId": agent})); err != nil {
 		t.Fatalf("update_ticket into agent_review: %v", err)
 	}
 	if _, err := s.callTool("update_ticket", mustJSON(t, map[string]any{
-		"id": "ACP-1", "status": "done", "note": "approved and landed",
+		"id": "ACP-1", "status": "done", "note": "approved and landed", "agentId": agent,
 	})); err != nil {
 		t.Fatalf("update_ticket with a note: %v", err)
 	}

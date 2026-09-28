@@ -58,7 +58,7 @@ func TestToolAnswersAreCompactJSON(t *testing.T) {
 		t.Fatalf("get_ticket text = %q, want it to decode to ticket %s", text, tk.ID)
 	}
 
-	text, isError = callToolText(t, s, "move_ticket", map[string]any{"id": tk.ID, "status": "in_progress"})
+	text, isError = callToolText(t, s, "move_ticket", map[string]any{"id": tk.ID, "status": "in_progress", "agentId": testAgent(t, s)})
 	if isError {
 		t.Fatalf("move_ticket errored: %s", text)
 	}

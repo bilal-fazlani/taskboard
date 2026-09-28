@@ -819,7 +819,8 @@ func (s *Store) CreateTicket(req models.CreateTicketRequest) (*models.Ticket, er
 // UpdateTicket applies the fields req sets and leaves the rest alone. A change
 // of status writes a row of status history, with req.Note, in the same
 // transaction; opts can add rules for that change (see
-// RequireNoteLeavingReview). A status change out of needs_user_input while
+// RequireNoteLeavingReview) and make the update an agent's (ByAgent),
+// checked first inside the transaction. A status change out of needs_user_input while
 // the ticket's request is open is refused with an ErrTicketWaiting, and the
 // update writes nothing. req.AppendDescription is joined onto the
 // description read inside the transaction (see models.AppendToDescription).
@@ -856,6 +857,9 @@ func (s *Store) UpdateTicket(id string, req models.UpdateTicketRequest, opts ...
 	}
 	if !found {
 		return nil, nil
+	}
+	if err := collectWriteOptions(opts).checkAgent(tx, id, time.Now().UTC()); err != nil {
+		return nil, err
 	}
 	t.Status = fromStatus
 
@@ -1014,7 +1018,8 @@ func (s *Store) UpdateTicket(id string, req models.UpdateTicketRequest, opts ...
 // returns (nil, nil) for an unknown id. A move that changes the status writes
 // a row of status history, with req.Note, in the same transaction; a move
 // within a column writes none. opts can add rules for the change (see
-// RequireNoteLeavingReview). A move out of needs_user_input while the
+// RequireNoteLeavingReview) and make the move an agent's (ByAgent), checked
+// first inside the transaction. A move out of needs_user_input while the
 // ticket's request is open is refused with an ErrTicketWaiting.
 func (s *Store) MoveTicket(id string, req models.MoveTicketRequest, opts ...WriteOption) (*models.Ticket, error) {
 	if !validStatus(req.Status) {
@@ -1034,14 +1039,18 @@ func (s *Store) MoveTicket(id string, req models.MoveTicketRequest, opts ...Writ
 	if !found {
 		return nil, nil
 	}
+	o := collectWriteOptions(opts)
+	now := time.Now().UTC()
+	if err := o.checkAgent(tx, id, now); err != nil {
+		return nil, err
+	}
 	if err := checkNotWaiting(tx, id, fromStatus, req.Status); err != nil {
 		return nil, err
 	}
-	if err := collectWriteOptions(opts).checkStatusChange(fromStatus, req.Status, req.Note); err != nil {
+	if err := o.checkStatusChange(fromStatus, req.Status, req.Note); err != nil {
 		return nil, err
 	}
 
-	now := time.Now().UTC()
 	position := float64(0)
 	if req.Position != nil {
 		position = *req.Position
@@ -1696,19 +1705,56 @@ func (s *Store) AddSubtask(ticketID string, req models.CreateSubtaskRequest) (*m
 }
 
 // ToggleSubtask flips a subtask. An unknown subtask, or one in a deleted
-// project, is an ErrInvalidInput and changes nothing.
-func (s *Store) ToggleSubtask(id string) (*models.Subtask, error) {
-	_, err := s.db.Exec("UPDATE subtasks SET completed = NOT completed WHERE id = ? AND id IN (SELECT id FROM "+liveSubtasks+")", id)
+// project, is an ErrInvalidInput and changes nothing. opts can make the
+// flip an agent's (ByAgent), checked against its ticket.
+func (s *Store) ToggleSubtask(id string, opts ...WriteOption) (*models.Subtask, error) {
+	return s.writeSubtask(id, opts, func(q dbtx) error {
+		_, err := q.Exec("UPDATE subtasks SET completed = NOT completed WHERE id = ? AND id IN (SELECT id FROM "+liveSubtasks+")", id)
+		return err
+	})
+}
+
+// writeSubtask runs update on the subtask in one transaction and answers
+// the subtask as it then stands. With ByAgent among opts, the agent is
+// checked against the subtask's ticket first, so a stopped agent changes
+// nothing. An unknown subtask, or one in a deleted project, is an
+// ErrInvalidInput.
+func (s *Store) writeSubtask(id string, opts []WriteOption, update func(q dbtx) error) (*models.Subtask, error) {
+	tx, err := s.db.Begin()
 	if err != nil {
+		return nil, fmt.Errorf("beginning transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	if o := collectWriteOptions(opts); o.byAgent {
+		var ticketID string
+		err := tx.QueryRow("SELECT ticket_id FROM "+liveSubtasks+" WHERE id = ?", id).Scan(&ticketID)
+		if err == sql.ErrNoRows {
+			return nil, invalidInput("subtask not found: %q", id)
+		}
+		if err != nil {
+			return nil, err
+		}
+		if err := o.checkAgent(tx, ticketID, time.Now().UTC()); err != nil {
+			return nil, err
+		}
+	}
+	if err := update(tx); err != nil {
 		return nil, err
 	}
 	var st models.Subtask
-	err = s.db.QueryRow("SELECT id, ticket_id, title, completed, position FROM "+liveSubtasks+" WHERE id = ?", id).
+	err = tx.QueryRow("SELECT id, ticket_id, title, completed, position FROM "+liveSubtasks+" WHERE id = ?", id).
 		Scan(&st.ID, &st.TicketID, &st.Title, &st.Completed, &st.Position)
 	if err == sql.ErrNoRows {
 		return nil, invalidInput("subtask not found: %q", id)
 	}
-	return &st, err
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("committing subtask: %w", err)
+	}
+	return &st, nil
 }
 
 // SetSubtaskState sets a subtask directly to completed, rather than flipping
@@ -1717,20 +1763,16 @@ func (s *Store) ToggleSubtask(id string) (*models.Subtask, error) {
 // target state, so a call that finds the subtask already there writes
 // nothing: no row changes, so PRAGMA data_version (and with it, any
 // live-refresh event a watcher drives from it) is untouched, exactly as if
-// the call had never been made. An unknown id, or a subtask in a deleted
-// project, is reported clearly rather than as a bare sql.ErrNoRows.
-func (s *Store) SetSubtaskState(id string, completed bool) (*models.Subtask, error) {
-	if _, err := s.db.Exec("UPDATE subtasks SET completed = ? WHERE id = ? AND completed != ? AND id IN (SELECT id FROM "+liveSubtasks+")",
-		completed, id, completed); err != nil {
-		return nil, err
-	}
-	var st models.Subtask
-	err := s.db.QueryRow("SELECT id, ticket_id, title, completed, position FROM "+liveSubtasks+" WHERE id = ?", id).
-		Scan(&st.ID, &st.TicketID, &st.Title, &st.Completed, &st.Position)
-	if err == sql.ErrNoRows {
-		return nil, invalidInput("subtask not found: %q", id)
-	}
-	return &st, err
+// the call had never been made (an agent's call, ByAgent, still touches its
+// agent). An unknown id, or a subtask in a deleted project, is reported
+// clearly rather than as a bare sql.ErrNoRows. opts can make the write an
+// agent's (ByAgent), checked against the subtask's ticket.
+func (s *Store) SetSubtaskState(id string, completed bool, opts ...WriteOption) (*models.Subtask, error) {
+	return s.writeSubtask(id, opts, func(q dbtx) error {
+		_, err := q.Exec("UPDATE subtasks SET completed = ? WHERE id = ? AND completed != ? AND id IN (SELECT id FROM "+liveSubtasks+")",
+			completed, id, completed)
+		return err
+	})
 }
 
 // GetSubtask returns one subtask, or (nil, nil) for an unknown id or one in

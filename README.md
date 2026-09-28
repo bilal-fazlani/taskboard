@@ -401,6 +401,14 @@ of it too: only the person does that, by answering or stopping the work;
 `list_tickets` filters on it, `get_board` has a column for it and
 `get_now` lists its tickets under `waiting`.
 
+`update_ticket`, `move_ticket` and `toggle_subtask` take `agentId` too, and
+require it: over MCP every such write is an agent's, while the person's own
+writes through the web, HTTP and CLI take none. Without a known `agentId` the
+call is refused, telling the caller to call `identify_agent` first. Once the
+person stops a session's work on a ticket, the session's writes there are
+refused, these three included, all but its hand-off (`release_ticket` with
+`give_back`).
+
 #### Entries and open notes
 
 `write_entry` and `handle_note` take `agentId`, the agent writing: every

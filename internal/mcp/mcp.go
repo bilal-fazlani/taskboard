@@ -593,9 +593,14 @@ func (s *MCPServer) callToolCtx(ctx context.Context, name string, args json.RawM
 		var a struct {
 			idOrKeyArg
 			models.UpdateTicketRequest
+			AgentID string `json:"agentId"`
 			fullArg
 		}
 		if err := decodeArgs(args, &a); err != nil {
+			return nil, err
+		}
+		byAgent, err := s.agentWrite(a.AgentID)
+		if err != nil {
 			return nil, err
 		}
 		ticketID, err := s.resolveTicketRefOrError(a.ref())
@@ -606,8 +611,8 @@ func (s *MCPServer) callToolCtx(ctx context.Context, name string, args json.RawM
 		if err != nil {
 			return nil, err
 		}
-		// update_ticket takes no agentId, so a call through MCP stands in for an agent: the note rule is switched on here.
-		t, err := s.store.UpdateTicket(ticketID, a.UpdateTicketRequest, db.RequireNoteLeavingReview())
+		// A call through MCP is an agent's: the note rule is switched on here, with the agent's own checks.
+		t, err := s.store.UpdateTicket(ticketID, a.UpdateTicketRequest, db.RequireNoteLeavingReview(), byAgent)
 		if err != nil {
 			return nil, err
 		}
@@ -620,9 +625,14 @@ func (s *MCPServer) callToolCtx(ctx context.Context, name string, args json.RawM
 		var a struct {
 			idOrKeyArg
 			models.MoveTicketRequest
+			AgentID string `json:"agentId"`
 			fullArg
 		}
 		if err := decodeArgs(args, &a); err != nil {
+			return nil, err
+		}
+		byAgent, err := s.agentWrite(a.AgentID)
+		if err != nil {
 			return nil, err
 		}
 		ticketID, err := s.resolveTicketRefOrError(a.ref())
@@ -633,8 +643,8 @@ func (s *MCPServer) callToolCtx(ctx context.Context, name string, args json.RawM
 		if err != nil {
 			return nil, err
 		}
-		// move_ticket takes no agentId, so a call through MCP stands in for an agent: the note rule is switched on here.
-		t, err := s.store.MoveTicket(ticketID, a.MoveTicketRequest, db.RequireNoteLeavingReview())
+		// A call through MCP is an agent's: the note rule is switched on here, with the agent's own checks.
+		t, err := s.store.MoveTicket(ticketID, a.MoveTicketRequest, db.RequireNoteLeavingReview(), byAgent)
 		if err != nil {
 			return nil, err
 		}
@@ -760,9 +770,14 @@ func (s *MCPServer) callToolCtx(ctx context.Context, name string, args json.RawM
 		var a struct {
 			ID        string `json:"id"`
 			Completed *bool  `json:"completed"`
+			AgentID   string `json:"agentId"`
 			fullArg
 		}
 		if err := decodeArgs(args, &a); err != nil {
+			return nil, err
+		}
+		byAgent, err := s.agentWrite(a.AgentID)
+		if err != nil {
 			return nil, err
 		}
 		before, err := s.store.GetSubtask(a.ID)
@@ -771,9 +786,9 @@ func (s *MCPServer) callToolCtx(ctx context.Context, name string, args json.RawM
 		}
 		var st *models.Subtask
 		if a.Completed != nil {
-			st, err = s.store.SetSubtaskState(a.ID, *a.Completed)
+			st, err = s.store.SetSubtaskState(a.ID, *a.Completed, byAgent)
 		} else {
-			st, err = s.store.ToggleSubtask(a.ID)
+			st, err = s.store.ToggleSubtask(a.ID, byAgent)
 		}
 		if err != nil {
 			return nil, err
@@ -1408,7 +1423,7 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 		},
 		{
 			Name: "update_ticket",
-			Description: "Update ticket properties. Changing the status out of agent_review requires a note." + waitingHelp + " " +
+			Description: "Update ticket properties." + agentWriteHelp + " Changing the status out of agent_review requires a note." + waitingHelp + " " +
 				"To add a line or paragraph to the description, pass appendDescription rather than resending the whole description. " +
 				"To record the branch, worktree, pull request or landed commits, pass delivery." +
 				ticketImageRefsHelp +
@@ -1447,22 +1462,25 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 						Description: appendDescriptionHelp,
 					},
 					"delivery": deliveryProp,
+					"agentId":  agentIDProp,
 					"full":     fullProp(ticketWhole),
 				}),
+				Required: []string{"agentId"},
 			},
 		},
 		{
 			Name: "move_ticket",
-			Description: "Move ticket to a different status column. Moving it out of agent_review requires a note." + waitingHelp +
+			Description: "Move ticket to a different status column." + agentWriteHelp + " Moving it out of agent_review requires a note." + waitingHelp +
 				shortAnswerHelp(ticketHolds, changedHelp, ticketWhole),
 			InputSchema: jsonSchema{
 				Type: "object",
 				Properties: withIDOrKeyProps(ticketIDDescription, map[string]schemaProp{
-					"status": {Type: "string", Description: "Target status", Enum: models.Statuses},
-					"note":   {Type: "string", Description: noteParamDescription},
-					"full":   fullProp(ticketWhole),
+					"status":  {Type: "string", Description: "Target status", Enum: models.Statuses},
+					"note":    {Type: "string", Description: noteParamDescription},
+					"agentId": agentIDProp,
+					"full":    fullProp(ticketWhole),
 				}),
-				Required: []string{"status"},
+				Required: []string{"status", "agentId"},
 			},
 		},
 		{
@@ -1551,7 +1569,7 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 		},
 		{
 			Name: "toggle_subtask",
-			Description: "Set a subtask's completion status. Prefer passing `completed` to set it to a known state: " +
+			Description: "Set a subtask's completion status." + agentWriteHelp + " Prefer passing `completed` to set it to a known state: " +
 				"a call that finds the subtask already at that state changes nothing and still succeeds, so it is safe " +
 				"to repeat and safe against a stale read. Omitting `completed` instead flips the current state, which " +
 				"is unsafe to repeat since a second call undoes the first." +
@@ -1562,9 +1580,10 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 				Properties: map[string]schemaProp{
 					"id":        {Type: "string", Description: "Subtask ID"},
 					"completed": {Type: "boolean", Description: "Target completion state. Omit to flip the current state instead."},
+					"agentId":   agentIDProp,
 					"full":      fullProp(subtaskWhole),
 				},
-				Required: []string{"id"},
+				Required: []string{"id", "agentId"},
 			},
 		},
 		{

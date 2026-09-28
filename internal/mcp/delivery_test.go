@@ -29,7 +29,8 @@ func TestUpdateTicketToolSetsDelivery(t *testing.T) {
 		t.Fatalf("new ticket delivery = %v, want it left out", got["delivery"])
 	}
 
-	short := callJSON(t, s, "update_ticket", map[string]any{"id": "BILL-1", "delivery": map[string]any{
+	agent := testAgent(t, s)
+	short := callJSON(t, s, "update_ticket", map[string]any{"id": "BILL-1", "agentId": agent, "delivery": map[string]any{
 		"branch": "bill-1", "worktree": "/w/bill-1", "prUrl": "https://github.com/acme/api/pull/3",
 		"landedCommits": []map[string]any{
 			{"sha": fullSHA1, "repo": "acme/api"},
@@ -53,15 +54,15 @@ func TestUpdateTicketToolSetsDelivery(t *testing.T) {
 	}
 
 	// Only the fields passed change.
-	wantChanged(t, "update_ticket", callJSON(t, s, "update_ticket", map[string]any{"id": "BILL-1", "delivery": map[string]any{"prUrl": ""}}), "delivery")
-	wantChanged(t, "update_ticket", callJSON(t, s, "update_ticket", map[string]any{"id": "BILL-1", "title": "Invoice v2"}), "title")
+	wantChanged(t, "update_ticket", callJSON(t, s, "update_ticket", map[string]any{"id": "BILL-1", "agentId": agent, "delivery": map[string]any{"prUrl": ""}}), "delivery")
+	wantChanged(t, "update_ticket", callJSON(t, s, "update_ticket", map[string]any{"id": "BILL-1", "agentId": agent, "title": "Invoice v2"}), "title")
 	delete(want, "prUrl")
 	if got := callJSON(t, s, "get_ticket", map[string]any{"id": "BILL-1"}); !reflect.DeepEqual(got["delivery"], want) {
 		t.Fatalf("get_ticket delivery = %v, want %v", got["delivery"], want)
 	}
 
 	// A commit without a repo on a two-repo ticket is refused.
-	text, isError := callToolText(t, s, "update_ticket", map[string]any{"id": "BILL-1", "delivery": map[string]any{
+	text, isError := callToolText(t, s, "update_ticket", map[string]any{"id": "BILL-1", "agentId": agent, "delivery": map[string]any{
 		"landedCommits": []map[string]any{{"sha": "0123abc"}},
 	}})
 	if !isError || !strings.Contains(text, "has no repo") {
@@ -79,10 +80,11 @@ func TestFindTicketsByCommitTool(t *testing.T) {
 	}
 	callJSON(t, s, "create_ticket", map[string]any{"projectId": "BILL", "title": "API", "repos": []string{"acme/api"}})
 	callJSON(t, s, "create_ticket", map[string]any{"projectId": "BILL", "title": "Web", "repos": []string{"acme/web"}})
-	callJSON(t, s, "update_ticket", map[string]any{"id": "BILL-1", "delivery": map[string]any{
+	agent := testAgent(t, s)
+	callJSON(t, s, "update_ticket", map[string]any{"id": "BILL-1", "agentId": agent, "delivery": map[string]any{
 		"landedCommits": []map[string]any{{"sha": fullSHA1}, {"sha": "77aa0bc"}},
 	}})
-	callJSON(t, s, "update_ticket", map[string]any{"id": "BILL-2", "delivery": map[string]any{
+	callJSON(t, s, "update_ticket", map[string]any{"id": "BILL-2", "agentId": agent, "delivery": map[string]any{
 		"landedCommits": []map[string]any{{"sha": fullSHA2}, {"sha": "77aa0bc", "repo": "acme/api"}},
 	}})
 

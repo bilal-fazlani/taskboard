@@ -19,12 +19,13 @@ func TestUpdateTicketToolAppendsToDescription(t *testing.T) {
 	}
 	callJSON(t, s, "create_ticket", map[string]any{"projectId": "BILL", "title": "Invoice", "description": "The plan.\nStep two."})
 
-	short := callJSON(t, s, "update_ticket", map[string]any{"id": "BILL-1", "appendDescription": "Worktree: /w/bill-1"})
+	agent := testAgent(t, s)
+	short := callJSON(t, s, "update_ticket", map[string]any{"id": "BILL-1", "appendDescription": "Worktree: /w/bill-1", "agentId": agent})
 	wantKeys(t, "update_ticket", short, "id", "key", "title", "status", "changed", "updatedAt", "url")
 	wantChanged(t, "update_ticket", short, "description")
 
 	full := callJSON(t, s, "update_ticket", map[string]any{
-		"id": "bill-1", "appendDescription": "Review: APPROVE", "priority": "low", "full": true,
+		"id": "bill-1", "appendDescription": "Review: APPROVE", "priority": "low", "full": true, "agentId": agent,
 	})
 	want := "The plan.\nStep two.\n\nWorktree: /w/bill-1\n\nReview: APPROVE"
 	if full["description"] != want || full["priority"] != "low" {
@@ -42,12 +43,13 @@ func TestUpdateTicketToolRejectsBadAppends(t *testing.T) {
 	}
 	callJSON(t, s, "create_ticket", map[string]any{"projectId": "BILL", "title": "Invoice", "description": "Draft"})
 
+	agent := testAgent(t, s)
 	for _, tc := range []struct {
 		args map[string]any
 		want string
 	}{
-		{map[string]any{"id": "BILL-1", "description": "New", "appendDescription": "More"}, "pass description or appendDescription, not both"},
-		{map[string]any{"id": "BILL-1", "appendDescription": "  "}, "appendDescription is empty"},
+		{map[string]any{"id": "BILL-1", "description": "New", "appendDescription": "More", "agentId": agent}, "pass description or appendDescription, not both"},
+		{map[string]any{"id": "BILL-1", "appendDescription": "  ", "agentId": agent}, "appendDescription is empty"},
 	} {
 		text, isError := callToolText(t, s, "update_ticket", tc.args)
 		if !isError || !strings.Contains(text, tc.want) {

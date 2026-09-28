@@ -245,3 +245,75 @@ func TestStartingAgainLiftsTheStopAndSaysSo(t *testing.T) {
 		t.Fatalf("a start with no stop to lift: stopped = %+v, want none", again.Stopped)
 	}
 }
+
+// An agent's ticket and subtask writes (ByAgent) need a known agent and
+// touch it, a no-op tick included. After the stop they are refused like its
+// other writes, a resumed chat's too, and change nothing. The person's own
+// writes, without ByAgent, go through, as do another session's; claiming
+// again lifts the stop for them too.
+func TestAStoppedAgentsTicketAndSubtaskWritesAreRefused(t *testing.T) {
+	f := newClaimFixture(t)
+	sub, err := f.s.AddSubtask(f.ticket.ID, models.CreateSubtaskRequest{Title: "Store"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustClaim(t, f.s, f.ticket.ID, f.first.ID)
+	title := "Renamed"
+	writes := func(opts ...WriteOption) map[string]error {
+		_, update := f.s.UpdateTicket(f.ticket.ID, models.UpdateTicketRequest{Title: &title}, opts...)
+		_, move := f.s.MoveTicket(f.ticket.ID, models.MoveTicketRequest{Status: models.StatusAgentReview}, opts...)
+		_, set := f.s.SetSubtaskState(sub.ID, true, opts...)
+		_, toggle := f.s.ToggleSubtask(sub.ID, opts...)
+		return map[string]error{"update": update, "move": move, "set subtask": set, "toggle subtask": toggle}
+	}
+	unchanged := func(what string) {
+		t.Helper()
+		tk, err := f.s.GetTicket(f.ticket.ID)
+		if err != nil || tk.Title != "Claim rules" || tk.Status != models.StatusTodo || tk.Subtasks[0].Completed {
+			t.Fatalf("%s changed the ticket: %+v, %v", what, tk, err)
+		}
+	}
+
+	setLastSeen(t, f.s, f.first.ID, time.Hour)
+	if _, err := f.s.SetSubtaskState(sub.ID, false, ByAgent(f.first.ID)); err != nil {
+		t.Fatalf("an agent's no-op tick: %v", err)
+	}
+	if time.Since(lastSeen(t, f.s, f.first.ID)) > time.Minute {
+		t.Fatal("an agent's tick did not touch it")
+	}
+	var invalid *ErrInvalidInput
+	for agentID, want := range map[string]string{" ": "agentId is required", "ghost": `"ghost" is not an agent`} {
+		for name, err := range writes(ByAgent(agentID)) {
+			if !errors.As(err, &invalid) || !strings.Contains(err.Error(), want) {
+				t.Fatalf("%s by agent %q: err = %v, want %q", name, agentID, err, want)
+			}
+		}
+	}
+
+	mustStop(t, f.s, f.ticket.ID)
+	unchanged("the stop")
+	resumed := identify(t, f.s, "3da2c294", "implementer")
+	for _, agent := range []*models.Agent{f.first, resumed} {
+		for name, err := range writes(ByAgent(agent.ID)) {
+			wantStopped(t, name, err)
+		}
+	}
+	unchanged("a stopped agent's refused writes")
+
+	for name, err := range writes() {
+		if err != nil {
+			t.Fatalf("the person's %s after the stop: %v", name, err)
+		}
+	}
+	for name, err := range writes(ByAgent(f.second.ID)) {
+		if err != nil {
+			t.Fatalf("another session's %s after the stop: %v", name, err)
+		}
+	}
+	mustClaim(t, f.s, f.ticket.ID, resumed.ID)
+	for name, err := range writes(ByAgent(f.first.ID)) {
+		if err != nil {
+			t.Fatalf("the stopped session's %s after claiming again: %v", name, err)
+		}
+	}
+}

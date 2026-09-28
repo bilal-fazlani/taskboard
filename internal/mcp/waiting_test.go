@@ -37,8 +37,8 @@ func TestMovingAWaitingTicketOutIsRefused(t *testing.T) {
 		tool string
 		args map[string]any
 	}{
-		{"move_ticket", map[string]any{"id": "ACP-1", "status": models.StatusTodo}},
-		{"update_ticket", map[string]any{"id": "ACP-1", "status": models.StatusDone, "title": "Renamed", "note": "landed"}},
+		{"move_ticket", map[string]any{"id": "ACP-1", "status": models.StatusTodo, "agentId": agent}},
+		{"update_ticket", map[string]any{"id": "ACP-1", "status": models.StatusDone, "title": "Renamed", "note": "landed", "agentId": agent}},
 	} {
 		text := callError(t, f.s, call.tool, call.args)
 		for _, want := range []string{"ACP-1", id, "answering the request on the ticket page", "Stop work"} {
@@ -58,7 +58,7 @@ func TestMovingAWaitingTicketOutIsRefused(t *testing.T) {
 	if _, err := f.s.store.AnswerRequest(id, "approved", "bilal", ""); err != nil {
 		t.Fatal(err)
 	}
-	moved := callJSON(t, f.s, "move_ticket", map[string]any{"id": "ACP-1", "status": models.StatusAgentReview})
+	moved := callJSON(t, f.s, "move_ticket", map[string]any{"id": "ACP-1", "status": models.StatusAgentReview, "agentId": agent})
 	if moved["key"] != "ACP-1" {
 		t.Fatalf("move_ticket after the answer = %v", moved)
 	}

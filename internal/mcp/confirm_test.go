@@ -92,25 +92,26 @@ func TestTicketToolsAnswerShortByDefault(t *testing.T) {
 		t.Fatalf("create_ticket = %v", created)
 	}
 
+	agent := testAgent(t, s)
 	updated := callJSON(t, s, "update_ticket", map[string]any{
-		"id": "BILL-1", "priority": "low", "labels": []string{"api", "bug"}, "title": "Invoice",
+		"id": "BILL-1", "priority": "low", "labels": []string{"api", "bug"}, "title": "Invoice", "agentId": agent,
 	})
 	wantKeys(t, "update_ticket", updated, "id", "key", "title", "status", "changed", "updatedAt", "url")
 	// title was sent unchanged, so it is not listed.
 	wantChanged(t, "update_ticket", updated, "priority", "labels")
 
 	// An update that changes nothing says so with an empty list.
-	same := callJSON(t, s, "update_ticket", map[string]any{"id": "BILL-1", "priority": "low"})
+	same := callJSON(t, s, "update_ticket", map[string]any{"id": "BILL-1", "priority": "low", "agentId": agent})
 	wantChanged(t, "update_ticket", same)
 
-	moved := callJSON(t, s, "move_ticket", map[string]any{"id": "BILL-1", "status": "in_progress"})
+	moved := callJSON(t, s, "move_ticket", map[string]any{"id": "BILL-1", "status": "in_progress", "agentId": agent})
 	wantKeys(t, "move_ticket", moved, "id", "key", "title", "status", "changed", "updatedAt", "url")
 	wantChanged(t, "move_ticket", moved, "status")
 	if moved["status"] != "in_progress" {
 		t.Fatalf("move_ticket status = %v", moved["status"])
 	}
 	// A move to the column it is already in changes nothing a caller set.
-	wantChanged(t, "move_ticket", callJSON(t, s, "move_ticket", map[string]any{"id": "BILL-1", "status": "in_progress"}))
+	wantChanged(t, "move_ticket", callJSON(t, s, "move_ticket", map[string]any{"id": "BILL-1", "status": "in_progress", "agentId": agent}))
 
 	// The update's changes and the move landed, whatever the answer holds.
 	tk, err := s.store.GetTicket(created["id"].(string))
@@ -142,11 +143,12 @@ func TestTicketToolsAnswerWholeTicketOnRequest(t *testing.T) {
 	wholeTicket("create_ticket", callJSON(t, s, "create_ticket", map[string]any{
 		"projectId": "BILL", "title": "Invoice", "description": "Details.", "labels": []string{"api"}, "full": true,
 	}))
-	wholeTicket("update_ticket", callJSON(t, s, "update_ticket", map[string]any{"id": "BILL-1", "priority": "low", "full": true}))
-	wholeTicket("move_ticket", callJSON(t, s, "move_ticket", map[string]any{"id": "BILL-1", "status": "done", "full": true}))
+	agent := testAgent(t, s)
+	wholeTicket("update_ticket", callJSON(t, s, "update_ticket", map[string]any{"id": "BILL-1", "priority": "low", "full": true, "agentId": agent}))
+	wholeTicket("move_ticket", callJSON(t, s, "move_ticket", map[string]any{"id": "BILL-1", "status": "done", "full": true, "agentId": agent}))
 
 	// full: false is the default, spelled out.
-	short := callJSON(t, s, "move_ticket", map[string]any{"id": "BILL-1", "status": "todo", "full": false})
+	short := callJSON(t, s, "move_ticket", map[string]any{"id": "BILL-1", "status": "todo", "full": false, "agentId": agent})
 	if _, ok := short["description"]; ok || short["changed"] == nil {
 		t.Fatalf("move_ticket with full: false = %v, want the short form", short)
 	}
@@ -181,16 +183,17 @@ func TestSubtaskToolsAnswerShortByDefault(t *testing.T) {
 	}
 
 	id := one["id"].(string)
-	ticked := callJSON(t, s, "toggle_subtask", map[string]any{"id": id, "completed": true})
+	agent := testAgent(t, s)
+	ticked := callJSON(t, s, "toggle_subtask", map[string]any{"id": id, "completed": true, "agentId": agent})
 	wantKeys(t, "toggle_subtask", ticked, "id", "title", "completed", "ticket", "changed", "url")
 	wantChanged(t, "toggle_subtask", ticked, "completed")
 	if ticked["completed"] != true {
 		t.Fatalf("toggle_subtask = %v", ticked)
 	}
 	// Already ticked: nothing changed.
-	wantChanged(t, "toggle_subtask", callJSON(t, s, "toggle_subtask", map[string]any{"id": id, "completed": true}))
+	wantChanged(t, "toggle_subtask", callJSON(t, s, "toggle_subtask", map[string]any{"id": id, "completed": true, "agentId": agent}))
 	// Flipping always changes it.
-	flipped := callJSON(t, s, "toggle_subtask", map[string]any{"id": id})
+	flipped := callJSON(t, s, "toggle_subtask", map[string]any{"id": id, "agentId": agent})
 	wantChanged(t, "toggle_subtask", flipped, "completed")
 	if flipped["completed"] != false {
 		t.Fatalf("flipped toggle_subtask = %v", flipped)
@@ -229,7 +232,7 @@ func TestSubtaskToolsAnswerWholeTicketOnRequest(t *testing.T) {
 		t.Fatalf("batch_create_subtasks full answer lists %d subtasks, want 2", n)
 	}
 	id := one["subtasks"].([]any)[0].(map[string]any)["id"].(string)
-	ticked := callJSON(t, s, "toggle_subtask", map[string]any{"id": id, "completed": true, "full": true})
+	ticked := callJSON(t, s, "toggle_subtask", map[string]any{"id": id, "completed": true, "full": true, "agentId": testAgent(t, s)})
 	if first := ticked["subtasks"].([]any)[0].(map[string]any); first["completed"] != true {
 		t.Fatalf("toggle_subtask full answer's subtask = %v, want completed", first)
 	}

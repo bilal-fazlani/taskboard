@@ -57,6 +57,7 @@ func TestDeletedProjectIsGoneFromTheTools(t *testing.T) {
 
 	callJSON(t, s, "delete_project", map[string]any{"id": "GONE"})
 
+	agent := testAgent(t, s)
 	for _, c := range []struct {
 		tool string
 		args map[string]any
@@ -65,11 +66,11 @@ func TestDeletedProjectIsGoneFromTheTools(t *testing.T) {
 		{"get_project", map[string]any{"id": "GONE"}},
 		{"update_project", map[string]any{"id": "GONE", "name": "Back"}},
 		{"get_ticket", map[string]any{"id": "GONE-1"}},
-		{"update_ticket", map[string]any{"id": "GONE-1", "title": "Changed"}},
-		{"move_ticket", map[string]any{"id": "GONE-1", "status": "done"}},
+		{"update_ticket", map[string]any{"id": "GONE-1", "title": "Changed", "agentId": agent}},
+		{"move_ticket", map[string]any{"id": "GONE-1", "status": "done", "agentId": agent}},
 		{"create_ticket", map[string]any{"projectId": "GONE", "title": "New"}},
 		{"create_subtask", map[string]any{"ticketId": "GONE-1", "title": "More"}},
-		{"toggle_subtask", map[string]any{"id": sub.ID, "completed": true}},
+		{"toggle_subtask", map[string]any{"id": sub.ID, "completed": true, "agentId": agent}},
 		{"list_epics", map[string]any{"projectId": "GONE"}},
 		{"list_entries", map[string]any{"project": "GONE"}},
 		{"create_project", map[string]any{"name": "Again", "prefix": "GONE"}},

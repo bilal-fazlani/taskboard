@@ -52,6 +52,16 @@ func TestTicketStopCommand(t *testing.T) {
 		t.Fatalf("the stopped agent's hand-off = %q, want it accepted", out)
 	}
 
+	// The person's own writes on the stopped ticket take no agent and are
+	// never refused: editing it, moving it, ticking its subtasks.
+	run("ticket", "update", "BILL-1", "--title", "Invoice v2")
+	run("ticket", "move", "BILL-1", "--status", "in_progress")
+	added := run("ticket", "subtask", "add", "BILL-1", "Tax")
+	subtaskID := added[strings.LastIndex(added, "(")+1 : strings.LastIndex(added, ")")]
+	if out := run("ticket", "subtask", "toggle", subtaskID); !strings.Contains(out, "Tax is now done") {
+		t.Fatalf("the person's subtask toggle after the stop = %q", out)
+	}
+
 	// --json prints the stopped ticket itself.
 	claimForTest(t, path, "BILL-2", agent)
 	var stopped models.Ticket
