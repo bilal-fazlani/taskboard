@@ -559,6 +559,9 @@ func (s *MCPServer) callToolCtx(ctx context.Context, name string, args json.RawM
 		if t.History, err = s.store.ListStatusChanges(ticketID); err != nil {
 			return nil, err
 		}
+		if t.AnsweredRequests, err = s.store.AnsweredRequests(ticketID); err != nil {
+			return nil, err
+		}
 		entries, err := s.store.TicketEntries(t)
 		if err != nil {
 			return nil, err
@@ -1350,7 +1353,7 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 				"its documents (name, format, size, updated time and a link; read one with get_document), " +
 				"its delivery (branch, worktree, prUrl and landedCommits, each commit a sha with its repo; left out when none is set), " +
 				"and its status history (newest first, each change with its note; the first entry, with an empty fromStatus, is its creation). " +
-				"reviewRounds counts how many times it has entered agent_review." + getTicketEntriesHelp,
+				"reviewRounds counts how many times it has entered agent_review." + answeredRequestsHelp + getTicketEntriesHelp,
 			InputSchema: jsonSchema{
 				Type:       "object",
 				Properties: idOrKeyProps(ticketIDDescription),

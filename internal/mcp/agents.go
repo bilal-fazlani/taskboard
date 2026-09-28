@@ -85,6 +85,15 @@ type awaitAnswerResult struct {
 // itself.
 var agentIDProp = schemaProp{Type: "string", Description: "Your agentId, from identify_agent."}
 
+// answeredRequestsHelp is what start_ticket's and get_ticket's descriptions
+// say about a ticket's answeredRequests: every answer the person gave on it,
+// including one given after the asking session ended, since OpenRequest
+// alone clears once a request is answered and a new session never sees it
+// otherwise.
+var answeredRequestsHelp = " The ticket also carries answeredRequests, the person's answers to its requests for user input, " +
+	"newest first (type, prompt, answer, note, answeredBy, answeredAt); a request the person closed by stopping work, " +
+	"rather than answering it, shows stopped: true instead of an answer. Left out when the ticket has none."
+
 // agentToolDefs are the agent protocol's tools, listed after the entry
 // tools.
 var agentToolDefs = [5]toolDef{
@@ -121,7 +130,7 @@ var agentToolDefs = [5]toolDef{
 			"before: nextBefore. Refused while an agent of another session holds the ticket and is live: the error names it " +
 			"and when its session was last seen; leave the ticket to it. Once that session has gone stale, the start takes " +
 			"the ticket over: takenFrom names the agent it was taken from and handOff says where its work stood; carry on " +
-			"from there. Starting a ticket your session holds continues it.",
+			"from there. Starting a ticket your session holds continues it." + answeredRequestsHelp,
 		InputSchema: jsonSchema{
 			Type: "object",
 			Properties: map[string]schemaProp{

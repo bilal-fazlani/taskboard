@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -601,7 +602,9 @@ func TestAgentToolDescriptionsSayWhenToUseThem(t *testing.T) {
 		"await_answer":       {"request you made", "answered: false", "call again", "keeps your session live"},
 		"get_now":            {"waiting on the person"},
 		"start_ticket": {"How you begin work on a ticket", "claims it for you", "Refused while an agent of another session",
-			"last seen", "takes the ticket over", "takenFrom", "handOff", "never block you"},
+			"last seen", "takes the ticket over", "takenFrom", "handOff", "never block you", "answeredRequests",
+			"stopped: true instead of an answer"},
+		"get_ticket": {"answeredRequests", "stopped: true instead of an answer"},
 	} {
 		for _, w := range want {
 			if !strings.Contains(descriptions[tool], w) {
@@ -643,5 +646,44 @@ func TestStartTicketToolBeginsWork(t *testing.T) {
 	got = callJSON(t, f.s, "start_ticket", map[string]any{"ticket": "ACP-1", "agentId": second})
 	if from, _ := got["takenFrom"].(map[string]any); from == nil || from["id"] != first {
 		t.Fatalf("start_ticket on a stale agent's ticket: takenFrom %v, want %s", got["takenFrom"], first)
+	}
+}
+
+// An answer the person gives after the asking session has gone stale still
+// reaches the next agent: start_ticket's takeover carries it in
+// answeredRequests, newest first, and get_ticket carries the same.
+func TestStartTicketCarriesAnAnswerGivenAfterTheAskingSessionWentStale(t *testing.T) {
+	f := newAgentServer(t)
+	first := f.identify(t, "3da2c294", "implementer")
+	second := f.identify(t, "b10d8a02", "implementer")
+	f.claim(t, first)
+
+	id := callJSON(t, f.s, "request_user_input", map[string]any{"ticket": "ACP-1", "agentId": first, "type": "question",
+		"prompt": "Which port?"})["id"].(string)
+
+	f.ageAgent(t, first)
+	if _, err := f.secondStore(t).AnswerRequest(id, "3011", "Bilal", "Free on this machine."); err != nil {
+		t.Fatal(err)
+	}
+
+	got := callJSON(t, f.s, "start_ticket", map[string]any{"ticket": "ACP-1", "agentId": second})
+	if from, _ := got["takenFrom"].(map[string]any); from == nil || from["id"] != first {
+		t.Fatalf("start_ticket's takenFrom = %v, want %s", got["takenFrom"], first)
+	}
+	ticket := got["ticket"].(map[string]any)
+	answered, _ := ticket["answeredRequests"].([]any)
+	if len(answered) != 1 {
+		t.Fatalf("start_ticket's answeredRequests = %v, want the answer given while stale", ticket["answeredRequests"])
+	}
+	entry := answered[0].(map[string]any)
+	if entry["type"] != "question" || entry["prompt"] != "Which port?" || entry["answer"] != "3011" ||
+		entry["note"] != "Free on this machine." || entry["answeredBy"] != "Bilal" || entry["answeredAt"] == nil || entry["stopped"] != nil {
+		t.Fatalf("the stale answer's entry = %v", entry)
+	}
+
+	fromGetTicket := callJSON(t, f.s, "get_ticket", map[string]any{"id": "ACP-1"})
+	if !reflect.DeepEqual(fromGetTicket["answeredRequests"], ticket["answeredRequests"]) {
+		t.Fatalf("get_ticket's answeredRequests = %v, want the same as start_ticket's %v",
+			fromGetTicket["answeredRequests"], ticket["answeredRequests"])
 	}
 }

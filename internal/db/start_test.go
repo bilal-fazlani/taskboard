@@ -314,3 +314,93 @@ func TestStartTicketSize(t *testing.T) {
 		t.Fatalf("the seeded start is %d bytes, over its ceiling of %d:\n%s", len(raw), startSizeCeiling, raw)
 	}
 }
+
+// start_ticket carries the ticket's answered requests, newest first, each
+// with its type, prompt, answer, note, who answered and when; a ticket with
+// none carries no answeredRequests at all.
+func TestStartTicketCarriesAnsweredRequestsNewestFirst(t *testing.T) {
+	f := newClaimFixture(t)
+	mustClaim(t, f.s, f.ticket.ID, f.first.ID)
+
+	if start := mustStart(t, f.s, f.ticket.ID, f.first.ID); start.Ticket.AnsweredRequests != nil {
+		t.Fatalf("answeredRequests on a ticket with none = %+v, want it left out", start.Ticket.AnsweredRequests)
+	}
+
+	first := mustCreateRequest(t, f.s, models.CreateUserInputRequest{TicketID: f.ticket.ID, AgentID: f.first.ID,
+		Type: models.UserInputQuestion, Prompt: "Which port?", Choices: []string{"3011", "3014"}})
+	if _, err := f.s.AnswerRequest(first, "3011", "Bilal", ""); err != nil {
+		t.Fatal(err)
+	}
+	second := mustCreateRequest(t, f.s, models.CreateUserInputRequest{TicketID: f.ticket.ID, AgentID: f.first.ID,
+		Type: models.UserInputApproval, Prompt: "Land it?"})
+	if _, err := f.s.AnswerRequest(second, "approved", "Bilal", "Ship it once CI is green."); err != nil {
+		t.Fatal(err)
+	}
+
+	got := mustStart(t, f.s, f.ticket.ID, f.first.ID).Ticket.AnsweredRequests
+	if len(got) != 2 {
+		t.Fatalf("answeredRequests = %+v, want 2", got)
+	}
+	// Newest first: the approval, answered second, comes before the question.
+	if got[0].Type != models.UserInputApproval || got[0].Prompt != "Land it?" || got[0].Answer != models.ApprovalApproved ||
+		got[0].Note != "Ship it once CI is green." || got[0].AnsweredBy != "Bilal" || got[0].AnsweredAt.IsZero() || got[0].Stopped {
+		t.Fatalf("newest answeredRequests entry = %+v", got[0])
+	}
+	if got[1].Type != models.UserInputQuestion || got[1].Prompt != "Which port?" || got[1].Answer != "3011" ||
+		got[1].Note != "" || got[1].AnsweredBy != "Bilal" || got[1].AnsweredAt.IsZero() || got[1].Stopped {
+		t.Fatalf("oldest answeredRequests entry = %+v", got[1])
+	}
+	if got[0].AnsweredAt.Before(got[1].AnsweredAt) {
+		t.Errorf("answeredRequests not newest first: %+v", got)
+	}
+}
+
+// A request closed by Stop work shows as stopped, not as an answer: no
+// answer or note, and answeredBy is who stopped the work.
+func TestStartTicketRequestClosedByStopShowsAsStopped(t *testing.T) {
+	f := newClaimFixture(t)
+	mustClaim(t, f.s, f.ticket.ID, f.first.ID)
+	mustCreateRequest(t, f.s, models.CreateUserInputRequest{TicketID: f.ticket.ID, AgentID: f.first.ID,
+		Type: models.UserInputApproval, Prompt: "Land it?"})
+
+	if _, err := f.s.StopWork(f.ticket.ID, "Bilal"); err != nil {
+		t.Fatal(err)
+	}
+
+	got := mustStart(t, f.s, f.ticket.ID, f.second.ID).Ticket.AnsweredRequests
+	if len(got) != 1 {
+		t.Fatalf("answeredRequests after a stop = %+v, want 1", got)
+	}
+	r := got[0]
+	if !r.Stopped || r.Answer != "" || r.Note != "" || r.AnsweredBy != "Bilal" || r.AnsweredAt.IsZero() ||
+		r.Type != models.UserInputApproval || r.Prompt != "Land it?" {
+		t.Fatalf("stopped request's answeredRequests entry = %+v, want stopped with no answer", r)
+	}
+}
+
+// An answer the person gives after the asking session has gone stale still
+// reaches the next agent: once a new session's start takes the ticket over,
+// its answeredRequests carries it.
+func TestStartTicketCarriesAnAnswerGivenAfterTheAskingSessionWentStale(t *testing.T) {
+	f := newClaimFixture(t)
+	mustStart(t, f.s, f.ticket.ID, f.first.ID)
+	id := mustCreateRequest(t, f.s, models.CreateUserInputRequest{TicketID: f.ticket.ID, AgentID: f.first.ID,
+		Type: models.UserInputQuestion, Prompt: "Which port?"})
+
+	// The asking session goes stale before the person answers.
+	setLastSeen(t, f.s, f.first.ID, 31*time.Minute)
+	if _, err := f.s.AnswerRequest(id, "3011", "Bilal", "Free on this machine."); err != nil {
+		t.Fatal(err)
+	}
+
+	// A second session's start takes the stale ticket over, and sees the
+	// answer given after the first session went quiet.
+	start := mustStart(t, f.s, f.ticket.ID, f.second.ID)
+	if start.TakenFrom == nil || start.TakenFrom.ID != f.first.ID {
+		t.Fatalf("start.takenFrom = %+v, want the stale %s", start.TakenFrom, f.first.ID)
+	}
+	got := start.Ticket.AnsweredRequests
+	if len(got) != 1 || got[0].Answer != "3011" || got[0].Note != "Free on this machine." || got[0].AnsweredBy != "Bilal" || got[0].Stopped {
+		t.Fatalf("answeredRequests after the takeover = %+v, want the answer given while stale", got)
+	}
+}

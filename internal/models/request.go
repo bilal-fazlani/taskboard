@@ -91,3 +91,47 @@ type CreateUserInputRequest struct {
 func (r TicketRequest) Answered() bool {
 	return r.AnsweredAt != nil
 }
+
+// AnsweredRequest is one of a ticket's answered requests, as Ticket.
+// AnsweredRequests carries them: only what an agent needs to act on an
+// answer, without the id, ticketId, agentId and choices the full
+// TicketRequest carries. A request the person closed by stopping work,
+// rather than answering it, has Stopped true and no Answer.
+type AnsweredRequest struct {
+	// Type is the type of user input, one of UserInputTypes.
+	Type   string `json:"type"`
+	Prompt string `json:"prompt"`
+	// Answer is left out when Stopped is true: StoppedAnswer is not a real
+	// answer, so it is never carried here.
+	Answer string `json:"answer,omitempty"`
+	// Note is the optional note the person left alongside the answer; never
+	// set when Stopped is true.
+	Note string `json:"note,omitempty"`
+	// AnsweredBy is who closed the request: the person who answered it, or,
+	// when Stopped is true, the person who stopped the work.
+	AnsweredBy string    `json:"answeredBy,omitempty"`
+	AnsweredAt time.Time `json:"answeredAt"`
+	// Stopped is whether the request closed because the person stopped work
+	// on the ticket (StoppedAnswer) rather than being answered.
+	Stopped bool `json:"stopped,omitempty"`
+}
+
+// AsAnsweredRequest converts an answered TicketRequest to the smaller shape
+// Ticket.AnsweredRequests carries. r must be answered.
+func (r TicketRequest) AsAnsweredRequest() AnsweredRequest {
+	a := AnsweredRequest{
+		Type:       r.Type,
+		Prompt:     r.Prompt,
+		Note:       r.Note,
+		AnsweredBy: r.AnsweredBy,
+	}
+	if r.AnsweredAt != nil {
+		a.AnsweredAt = *r.AnsweredAt
+	}
+	if r.Answer == StoppedAnswer {
+		a.Stopped = true
+	} else {
+		a.Answer = r.Answer
+	}
+	return a
+}

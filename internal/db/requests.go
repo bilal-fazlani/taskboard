@@ -100,6 +100,31 @@ func (s *Store) ListRequests(ticketID string) ([]models.TicketRequest, error) {
 	return out, rows.Err()
 }
 
+// AnsweredRequests returns a ticket's answered requests, newest first, in
+// the smaller shape (models.AnsweredRequest) that start_ticket and the MCP
+// get_ticket tool carry: enough for an agent starting or reading the ticket
+// to learn every answer the person gave on it, including one given after
+// the asking session ended, without the id, agent and choices only the full
+// TicketRequest needs. nil when the ticket has none. ticketID is a resolved
+// ticket id, not a display key.
+func (s *Store) AnsweredRequests(ticketID string) ([]models.AnsweredRequest, error) {
+	rows, err := s.db.Query(requestSelect+` WHERE r.ticket_id = ? AND`+liveRequest+` AND r.answered_at IS NOT NULL
+		ORDER BY r.answered_at DESC, r.rowid DESC`, ticketID)
+	if err != nil {
+		return nil, fmt.Errorf("listing answered requests: %w", err)
+	}
+	defer rows.Close()
+	var out []models.AnsweredRequest
+	for rows.Next() {
+		req, err := scanRequest(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, req.AsAnsweredRequest())
+	}
+	return out, rows.Err()
+}
+
 // CreateRequest records the agent asking the person for user input on a
 // ticket (an id or display key) and moves the ticket to needs_user_input,
 // whatever the type. It answers with the new request's id. The type must be

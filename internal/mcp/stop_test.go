@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -52,5 +53,25 @@ func TestAwaitAnswerOnAStoppedApproval(t *testing.T) {
 	stopped, _ := got["stopped"].(map[string]any)
 	if stopped == nil || stopped["by"] != "bilal" || stopped["at"] == nil {
 		t.Fatalf("start_ticket after the stop: stopped = %v, want by bilal with its time", got["stopped"])
+	}
+
+	// The request Stop work closed shows as stopped, not as an answer: no
+	// answer or note, only who stopped the work and when. get_ticket carries
+	// the same.
+	ticket := got["ticket"].(map[string]any)
+	answered, _ := ticket["answeredRequests"].([]any)
+	if len(answered) != 1 {
+		t.Fatalf("start_ticket's answeredRequests = %v, want the one closed by the stop", ticket["answeredRequests"])
+	}
+	entry := answered[0].(map[string]any)
+	if entry["type"] != "approval" || entry["prompt"] != "Land the branch on main?" || entry["stopped"] != true ||
+		entry["answer"] != nil || entry["note"] != nil || entry["answeredBy"] != "bilal" || entry["answeredAt"] == nil {
+		t.Fatalf("the stopped request's answeredRequests entry = %v, want it stopped with no answer", entry)
+	}
+
+	fromGetTicket := callJSON(t, f.s, "get_ticket", map[string]any{"id": "ACP-1"})
+	if !reflect.DeepEqual(fromGetTicket["answeredRequests"], ticket["answeredRequests"]) {
+		t.Fatalf("get_ticket's answeredRequests = %v, want the same as start_ticket's %v",
+			fromGetTicket["answeredRequests"], ticket["answeredRequests"])
 	}
 }

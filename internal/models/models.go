@@ -97,6 +97,15 @@ type Ticket struct {
 	// HTTP API serves it from its own endpoint.
 	History []StatusChange `json:"history,omitempty"`
 
+	// AnsweredRequests are the ticket's answered requests for user input,
+	// newest first, so an agent starting or reading the ticket learns every
+	// answer the person gave on it, including one given after the asking
+	// session ended: OpenRequest alone would miss it, since it clears once
+	// answered. Only start_ticket and the MCP get_ticket tool fill it in;
+	// everywhere else it is left out, and the HTTP API lists a ticket's
+	// requests from its own endpoint.
+	AnsweredRequests []AnsweredRequest `json:"answeredRequests,omitempty"`
+
 	// Delivery is where the ticket's work lives and where it landed. Only
 	// the full ticket carries it, and only when a field is set.
 	Delivery *Delivery `json:"delivery,omitempty"`

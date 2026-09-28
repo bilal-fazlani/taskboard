@@ -38,6 +38,9 @@ func (s *Store) StartTicket(ticketRef, agentID string) (*models.Start, error) {
 		return nil, fmt.Errorf("reading the claimed ticket %q: it is gone", ticketRef)
 	}
 	t.Agent = nil
+	if t.AnsweredRequests, err = s.AnsweredRequests(t.ID); err != nil {
+		return nil, err
+	}
 	start := &models.Start{Ticket: t, TakenFrom: claim.TakenFrom, Stopped: claim.Stopped, HandOff: claim.HandOff}
 
 	if start.TakenFrom == nil {
