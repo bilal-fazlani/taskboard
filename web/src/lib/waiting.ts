@@ -60,6 +60,20 @@ export function compareWaiting(a: WaitingTicket, b: WaitingTicket): number {
   return x === y ? 0 : x < y ? -1 : 1;
 }
 
+/**
+ * What a graph card's accessible name adds for a ticket waiting on the
+ * person, since its role=button hides the band: ", waiting on you: Approve:
+ * <first line>", or just ", waiting on you" when its request didn't come
+ * with it. Empty for any other ticket.
+ */
+export function waitingLabel(
+  ticket: Pick<Ticket, "status"> & { openRequest?: Pick<TicketRequest, "type" | "prompt"> },
+): string {
+  if (!isWaiting(ticket.status)) return "";
+  const r = ticket.openRequest;
+  return r ? `, waiting on you: ${requestKind(r.type)}: ${firstLine(r.prompt)}` : ", waiting on you";
+}
+
 /** How many of the tickets wait on the person. */
 export function waitingCount(tickets: readonly Pick<Ticket, "status">[]): number {
   return tickets.filter((t) => isWaiting(t.status)).length;

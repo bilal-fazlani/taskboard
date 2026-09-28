@@ -209,6 +209,25 @@ describe("TicketEditor as a modal", () => {
     await waitFor(() => expect(mockApi.tickets.get).toHaveBeenCalledWith("t1"));
   });
 
+  it("shows Waiting on You in a disabled status select, offering no move out of it", async () => {
+    mockApi.tickets.get.mockImplementation((id: string) => Promise.resolve(makeTicket({ id, status: "needs_user_input" })));
+    renderEditor(makeTicket({ status: "needs_user_input" }));
+    const status = screen.getByLabelText("Status") as HTMLSelectElement;
+    expect(status.value).toBe("needs_user_input");
+    expect(status.selectedOptions[0].textContent).toBe("Waiting on You");
+    expect(status.disabled).toBe(true);
+    await waitFor(() => expect(mockApi.tickets.get).toHaveBeenCalledWith("t1"));
+    expect((screen.getByLabelText("Status") as HTMLSelectElement).disabled).toBe(true);
+  });
+
+  it("keeps the status select open, without Waiting on You, for a writable status", async () => {
+    renderEditor(makeTicket({ status: "in_progress" }));
+    const status = screen.getByLabelText("Status") as HTMLSelectElement;
+    expect(status.disabled).toBe(false);
+    expect([...status.options].map((o) => o.value)).not.toContain("needs_user_input");
+    await waitFor(() => expect(mockApi.tickets.get).toHaveBeenCalledWith("t1"));
+  });
+
   it("puts content in the first column and fields in the second", () => {
     renderEditor();
     const body = screen.getByTestId("ticket-editor-body");

@@ -31,7 +31,7 @@ import { useDocParam } from "../hooks/useDocParam";
 import { useOwnerDocuments } from "../hooks/useOwnerDocuments";
 import { usePasteImages } from "../hooks/usePasteImages";
 import { actionErrorMessage, deleteErrorMessage, saveErrorMessage } from "../lib/saveError";
-import { STATUSES, STATUS_LABELS, STATUS_STYLES, isStatus } from "../lib/status";
+import { STATUSES, STATUS_LABELS, STATUS_STYLES, isStatus, isWritableStatus } from "../lib/status";
 import {
   changedFields,
   dependencyWrite,
@@ -600,6 +600,8 @@ export default function TicketEditor({
   epicOptions.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
   const statusStyle = isStatus(status) ? STATUS_STYLES[status] : "bg-slate-500/20 text-slate-400";
   const statusLabel = isStatus(status) ? STATUS_LABELS[status] : status.replace("_", " ");
+  // A known status no write may set (needs_user_input) locks the status select.
+  const statusLocked = isStatus(savedStatus) && !isWritableStatus(savedStatus);
 
   return (
     <div className="fixed inset-0 z-50 flex p-3 sm:p-6 lg:p-10">
@@ -909,17 +911,25 @@ export default function TicketEditor({
                 <label htmlFor={statusId} className={FIELD_LABEL}>
                   Status
                 </label>
+                {/* A ticket waiting on the person shows Waiting on You, and
+                    the select is disabled: only answering its request or
+                    stopping the work moves it out. */}
                 <select
                   id={statusId}
                   value={status}
+                  disabled={statusLocked}
+                  title={statusLocked ? "Answer the request, or stop the work, to move it on" : undefined}
                   onChange={(e) => {
                     setStatus(e.target.value);
                     // Back to the saved status there is no change to note.
                     if (e.target.value === savedStatus) setNote("");
                     markDirty();
                   }}
-                  className={SELECT}
+                  className={`${SELECT} disabled:cursor-not-allowed disabled:opacity-70`}
                 >
+                  {statusLocked && isStatus(savedStatus) && (
+                    <option value={savedStatus}>{STATUS_LABELS[savedStatus]}</option>
+                  )}
                   {STATUSES.map((s) => (
                     <option key={s} value={s}>
                       {STATUS_LABELS[s]}

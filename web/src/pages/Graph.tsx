@@ -52,7 +52,7 @@ import { entrySize, mergeSizes, pruneSizes } from "../lib/graphSizes";
 import { columnHeading, doneCountText } from "../lib/graphText";
 import { CONFLICT_ONLY_DASH, conflictOnlyEdges, edgeKey } from "../lib/graphEdgeKinds";
 import { isDone } from "../lib/status";
-import { waitingCount } from "../lib/waiting";
+import { waitingCount, waitingLabel } from "../lib/waiting";
 import {
   FIT_PADDING,
   IDENTITY,
@@ -985,7 +985,7 @@ export default function Graph() {
                 data-ticket-id={node.id}
                 role="button"
                 tabIndex={0}
-                aria-label={`${node.ticket.projectPrefix}-${node.ticket.number} ${node.ticket.title}`}
+                aria-label={`${node.ticket.projectPrefix}-${node.ticket.number} ${node.ticket.title}${waitingLabel(node.ticket)}`}
                 onKeyDown={(e) => {
                   if (e.target !== e.currentTarget || (e.key !== "Enter" && e.key !== " ")) return;
                   e.preventDefault();

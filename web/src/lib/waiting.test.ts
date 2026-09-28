@@ -1,5 +1,26 @@
 import { describe, expect, it } from "vitest";
-import { WAITING_LINK, compareWaiting, firstLine, requestKind, waitingCount, waitingSince } from "./waiting";
+import {
+  WAITING_LINK,
+  compareWaiting,
+  firstLine,
+  requestKind,
+  waitingCount,
+  waitingLabel,
+  waitingSince,
+} from "./waiting";
+
+describe("waitingLabel", () => {
+  it("says a waiting ticket waits on you, with its request's type and first line", () => {
+    expect(
+      waitingLabel({ status: "needs_user_input", openRequest: { type: "approval", prompt: "Land it?\nThe suite is green." } }),
+    ).toBe(", waiting on you: Approve: Land it?");
+    expect(waitingLabel({ status: "needs_user_input" })).toBe(", waiting on you");
+  });
+
+  it("adds nothing for a ticket that isn't waiting", () => {
+    expect(waitingLabel({ status: "in_progress" })).toBe("");
+  });
+});
 
 describe("requestKind", () => {
   it("names an approval Approve and a question Question", () => {

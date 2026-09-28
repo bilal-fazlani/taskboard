@@ -163,6 +163,17 @@ describe("the Dependencies view's waiting cards", () => {
     expect(within(card("ACP-1")).queryByTestId("card-request")).toBeNull();
   });
 
+  it("names a waiting card as waiting on you, with its request's type and first line", async () => {
+    await mount(TICKETS);
+    expect(card("ACP-4").getAttribute("aria-label")).toBe(
+      "ACP-4 Ticket ACP-4, waiting on you: Approve: Delete the Decisions document?",
+    );
+    expect(card("ACP-3").getAttribute("aria-label")).toBe(
+      "ACP-3 Ticket ACP-3, waiting on you: Question: Round only, or the finding too?",
+    );
+    expect(card("ACP-1").getAttribute("aria-label")).toBe("ACP-1 Ticket ACP-1");
+  });
+
   it("puts the waiting cards at the top of Ready, oldest first, above the one in progress", async () => {
     await mount(TICKETS);
     expect(top("ACP-4")).toBeLessThan(top("ACP-3"));
@@ -175,7 +186,10 @@ describe("the header's waiting count", () => {
     await mount(TICKETS);
     const chip = screen.getByTestId("waiting-chip");
     expect(chip.textContent).toBe("3 waiting on you");
-    expect(chip.getAttribute("aria-label")).toBe("3 tickets waiting on you: open the waiting list");
+    // Its accessible name starts with what it shows (WCAG 2.5.3).
+    expect(chip.getAttribute("aria-label")).toBe("3 waiting on you, in every project: open the waiting list");
+    expect(chip.getAttribute("aria-label")!.startsWith(chip.textContent!)).toBe(true);
+    expect(screen.getByRole("link", { name: /^3 waiting on you/ })).toBe(chip);
     expect(chip.getAttribute("href")).toBe("/now?project=all#waiting");
     expect(chip.closest("header")).toBe(screen.getByRole("heading", { level: 1, name: "Dependencies" }).closest("header"));
   });
@@ -192,11 +206,11 @@ describe("the header's waiting count", () => {
     expect(document.activeElement).toBe(group);
   });
 
-  it("says ticket for one", async () => {
+  it("counts one the same way", async () => {
     await mount(TICKETS.filter((t) => t.id !== "ACP-3" && t.id !== "LDR-1"));
     const chip = screen.getByTestId("waiting-chip");
     expect(chip.textContent).toBe("1 waiting on you");
-    expect(chip.getAttribute("aria-label")).toBe("1 ticket waiting on you: open the waiting list");
+    expect(chip.getAttribute("aria-label")).toBe("1 waiting on you, in every project: open the waiting list");
   });
 
   it("is hidden when nothing waits", async () => {
