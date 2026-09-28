@@ -42,3 +42,7 @@ The app is supposed to provide a world view of the development state.
 - History or tokens used at each round, ticket.
 - Provide assistance to user by offering options, suggestions, and guidance based on the current state of the project and tasks.
 - Have good animations and transitions to enhance the user experience.
+
+# Ways of working
+
+- because we are bootstrapping (using taskboard to build taskboard) whenever you feel like there is a good point to pause and use new features, tell me. once no tasks are in flight, I can close claude, run make install and start claude again and we can resume. this can happen whenever you think your future work can benefit from stuff you have just built
