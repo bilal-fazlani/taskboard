@@ -1502,7 +1502,10 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 			Name: "get_now",
 			Description: "What's moving right now, across all projects by default: tickets in progress, waiting on the person " +
 				"(needs_user_input) or in review, with their subtask and review progress, plus what landed in the last 24 hours " +
-				"with its commit shas. Checking a " +
+				"with its commit shas. A ticket in progress or waiting that no live agent works (no holder, or a stale one) " +
+				"carries unattended: true. A ticket in progress whose newest request is answered, held by a live agent or not, " +
+				"carries answered, that request as {type, prompt, answer, note} (stopped: true instead of an answer when the " +
+				"person stopped the work): the tickets to pick up, and whether they were approved. Checking a " +
 				"run's state costs one cheap call, instead of a list_tickets per status plus a get_ticket per ticket.",
 			InputSchema: jsonSchema{
 				Type:       "object",

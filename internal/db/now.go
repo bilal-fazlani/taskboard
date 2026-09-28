@@ -44,7 +44,7 @@ func (s *Store) Now(projectRef string, now time.Time) (*models.Now, error) {
 		projectID = id
 	}
 
-	active, err := s.nowActive(projectID)
+	active, err := s.nowActive(projectID, now)
 	if err != nil {
 		return nil, err
 	}
@@ -77,9 +77,10 @@ func inList(ids []string) (string, []any) {
 }
 
 // nowActive reads the tickets in progress, waiting on the person or in
-// review, with their subtask progress, review rounds, time in their status
-// and, in review, the state of their review.
-func (s *Store) nowActive(projectID string) ([]models.NowTicket, error) {
+// review, with their subtask progress, review rounds, time in their status,
+// in review, the state of their review, in progress or waiting, whether
+// they are unattended as of now and, in progress, their answered request.
+func (s *Store) nowActive(projectID string, now time.Time) ([]models.NowTicket, error) {
 	rows, err := s.db.Query(`SELECT t.id, COALESCE(p.prefix, ''), t.number, t.title, t.status, t.created_at
 		FROM `+liveTickets+` t LEFT JOIN `+liveProjects+` p ON p.id = t.project_id
 		WHERE t.status IN (?, ?, ?) AND (? = '' OR t.project_id = ?)`,
@@ -123,6 +124,12 @@ func (s *Store) nowActive(projectID string) ([]models.NowTicket, error) {
 		return nil, err
 	}
 	if err := s.nowRequests(tickets, index); err != nil {
+		return nil, err
+	}
+	if err := s.nowUnattended(tickets, index, now); err != nil {
+		return nil, err
+	}
+	if err := s.nowAnswered(tickets, index); err != nil {
 		return nil, err
 	}
 
@@ -185,6 +192,97 @@ func (s *Store) nowRequests(tickets []models.NowTicket, index map[string]int) er
 		}
 		if i, ok := index[id]; ok {
 			tickets[i].Request = &r
+		}
+	}
+	return rows.Err()
+}
+
+// nowUnattended sets Unattended on each ticket in progress or waiting on the
+// person that has no holder, or whose holder is stale as of now (markStale,
+// with the install's stale threshold), in one query. A ticket in review is
+// never unattended: its reviewer does not hold it.
+func (s *Store) nowUnattended(tickets []models.NowTicket, index map[string]int, now time.Time) error {
+	var ids []string
+	for _, t := range tickets {
+		if t.Status == models.StatusInProgress || t.Status == models.StatusNeedsUserInput {
+			ids = append(ids, t.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	settings, err := s.AgentSettings()
+	if err != nil {
+		return err
+	}
+	placeholders, args := inList(ids)
+	rows, err := s.db.Query(`SELECT t.id, `+agentColumns+`
+		FROM `+liveTickets+` t JOIN agents a ON a.id = t.agent_id
+		WHERE t.id IN (`+placeholders+`)`, args...)
+	if err != nil {
+		return fmt.Errorf("loading holding agents: %w", err)
+	}
+	live := map[string]bool{}
+	for rows.Next() {
+		var ticketID string
+		a, err := scanAgent(rows, &ticketID)
+		if err != nil {
+			rows.Close()
+			return err
+		}
+		markStale(settings, &a, now)
+		live[ticketID] = !a.Stale
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	for _, id := range ids {
+		if !live[id] {
+			tickets[index[id]].Unattended = true
+		}
+	}
+	return nil
+}
+
+// nowAnswered sets Answered on each ticket in progress whose newest request
+// is answered, in one query, whoever holds it: staleness is per session and
+// a run's subagents share it, so a hold the run's own session made and the
+// person answered never reads as unattended, and pickup must still see its
+// answer. A ticket waiting on the person has an open request instead, and
+// one in review carries none.
+func (s *Store) nowAnswered(tickets []models.NowTicket, index map[string]int) error {
+	var ids []string
+	for _, t := range tickets {
+		if t.Status == models.StatusInProgress {
+			ids = append(ids, t.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	placeholders, args := inList(ids)
+	// Newest first, so the first row read for a ticket is its newest request.
+	rows, err := s.db.Query(requestSelect+` WHERE r.ticket_id IN (`+placeholders+`)
+		ORDER BY r.created_at DESC, r.rowid DESC`, args...)
+	if err != nil {
+		return fmt.Errorf("loading requests: %w", err)
+	}
+	defer rows.Close()
+	seen := map[string]bool{}
+	for rows.Next() {
+		r, err := scanRequest(rows)
+		if err != nil {
+			return err
+		}
+		if seen[r.TicketID] {
+			continue
+		}
+		seen[r.TicketID] = true
+		if r.Answered() {
+			a := r.AsAnsweredRequest()
+			tickets[index[r.TicketID]].Answered = &a
 		}
 	}
 	return rows.Err()

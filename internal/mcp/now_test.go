@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -176,6 +177,81 @@ func TestGetNowToolProjectFilter(t *testing.T) {
 	n = out.(nowAnswer)
 	if len(n.InProgress) != 0 || len(n.InReview) != 0 || len(n.Landed) != 0 {
 		t.Errorf("get_now(projectId=NOPE) = %+v, want everything empty", n)
+	}
+}
+
+// An approved hold whose session has ended shows in get_now as unattended,
+// with its newest answer's type, prompt, answer and note and nothing more.
+// A live holder's approved hold carries its answer but is not unattended,
+// and a live holder's ticket with no request carries neither field.
+func TestGetNowToolFlagsAnApprovedHoldWhoseSessionEnded(t *testing.T) {
+	f := newAgentServer(t)
+	orchestrator := f.identify(t, "3da2c294", "orchestrator")
+	implementer := f.identify(t, "b10d8a02", "implementer")
+
+	callJSON(t, f.s, "start_ticket", map[string]any{"ticket": "ACP-1", "agentId": orchestrator})
+	hold := "Hold (Bilal 2026-09-28): wait for ACP-9. Approve to dispatch it once ACP-9 lands."
+	id := callJSON(t, f.s, "request_user_input", map[string]any{"ticket": "ACP-1", "agentId": orchestrator,
+		"type": "approval", "prompt": hold})["id"].(string)
+	f.ageAgent(t, orchestrator)
+	if _, err := f.secondStore(t).AnswerRequest(id, "approved", "Bilal", "ACP-9 landed."); err != nil {
+		t.Fatal(err)
+	}
+
+	working, err := f.s.store.CreateTicket(models.CreateTicketRequest{ProjectID: f.ticket.ProjectID, Title: "Being built"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	callJSON(t, f.s, "start_ticket", map[string]any{"ticket": working.ID, "agentId": implementer})
+
+	// The live session's own hold, approved while it runs.
+	ownHold, err := f.s.store.CreateTicket(models.CreateTicketRequest{ProjectID: f.ticket.ProjectID, Title: "Held by this run"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	callJSON(t, f.s, "start_ticket", map[string]any{"ticket": ownHold.ID, "agentId": implementer})
+	ownPrompt := "Hold (Bilal 2026-09-28): wait for ACP-8. Approve to dispatch it once ACP-8 lands."
+	ownID := callJSON(t, f.s, "request_user_input", map[string]any{"ticket": ownHold.ID, "agentId": implementer,
+		"type": "approval", "prompt": ownPrompt})["id"].(string)
+	if _, err := f.secondStore(t).AnswerRequest(ownID, "approved", "Bilal", ""); err != nil {
+		t.Fatal(err)
+	}
+
+	got := callJSON(t, f.s, "get_now", map[string]any{})
+	inProgress, _ := got["inProgress"].([]any)
+	byKey := map[string]map[string]any{}
+	for _, v := range inProgress {
+		tk := v.(map[string]any)
+		byKey[tk["key"].(string)] = tk
+	}
+	if len(byKey) != 3 {
+		t.Fatalf("get_now's inProgress = %v, want ACP-1, ACP-2 and ACP-3", got["inProgress"])
+	}
+
+	own := byKey["ACP-3"]
+	if _, ok := own["unattended"]; ok {
+		t.Errorf("the live session's approved hold names unattended: %v", own)
+	}
+	wantOwn := map[string]any{"type": "approval", "prompt": ownPrompt, "answer": "approved"}
+	if !reflect.DeepEqual(own["answered"], wantOwn) {
+		t.Errorf("the live session's approved hold's answered = %v, want %v", own["answered"], wantOwn)
+	}
+
+	held := byKey["ACP-1"]
+	if held["unattended"] != true {
+		t.Errorf("the approved hold = %v, want unattended: true", held)
+	}
+	want := map[string]any{"type": "approval", "prompt": hold, "answer": "approved", "note": "ACP-9 landed."}
+	if !reflect.DeepEqual(held["answered"], want) {
+		t.Errorf("the approved hold's answered = %v, want %v", held["answered"], want)
+	}
+
+	live := byKey["ACP-2"]
+	if _, ok := live["unattended"]; ok {
+		t.Errorf("the live holder's ticket names unattended: %v", live)
+	}
+	if _, ok := live["answered"]; ok {
+		t.Errorf("the live holder's ticket names answered: %v", live)
 	}
 }
 

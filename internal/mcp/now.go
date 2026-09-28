@@ -32,6 +32,30 @@ type nowActive struct {
 	// Since is truncated to whole seconds: how long the ticket has been in
 	// its status needs no finer precision.
 	Since time.Time `json:"since"`
+	// Unattended is set on a ticket in progress or waiting on the person
+	// that no live agent works (no holder, or a stale one): the ticket a
+	// session picks up. Left out otherwise.
+	Unattended bool `json:"unattended,omitempty"`
+	// Answered is an in-progress ticket's newest request when it is
+	// answered, attended or not: a hold the caller's own live session made
+	// never reads as unattended. Left out otherwise.
+	Answered *nowAnswered `json:"answered,omitempty"`
+}
+
+// nowAnswered is an in-progress ticket's answered newest request, as get_now
+// answers it: what a session picking the ticket up acts on, without the
+// answerer and time get_ticket's answeredRequests carry.
+type nowAnswered struct {
+	Type string `json:"type"`
+	// Prompt is what the request asked, so an approval says what it
+	// approved.
+	Prompt string `json:"prompt"`
+	// Answer is left out when Stopped is true.
+	Answer string `json:"answer,omitempty"`
+	Note   string `json:"note,omitempty"`
+	// Stopped is set when the person closed the request by stopping work
+	// rather than answering it.
+	Stopped bool `json:"stopped,omitempty"`
 }
 
 // nowLanded is a ticket that recently landed, as get_now answers it: its
@@ -100,6 +124,10 @@ func compactNowActive(t models.NowTicket) nowActive {
 		ReviewRounds: t.ReviewRounds,
 		Review:       t.Review,
 		Since:        t.Since.Truncate(time.Second),
+		Unattended:   t.Unattended,
+	}
+	if r := t.Answered; r != nil {
+		a.Answered = &nowAnswered{Type: r.Type, Prompt: r.Prompt, Answer: r.Answer, Note: r.Note, Stopped: r.Stopped}
 	}
 	if t.SubtasksTotal > 0 {
 		a.Subtasks = strconv.Itoa(t.SubtasksDone) + "/" + strconv.Itoa(t.SubtasksTotal)

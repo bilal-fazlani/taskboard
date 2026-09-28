@@ -338,6 +338,97 @@ func TestNowWaitingCarriesEachRequestOldestFirst(t *testing.T) {
 	}
 }
 
+// A ticket in progress or waiting that no live agent works is unattended,
+// and a ticket in progress whose newest request is answered carries that
+// answer whoever holds it: an approved hold whose session went stale is
+// both, a live holder's approved hold only carries its answer, a ticket in
+// progress with no request carries none, and a waiting ticket or one in
+// review never carries one.
+func TestNowMarksUnattendedTicketsAndCarriesAnswers(t *testing.T) {
+	f := newClaimFixture(t)
+	held := f.ticket
+	live := seedTicket(t, f.s, f.project.ID, "Live holder")
+	working := seedTicket(t, f.s, f.project.ID, "Being built, never asked")
+	asking := seedTicket(t, f.s, f.project.ID, "Asks a stale question")
+	unheld := seedStatusTicket(t, f.s, f.project.ID, "Moved by hand", models.StatusInProgress)
+	reviewed := seedStatusTicket(t, f.s, f.project.ID, "Under review", models.StatusAgentReview)
+
+	answer := func(ticketID, agentID, prompt, reply, note string) {
+		t.Helper()
+		id := mustCreateRequest(t, f.s, models.CreateUserInputRequest{TicketID: ticketID, AgentID: agentID,
+			Type: models.UserInputApproval, Prompt: prompt})
+		if _, err := f.s.AnswerRequest(id, reply, "Bilal", note); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mustClaim(t, f.s, held.ID, f.first.ID)
+	answer(held.ID, f.first.ID, "Mock approval", models.ApprovalDeclined, "Revise the colours.")
+	answer(held.ID, f.first.ID, "Hold (Bilal 2026-09-27): wait for ACP-9. Approve to dispatch it once ACP-9 lands.",
+		models.ApprovalApproved, "ACP-9 landed.")
+	mustClaim(t, f.s, live.ID, f.second.ID)
+	answer(live.ID, f.second.ID, "Hold (Bilal 2026-09-27): wait for ACP-8. Approve to dispatch it once ACP-8 lands.",
+		models.ApprovalApproved, "")
+	mustClaim(t, f.s, working.ID, f.second.ID)
+	mustClaim(t, f.s, asking.ID, f.first.ID)
+	answer(asking.ID, f.first.ID, "Earlier call", models.ApprovalApproved, "")
+	mustCreateRequest(t, f.s, models.CreateUserInputRequest{TicketID: asking.ID, AgentID: f.first.ID,
+		Type: models.UserInputQuestion, Prompt: "Which port?"})
+	// The first session ended an hour before nowAt; the second was seen a
+	// minute before it.
+	execOrFail(t, f.s.db, `UPDATE agents SET last_seen_at = ? WHERE id = ?`, stamp(nowAt.Add(-time.Hour)), f.first.ID)
+	execOrFail(t, f.s.db, `UPDATE agents SET last_seen_at = ? WHERE id = ?`, stamp(nowAt.Add(-time.Minute)), f.second.ID)
+
+	n := readNow(t, f.s, "")
+	byKey := map[string]models.NowTicket{}
+	for _, group := range [][]models.NowTicket{n.InProgress, n.Waiting, n.InReview} {
+		for _, tk := range group {
+			byKey[tk.Key] = tk
+		}
+	}
+	if len(byKey) != 6 {
+		t.Fatalf("now = %+v, want six active tickets", n)
+	}
+
+	h := byKey[held.DisplayKey()]
+	if !h.Unattended || h.Status != models.StatusInProgress {
+		t.Errorf("the approved hold = %+v, want in progress and unattended", h)
+	}
+	if a := h.Answered; a == nil || a.Type != models.UserInputApproval || a.Answer != models.ApprovalApproved ||
+		a.Note != "ACP-9 landed." || !strings.HasPrefix(a.Prompt, "Hold (Bilal") || a.Stopped {
+		t.Errorf("the approved hold's answer = %+v, want its newest answer, the approved hold", a)
+	}
+
+	l := byKey[live.DisplayKey()]
+	if l.Unattended || l.Status != models.StatusInProgress {
+		t.Errorf("the live holder's approved hold = %+v, want in progress and attended", l)
+	}
+	if a := l.Answered; a == nil || a.Answer != models.ApprovalApproved || !strings.HasPrefix(a.Prompt, "Hold (Bilal") {
+		t.Errorf("the live holder's approved hold's answer = %+v, want the approved hold", a)
+	}
+
+	w := byKey[working.DisplayKey()]
+	if w.Unattended || w.Answered != nil {
+		t.Errorf("the live holder's ticket with no request = %+v, want attended with no answer", w)
+	}
+	data, err := json.Marshal(w)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), `"unattended"`) || strings.Contains(string(data), `"answered"`) {
+		t.Errorf("an attended ticket with no request names unattended or answered: %s", data)
+	}
+
+	if a := byKey[asking.DisplayKey()]; !a.Unattended || a.Status != models.StatusNeedsUserInput || a.Answered != nil {
+		t.Errorf("the stale holder's waiting ticket = %+v, want unattended with no answer, though an earlier request was answered", a)
+	}
+	if u := byKey[unheld.DisplayKey()]; !u.Unattended || u.Answered != nil {
+		t.Errorf("the ticket nobody holds = %+v, want unattended with no answer", u)
+	}
+	if r := byKey[reviewed.DisplayKey()]; r.Unattended || r.Answered != nil {
+		t.Errorf("the ticket in review = %+v, want never unattended", r)
+	}
+}
+
 func TestReviewRoundAndVerdict(t *testing.T) {
 	for name, want := range map[string]int{"Review 1": 1, "review 12": 12, "REVIEW 3": 3, "Review": 0, "Review 0": 0, "Review notes": 0, "Reviews 1": 0, "Review 1b": 0} {
 		got, ok := reviewRound(name)

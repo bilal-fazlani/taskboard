@@ -52,6 +52,16 @@ type NowTicket struct {
 	// Request is what the ticket waits on, set only on a ticket in
 	// needs_user_input: the Now page lists each with its type and prompt.
 	Request *NowRequest `json:"request,omitempty"`
+	// Unattended is set on a ticket in progress or waiting on the person
+	// that no live agent works: it has no holder, or its holder's session
+	// has gone stale. It waits for a session to pick it up.
+	Unattended bool `json:"unattended,omitempty"`
+	// Answered is an in-progress ticket's newest request when that request
+	// is answered, whether or not the ticket is unattended, so a session
+	// picking it up knows whether it was approved without reading the
+	// ticket; nil on a ticket with no answered newest request and on every
+	// ticket waiting on the person or in review.
+	Answered *AnsweredRequest `json:"answered,omitempty"`
 }
 
 // NowRequest is a waiting ticket's open request for user input, as far as
