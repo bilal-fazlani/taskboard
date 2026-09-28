@@ -635,6 +635,9 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ status, position }),
       }).then(normalizeTicket),
+    /** The person stopping the work an agent does on the ticket: it answers
+     * with the ticket, freed and back in todo. */
+    stop: (id: string) => request<RawTicket>(`/api/tickets/${id}/stop`, { method: "POST" }).then(normalizeTicket),
     addSubtask: (id: string, title: string) =>
       request<Subtask>(`/api/tickets/${id}/subtasks`, {
         method: "POST",

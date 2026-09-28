@@ -20,6 +20,7 @@ import RepoPicker from "./RepoPicker";
 import DependencyPicker, { KindPill, SurfacedFromPicker, TicketRefLabel } from "./DependencyPicker";
 import DeliverySection from "./DeliverySection";
 import RequestBlock from "./RequestBlock";
+import HeldBy from "./HeldBy";
 import TicketEntries from "./TicketEntries";
 import EntryContextBox from "./EntryContextBox";
 import { useNavigate } from "react-router-dom";
@@ -595,6 +596,24 @@ export default function TicketEditor({
     }
   };
 
+  // Stop work frees the ticket at once. The ticket it answers with is shown
+  // the way a live refresh would show it: filled in quietly, or offered by
+  // the notice while there are unsaved edits.
+  const handleStopWork = async () => {
+    clearActionError();
+    try {
+      const full = await api.tickets.stop(ticket.id);
+      setDetail(full);
+      if (!dirtyRef.current) {
+        syncFrom(full);
+        return;
+      }
+      noteChanged(changedFields(baseRef.current, ticketFields(full)).length > 0 ? full : null);
+    } catch (error) {
+      reportActionError(error);
+    }
+  };
+
   const ticketKey = `${ticket.projectPrefix}-${ticket.number}`;
   // "No epic", then the project's epics by name, plus the ticket's own epic if
   // the list doesn't have it (yet), so the select never shows a blank.
@@ -911,7 +930,8 @@ export default function TicketEditor({
               deleted ? "opacity-60" : ""
             }`}
           >
-            {/* Who holds the ticket, with its Stop work action, goes here, first in this column. */}
+            {/* First in this column; renders nothing while no agent holds the ticket. */}
+            <HeldBy ticketKey={ticketKey} status={detail.status} agent={detail.agent} onStop={handleStopWork} />
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label htmlFor={statusId} className={FIELD_LABEL}>

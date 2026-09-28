@@ -13,6 +13,7 @@ const mockApi = vi.hoisted(() => ({
     list: vi.fn(),
     history: vi.fn(),
     addSubtask: vi.fn(),
+    stop: vi.fn(),
   },
   subtasks: {
     toggle: vi.fn(),
@@ -2614,5 +2615,109 @@ describe("image documents", () => {
     fireEvent.submit(input);
     expect(await screen.findByRole("dialog", { name: "Login.png" })).toBeTruthy();
     await waitFor(() => expect(docParam()).toBe("Login.png"));
+  });
+});
+
+describe("Held by and Stop work", () => {
+  const holder = {
+    id: "a1",
+    sessionId: "s1",
+    role: "implementer",
+    model: "claude-opus-5-5",
+    provider: "anthropic",
+    createdAt: "2026-09-28T08:00:00Z",
+    lastSeenAt: "2026-09-28T08:00:00Z",
+    sessionLastSeenAt: new Date(Date.now() - 4 * 60_000).toISOString(),
+    stale: false,
+  };
+  const held = (overrides: Partial<Ticket> = {}) => makeTicket({ status: "in_progress", agent: holder, ...overrides });
+  const freed = (overrides: Partial<Ticket> = {}) =>
+    makeTicket({ status: "todo", updatedAt: "2026-09-28T09:00:00Z", ...overrides });
+  const heldBy = () => screen.queryByTestId("held-by");
+  const stopButton = () => within(screen.getByTestId("held-by")).getByRole("button", { name: "Stop work" });
+
+  beforeEach(() => {
+    mockApi.tickets.get.mockImplementation(() => Promise.resolve(held()));
+  });
+
+  it("shows the holder first in the side column, with Stop work under it", async () => {
+    renderEditor(held());
+    const fields = screen.getByRole("complementary", { name: "Ticket fields" });
+    const section = within(fields).getByTestId("held-by");
+    expect(fields.firstElementChild).toBe(section);
+    expect(within(section).getByText("Held by")).toBeTruthy();
+    expect(section.textContent).toContain("implementer · claude-opus-5-5 · seen 4m ago");
+    expect(within(section).getByRole("img", { name: "Anthropic" })).toBeTruthy();
+    expect(stopButton()).toBeTruthy();
+  });
+
+  it("shows nothing while no agent holds the ticket", async () => {
+    mockApi.tickets.get.mockImplementation(() => Promise.resolve(makeTicket()));
+    renderEditor(makeTicket());
+    await waitFor(() => expect(mockApi.tickets.get).toHaveBeenCalled());
+    expect(heldBy()).toBeNull();
+    expect(screen.queryByRole("button", { name: "Stop work" })).toBeNull();
+  });
+
+  it("says a stale holder is stale", () => {
+    renderEditor(held({ agent: { ...holder, stale: true } }));
+    expect(screen.getByTestId("held-by").textContent).toContain("· stale");
+  });
+
+  it("asks inline first, starting on Keep working, which stops nothing", async () => {
+    const { onClose } = renderEditor(held());
+    fireEvent.click(stopButton());
+    const confirm = screen.getByRole("alertdialog", { name: "Confirm stop work" });
+    expect(confirm.textContent).toContain(
+      "Stop work on AUTH-7? The ticket goes back to To do now. The implementer is told on its next call, and can still leave its hand-off.",
+    );
+    const keep = within(confirm).getByRole("button", { name: "Keep working" });
+    expect(document.activeElement).toBe(keep);
+    fireEvent.click(keep);
+    expect(screen.queryByRole("alertdialog", { name: "Confirm stop work" })).toBeNull();
+    expect(document.activeElement).toBe(stopButton());
+
+    // Escape keeps working too, and leaves the editor open.
+    fireEvent.click(stopButton());
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("alertdialog", { name: "Confirm stop work" })).toBeNull();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(mockApi.tickets.stop).not.toHaveBeenCalled();
+  });
+
+  it("stops the work and shows the freed ticket at once", async () => {
+    mockApi.tickets.stop.mockResolvedValue(freed());
+    renderEditor(held());
+    await waitFor(() => expect(mockApi.tickets.get).toHaveBeenCalled());
+    fireEvent.click(stopButton());
+    const confirm = screen.getByRole("alertdialog", { name: "Confirm stop work" });
+    fireEvent.click(within(confirm).getByRole("button", { name: "Stop work" }));
+    await waitFor(() => expect(heldBy()).toBeNull());
+    expect(mockApi.tickets.stop).toHaveBeenCalledWith("t1");
+    expect((screen.getByLabelText("Status") as HTMLSelectElement).value).toBe("todo");
+    expect(screen.queryByRole("alertdialog", { name: "Confirm stop work" })).toBeNull();
+  });
+
+  it("goes away when a live change frees the ticket elsewhere", async () => {
+    const { rerenderWith } = renderEditor(held());
+    expect(heldBy()).toBeTruthy();
+    mockApi.tickets.get.mockImplementation(() => Promise.resolve(freed()));
+    rerenderWith({ ticket: freed() });
+    await waitFor(() => expect(heldBy()).toBeNull());
+  });
+
+  it("says why on the error strip when the stop is refused, and keeps the holder", async () => {
+    mockApi.tickets.stop.mockRejectedValue(
+      new Error('API error 400: {"error":"ticket AUTH-7 is not held by any agent: there is no work on it to stop"}'),
+    );
+    renderEditor(held());
+    fireEvent.click(stopButton());
+    fireEvent.click(
+      within(screen.getByRole("alertdialog", { name: "Confirm stop work" })).getByRole("button", { name: "Stop work" }),
+    );
+    expect((await screen.findByTestId("ticket-save-error")).textContent).toContain(
+      "ticket AUTH-7 is not held by any agent: there is no work on it to stop.",
+    );
+    expect(heldBy()).toBeTruthy();
   });
 });
