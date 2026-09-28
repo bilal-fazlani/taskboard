@@ -287,6 +287,26 @@ describe("Epics rows", () => {
     expect(within(rowOf("Review")).getByText("3 active")).toBeTruthy();
   });
 
+  it("shows a red waiting chip beside the blue active one, each counting its own tickets", async () => {
+    serves({
+      epics: [
+        epic("Agents", { in_progress: 2, needs_user_input: 1 }, "2026-09-01T00:00:00Z"),
+        epic("Views", { needs_user_input: 1 }, "2026-09-02T00:00:00Z"),
+        epic("Hardening", { todo: 1 }, "2026-09-03T00:00:00Z"),
+      ],
+      noEpic: progress(),
+    });
+    await mount();
+    const agents = rowOf("Agents");
+    expect(within(agents).getByText("2 active")).toBeTruthy();
+    expect(within(agents).getByText("1 waiting")).toBeTruthy();
+    const views = rowOf("Views");
+    expect(within(views).queryByText(/active/)).toBeNull();
+    expect(within(views).getByText("1 waiting")).toBeTruthy();
+    // Nothing live: no chip at all, as today.
+    expect(within(rowOf("Hardening")).queryByText(/active|waiting/)).toBeNull();
+  });
+
   it("splits the bar by status in proportion, in the status colours", async () => {
     await mount();
     const segments = [...within(rowOf("Graph")).getByTestId("epic-bar").children] as HTMLElement[];

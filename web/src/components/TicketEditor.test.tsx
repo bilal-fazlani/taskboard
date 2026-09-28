@@ -1145,6 +1145,46 @@ describe("typed links", () => {
     expect(screen.getByText("Guard gap")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Remove .*AUTH-6/ })).toBeNull();
   });
+
+  it("shows each dependency's status with its label and colour, not the raw enum, in Depends on, Blocks and Surfaced here", async () => {
+    mockApi.tickets.get.mockResolvedValue(
+      makeTicket({
+        dependsOn: [{ id: "t2", key: "AUTH-2", title: "Build login UI", status: "needs_user_input" }],
+        blocks: [{ id: "t5", key: "AUTH-5", title: "Release", status: "done" }],
+        surfaced: [{ id: "t6", key: "AUTH-6", title: "Guard gap", status: "in_progress" }],
+      }),
+    );
+    renderEditor();
+    await screen.findByText("Release");
+
+    // Each row is "<TicketRefLabel/><KindPill/>?<StatusPill/>" in one flex
+    // row, so scope the pill lookup to the row naming that dependency.
+    const rowOf = (title: string) => screen.getByText(title).closest(".flex.items-center.gap-2") as HTMLElement;
+
+    const waiting = within(rowOf("Build login UI")).getByText("Waiting on You");
+    expect(waiting.className).toContain("bg-red-500/20");
+    expect(waiting.className).toContain("text-red-400");
+    // Never the half-fixed raw enum a naive replace("_", " ") would leave.
+    expect(screen.queryByText("needs user_input")).toBeNull();
+
+    const done = within(rowOf("Release")).getByText("Done");
+    expect(done.className).toContain("bg-green-500/20");
+    expect(done.className).toContain("text-green-400");
+
+    const inProgress = within(rowOf("Guard gap")).getByText("In Progress");
+    expect(inProgress.className).toContain("bg-blue-500/20");
+    expect(inProgress.className).toContain("text-blue-400");
+  });
+
+  it("falls back to the raw text and a generic look for a status pill it doesn't know", async () => {
+    mockApi.tickets.get.mockResolvedValue(
+      makeTicket({ blocks: [{ id: "t5", key: "AUTH-5", title: "Release", status: "archived" }] }),
+    );
+    renderEditor();
+    const pill = await screen.findByText("archived");
+    expect(pill.className).toContain("bg-slate-500/20");
+    expect(pill.className).toContain("text-slate-400");
+  });
 });
 
 describe("subtasks", () => {
@@ -1372,7 +1412,10 @@ describe("fields", () => {
     renderEditor();
     expect(screen.getByText("Auth System")).toBeTruthy();
     await screen.findByText("Release");
-    expect(screen.getAllByText("in progress")).toHaveLength(2);
+    // Depends on (AUTH-2) and Blocks (AUTH-5) both wait in in_progress, shown
+    // by its label on its pill (a span, unlike the status select's option),
+    // not the raw enum.
+    expect(screen.getAllByText("In Progress", { selector: "span" })).toHaveLength(2);
   });
 
   it("shows the full ticket's delivery last in the fields column, below Blocks, and leaves Save alone", async () => {

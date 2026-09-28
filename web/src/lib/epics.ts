@@ -8,7 +8,7 @@
 
 import type { Epic, EpicProgress } from "../api/client";
 import { NO_EPIC, isNoEpic } from "./filters";
-import { ACTIVE_STATUSES, DONE_STATUS, type KnownStatus } from "./status";
+import { ACTIVE_STATUSES, DONE_STATUS, NEEDS_USER_INPUT_STATUS, type KnownStatus } from "./status";
 import type { TicketViewPath } from "./lastView";
 
 const count = (progress: EpicProgress, status: string) => progress.counts?.[status] ?? 0;
@@ -18,15 +18,21 @@ export function activeCount(progress: EpicProgress): number {
   return ACTIVE_STATUSES.reduce((sum, status) => sum + count(progress, status), 0);
 }
 
+/** How many of the tickets wait on the person: needs_user_input. */
+export function waitingCount(progress: EpicProgress): number {
+  return count(progress, NEEDS_USER_INPUT_STATUS);
+}
+
 /** How many of the tickets are done. */
 export function doneCount(progress: EpicProgress): number {
   return count(progress, DONE_STATUS);
 }
 
-// Epics with an active ticket first, then the others with tickets, then the
-// empty ones.
+// Epics with an active or waiting ticket first, then the others with
+// tickets, then the empty ones. A waiting ticket ranks its epic with the
+// busy ones even when nothing is active, since it still needs attention.
 function rank(epic: Epic): number {
-  if (activeCount(epic) > 0) return 0;
+  if (activeCount(epic) > 0 || waitingCount(epic) > 0) return 0;
   return epic.total > 0 ? 1 : 2;
 }
 

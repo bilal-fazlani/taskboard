@@ -2,6 +2,21 @@ import { useEffect, useState } from "react";
 import { StickyNote, X } from "lucide-react";
 import { api, type DependencyKind, type Ticket, type TicketRef } from "../api/client";
 import { useEscape } from "../lib/escapeStack";
+import { STATUS_LABELS, STATUS_STYLES, isStatus } from "../lib/status";
+
+// A fallback for a status this build doesn't know about yet: the same muted
+// look the status select and header badge fall back to.
+const UNKNOWN_STATUS_STYLE = "bg-slate-500/20 text-slate-400";
+
+// A ticket ref's status as a small pill, in the status's own colour
+// (STATUS_STYLES), with STATUS_LABELS' wording — "Waiting on You" rather than
+// the raw "needs_user_input" a naive `replace("_", " ")` would half-fix. An
+// unknown status falls back to a generic look and its raw text.
+export function StatusPill({ status }: { status: string }) {
+  const style = isStatus(status) ? STATUS_STYLES[status] : UNKNOWN_STATUS_STYLE;
+  const label = isStatus(status) ? STATUS_LABELS[status] : status.replace(/_/g, " ");
+  return <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${style}`}>{label}</span>;
+}
 
 // A linked ticket's key and title: a button that opens it when there is
 // somewhere to open it, plain text otherwise.
@@ -123,9 +138,7 @@ function DependencyRow({
           ticketRef={ticketRef}
           onToggle={() => onChange({ ...ticketRef, kind: isConflictOnly(ticketRef) ? "needs_work" : "conflict_only" })}
         />
-        <span className="shrink-0 rounded-full bg-slate-800 px-2 py-0.5 text-[10px] text-slate-400">
-          {ticketRef.status.replace("_", " ")}
-        </span>
+        <StatusPill status={ticketRef.status} />
         {!note && !editing && (
           <button
             type="button"
@@ -292,9 +305,7 @@ export function SurfacedFromPicker({
     return (
       <div className="flex items-center gap-2 rounded-md border border-slate-800 bg-slate-900/60 px-2.5 py-1.5">
         <TicketRefLabel ticketRef={value} onOpen={onOpen} />
-        <span className="shrink-0 rounded-full bg-slate-800 px-2 py-0.5 text-[10px] text-slate-400">
-          {value.status.replace("_", " ")}
-        </span>
+        <StatusPill status={value.status} />
         <button
           type="button"
           onClick={() => onChange(null)}

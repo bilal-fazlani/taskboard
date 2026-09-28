@@ -18,6 +18,7 @@ import {
   progressText,
   serverMessage,
   showsNoEpic,
+  waitingCount,
 } from "../lib/epics";
 import { NO_EPIC } from "../lib/filters";
 import { readLastView } from "../lib/lastView";
@@ -175,6 +176,7 @@ function Row({
   menu?: React.ReactNode;
 }) {
   const active = noEpic ? 0 : activeCount(progress);
+  const waiting = noEpic ? 0 : waitingCount(progress);
   const Icon = noEpic ? CircleDashed : Layers;
   // A description may run to several lines; the row shows the first.
   const summary = description?.split(/\r?\n/, 1)[0].trim();
@@ -192,6 +194,11 @@ function Row({
           {active > 0 && (
             <span className="shrink-0 rounded bg-blue-500/10 px-1.5 py-0.5 text-[11px] font-medium text-blue-400">
               {active} active
+            </span>
+          )}
+          {waiting > 0 && (
+            <span className="shrink-0 rounded bg-red-500/10 px-1.5 py-0.5 text-[11px] font-medium text-red-400">
+              {waiting} waiting
             </span>
           )}
         </span>

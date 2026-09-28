@@ -9,6 +9,7 @@ import {
   progressText,
   serverMessage,
   showsNoEpic,
+  waitingCount,
 } from "./epics";
 
 function progress(counts: Partial<Record<string, number>> = {}, lastActivityAt: string | null = null): EpicProgress {
@@ -44,6 +45,15 @@ describe("arrangeEpics", () => {
     expect(names(live)).toEqual(["Busy new", "Review old", "Idle new", "Alpha", "beta", "Idle old", "empty a", "Empty B"]);
   });
 
+  it("ranks an epic whose only live ticket waits on the person with the busy ones", () => {
+    const { live } = arrangeEpics([
+      epic("Idle", { todo: 1 }, "2026-09-20T00:00:00Z"),
+      epic("Waiting", { needs_user_input: 1 }, "2026-09-10T00:00:00Z"),
+      epic("Busy", { in_progress: 1 }, "2026-09-05T00:00:00Z"),
+    ]);
+    expect(names(live)).toEqual(["Waiting", "Busy", "Idle"]);
+  });
+
   it("folds complete epics away, in the same order, and never an empty one", () => {
     const { live, complete } = arrangeEpics([
       epic("Old done", { done: 2 }, "2026-09-01T00:00:00Z"),
@@ -53,6 +63,13 @@ describe("arrangeEpics", () => {
     ]);
     expect(names(live)).toEqual(["Open", "Empty"]);
     expect(names(complete)).toEqual(["New done", "Old done"]);
+  });
+});
+
+describe("waitingCount", () => {
+  it("counts only the tickets waiting on the person", () => {
+    expect(waitingCount(progress({ needs_user_input: 2, in_progress: 1 }))).toBe(2);
+    expect(waitingCount(progress({ todo: 1 }))).toBe(0);
   });
 });
 

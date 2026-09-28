@@ -17,7 +17,7 @@ import DocumentsSection from "./DocumentsSection";
 import ImageUploadStatus from "./ImageUploadStatus";
 import LabelPicker from "./LabelPicker";
 import RepoPicker from "./RepoPicker";
-import DependencyPicker, { KindPill, SurfacedFromPicker, TicketRefLabel } from "./DependencyPicker";
+import DependencyPicker, { KindPill, StatusPill, SurfacedFromPicker, TicketRefLabel } from "./DependencyPicker";
 import DeliverySection from "./DeliverySection";
 import RequestBlock from "./RequestBlock";
 import HeldBy from "./HeldBy";
@@ -1144,9 +1144,7 @@ export default function TicketEditor({
                     <div className="flex items-center gap-2">
                       <TicketRefLabel ticketRef={ref} onOpen={openLinked} />
                       <KindPill ticketRef={ref} />
-                      <span className="shrink-0 rounded-full bg-slate-800 px-2 py-0.5 text-[10px] text-slate-400">
-                        {ref.status.replace("_", " ")}
-                      </span>
+                      <StatusPill status={ref.status} />
                     </div>
                     {ref.note && (
                       <p className="mt-0.5 truncate pl-[60px] text-[11px] text-slate-500" title={ref.note}>
@@ -1170,9 +1168,7 @@ export default function TicketEditor({
                     className="mb-1.5 flex items-center gap-2 rounded-md border border-slate-800 bg-slate-900/60 px-2.5 py-1.5 opacity-75 hover:opacity-100"
                   >
                     <TicketRefLabel ticketRef={ref} onOpen={openLinked} />
-                    <span className="shrink-0 rounded-full bg-slate-800 px-2 py-0.5 text-[10px] text-slate-400">
-                      {ref.status.replace("_", " ")}
-                    </span>
+                    <StatusPill status={ref.status} />
                   </div>
                 ))}
                 <p className="mt-1 text-[11px] text-slate-600">Read only. Tickets found during this one&apos;s work.</p>
