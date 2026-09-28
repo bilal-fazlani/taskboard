@@ -282,3 +282,39 @@ func TestClaimTicketRefusesAnUnknownTicketOrAgent(t *testing.T) {
 		t.Fatalf("refused claims changed the ticket: %+v, %s", got.Agent, got.Status)
 	}
 }
+
+// A done ticket refuses a claim instead of quietly reopening it: the error
+// names the ticket and how to reopen it on purpose, and the ticket stays
+// done with no holder.
+func TestClaimTicketRefusesADoneTicket(t *testing.T) {
+	f := newClaimFixture(t)
+	if _, err := f.s.MoveTicket(f.ticket.ID, models.MoveTicketRequest{Status: models.StatusDone}); err != nil {
+		t.Fatal(err)
+	}
+	n := historyLen(t, f.s, f.ticket.ID)
+
+	_, err := f.s.ClaimTicket(f.ticket.ID, f.first.ID)
+	var done *ErrTicketDone
+	if !errors.As(err, &done) {
+		t.Fatalf("claim of a done ticket: %v, want ErrTicketDone", err)
+	}
+	if done.Ticket != "ACP-1" {
+		t.Fatalf("ErrTicketDone names %s, want ACP-1", done.Ticket)
+	}
+	wantInvalidContaining(t, err, "ACP-1 is done")
+	wantInvalidContaining(t, err, "move it to todo, then start it")
+	got, _ := f.s.GetTicket(f.ticket.ID)
+	if got.Status != models.StatusDone || got.Agent != nil || historyLen(t, f.s, f.ticket.ID) != n {
+		t.Fatal("a refused claim on a done ticket changed it")
+	}
+
+	// Moving it to todo first, then starting it, is how to reopen it on
+	// purpose.
+	if _, err := f.s.MoveTicket(f.ticket.ID, models.MoveTicketRequest{Status: models.StatusTodo}); err != nil {
+		t.Fatal(err)
+	}
+	c := mustClaim(t, f.s, f.ticket.ID, f.first.ID)
+	if c.Ticket.Status != models.StatusInProgress || c.Ticket.Agent == nil || c.Ticket.Agent.ID != f.first.ID {
+		t.Fatalf("claiming after a deliberate reopen: status %s, agent %+v", c.Ticket.Status, c.Ticket.Agent)
+	}
+}

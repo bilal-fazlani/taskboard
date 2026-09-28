@@ -395,7 +395,9 @@ func ticketCommands() *cobra.Command {
 			"and the unfinished dependencies, " +
 			"each only when there is one. Refused while an agent of " +
 			"another session holds the ticket and is live, naming it and when its session was last seen; once that " +
-			"session is stale, the ticket is taken over. There is no separate claim command.",
+			"session is stale, the ticket is taken over. A done ticket is refused too, naming it and how to reopen " +
+			"it on purpose: move it to todo, then start it; the ticket stays done with no holder. There is no " +
+			"separate claim command.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			store, err := openStore()

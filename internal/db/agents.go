@@ -353,11 +353,28 @@ func (e *ErrTicketHeld) Error() string { return e.msg }
 // Unwrap makes errors.As find an ErrInvalidInput with the same message.
 func (e *ErrTicketHeld) Unwrap() error { return &ErrInvalidInput{Msg: e.msg} }
 
+// ErrTicketDone is a claim refused because the ticket is done. Reopening it
+// is a deliberate act, not a side effect of a cheap one-call start: move it
+// to todo, then start it. It is also an ErrInvalidInput, so a surface that
+// knows no better reports it as the caller's mistake; the HTTP layer
+// recognizes it ahead of that and answers 409 instead.
+type ErrTicketDone struct {
+	Ticket string
+	msg    string
+}
+
+func (e *ErrTicketDone) Error() string { return e.msg }
+
+// Unwrap makes errors.As find an ErrInvalidInput with the same message.
+func (e *ErrTicketDone) Unwrap() error { return &ErrInvalidInput{Msg: e.msg} }
+
 // ClaimTicket gives the ticket (an id or display key) to the agent and moves
 // it to in_progress. A ticket waiting on the person (needs_user_input) or
 // in review (agent_review) keeps its status: its open request still waits
-// for an answer, and leaving review takes an agent's note. It touches the
-// agent. It never looks at the ticket's dependencies.
+// for an answer, and leaving review takes an agent's note. A done ticket is
+// refused with an ErrTicketDone instead of being claimed: starting it would
+// quietly reopen landed work. It touches the agent. It never looks at the
+// ticket's dependencies.
 //
 // A session owns the tickets its agents hold, since a resumed chat keeps its
 // session: an agent in the holder's session takes the ticket as its own,
@@ -395,6 +412,15 @@ func (s *Store) ClaimTicket(ticketID, agentID string) (*models.Claim, error) {
 	status, holder, err := ticketHolding(tx, id)
 	if err != nil {
 		return nil, err
+	}
+	if status == models.StatusDone {
+		key, err := ticketKey(tx, id)
+		if err != nil {
+			return nil, err
+		}
+		return nil, &ErrTicketDone{Ticket: key, msg: fmt.Sprintf(
+			"ticket %s is done; starting it would quietly reopen landed work. "+
+				"To reopen it on purpose, move it to todo, then start it.", key)}
 	}
 
 	claim := &models.Claim{}

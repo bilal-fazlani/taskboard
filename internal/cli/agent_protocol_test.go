@@ -268,3 +268,40 @@ func TestTicketStartCommand(t *testing.T) {
 		t.Fatalf("ticket start of a stale agent's ticket = %q: %v; want takenFrom %s", out, err, first)
 	}
 }
+
+// ticket start refuses a done ticket instead of quietly reopening it, naming
+// it and how to reopen it on purpose; the ticket stays done and unclaimed.
+func TestTicketStartCommandRefusesADoneTicket(t *testing.T) {
+	setLiveBuild(t, false)
+	sandboxHome(t)
+	path := filepath.Join(t.TempDir(), "dev.db")
+	runArgs := func(args ...string) (string, error) {
+		t.Helper()
+		return runCLI(t, append([]string{"--db", path}, args...)...)
+	}
+	run := func(args ...string) string {
+		t.Helper()
+		out, err := runArgs(args...)
+		if err != nil {
+			t.Fatalf("%v: %q, %v", args, out, err)
+		}
+		return out
+	}
+	run("project", "create", "Billing", "--prefix", "BILL")
+	run("ticket", "create", "--project", "BILL", "--title", "Invoice")
+	out := run("agent", "identify", "--vendor", "claude_code", "--session-id", "3da2c294",
+		"--role", "implementer", "--model", "claude-sonnet", "--provider", "anthropic")
+	agentID := identifyIDRe.FindStringSubmatch(out)[1]
+	run("ticket", "move", "BILL-1", "--status", "done")
+
+	out, err := runArgs("ticket", "start", "BILL-1", "--agent", agentID)
+	if err == nil || !strings.Contains(err.Error(), "BILL-1 is done") || !strings.Contains(err.Error(), "move it to todo, then start it") {
+		t.Fatalf("ticket start of a done ticket: %q, %v; want it named as done with how to reopen it", out, err)
+	}
+
+	got := run("ticket", "get", "BILL-1", "--json")
+	var ticket models.Ticket
+	if err := json.Unmarshal([]byte(got), &ticket); err != nil || ticket.Status != models.StatusDone || ticket.Agent != nil {
+		t.Fatalf("after the refused start: %q, %v; want it still done and unclaimed", got, err)
+	}
+}

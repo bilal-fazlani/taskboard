@@ -603,7 +603,7 @@ func TestAgentToolDescriptionsSayWhenToUseThem(t *testing.T) {
 		"get_now":            {"waiting on the person"},
 		"start_ticket": {"How you begin work on a ticket", "claims it for you", "Refused while an agent of another session",
 			"last seen", "takes the ticket over", "takenFrom", "handOff", "never block you", "answeredRequests",
-			"stopped: true instead of an answer"},
+			"stopped: true instead of an answer", "A done ticket is refused too", "moving it to todo, then starting it"},
 		"get_ticket": {"answeredRequests", "stopped: true instead of an answer"},
 	} {
 		for _, w := range want {
@@ -646,6 +646,25 @@ func TestStartTicketToolBeginsWork(t *testing.T) {
 	got = callJSON(t, f.s, "start_ticket", map[string]any{"ticket": "ACP-1", "agentId": second})
 	if from, _ := got["takenFrom"].(map[string]any); from == nil || from["id"] != first {
 		t.Fatalf("start_ticket on a stale agent's ticket: takenFrom %v, want %s", got["takenFrom"], first)
+	}
+}
+
+// start_ticket refuses a done ticket instead of quietly reopening it, naming
+// it and how to reopen it on purpose; the ticket stays done and unclaimed.
+func TestStartTicketRefusesADoneTicket(t *testing.T) {
+	f := newAgentServer(t)
+	first := f.identify(t, "3da2c294", "implementer")
+	if _, err := f.s.store.MoveTicket(f.ticket.ID, models.MoveTicketRequest{Status: models.StatusDone}); err != nil {
+		t.Fatal(err)
+	}
+
+	text := callError(t, f.s, "start_ticket", map[string]any{"ticket": "ACP-1", "agentId": first})
+	if !strings.Contains(text, "ACP-1 is done") || !strings.Contains(text, "move it to todo, then start it") {
+		t.Errorf("start_ticket on a done ticket: %s; want it named as done with how to reopen it", text)
+	}
+	got, err := f.s.store.GetTicket(f.ticket.ID)
+	if err != nil || got.Status != models.StatusDone || got.Agent != nil {
+		t.Fatalf("after the refused start: %+v, %v; want it still done and unclaimed", got, err)
 	}
 }
 

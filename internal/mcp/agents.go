@@ -130,7 +130,9 @@ var agentToolDefs = [5]toolDef{
 			"before: nextBefore. Refused while an agent of another session holds the ticket and is live: the error names it " +
 			"and when its session was last seen; leave the ticket to it. Once that session has gone stale, the start takes " +
 			"the ticket over: takenFrom names the agent it was taken from and handOff says where its work stood; carry on " +
-			"from there. Starting a ticket your session holds continues it." + answeredRequestsHelp,
+			"from there. Starting a ticket your session holds continues it. A done ticket is refused too: the error names " +
+			"it and how to reopen it on purpose, moving it to todo, then starting it; the ticket stays done, with no " +
+			"holder." + answeredRequestsHelp,
 		InputSchema: jsonSchema{
 			Type: "object",
 			Properties: map[string]schemaProp{

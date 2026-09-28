@@ -217,6 +217,30 @@ func TestStartTicket(t *testing.T) {
 	}
 }
 
+// A done ticket is a 409 too, naming it and how to reopen it on purpose; the
+// ticket stays done and unclaimed.
+func TestStartTicketRefusesADoneTicket(t *testing.T) {
+	r := serve(t)
+	agentID := identify(t, r, "9", "implementer")["id"].(string)
+	project, _ := doRequest[map[string]any](t, http.MethodPost, r.url+"/api/projects", `{"name":"Billing","prefix":"BILL"}`)
+	ticket, _ := doRequest[map[string]any](t, http.MethodPost, r.url+"/api/tickets",
+		fmt.Sprintf(`{"projectId":%q,"title":"Invoice"}`, project["id"]))
+	ticketID := ticket["id"].(string)
+	if _, err := r.srv.store.MoveTicket(ticketID, models.MoveTicketRequest{Status: models.StatusDone}); err != nil {
+		t.Fatal(err)
+	}
+
+	got, status := doRequest[map[string]any](t, http.MethodPost, r.url+"/api/tickets/"+ticketID+"/start",
+		fmt.Sprintf(`{"agentId":%q}`, agentID))
+	if msg, _ := got["error"].(string); status != http.StatusConflict || !strings.Contains(msg, "BILL-1 is done") ||
+		!strings.Contains(msg, "move it to todo, then start it") {
+		t.Fatalf("start of a done ticket: status %d, %#v; want 409 naming it and how to reopen it", status, got)
+	}
+	if held, _ := r.srv.store.GetTicket(ticketID); held.Status != models.StatusDone || held.Agent != nil {
+		t.Fatalf("after the refused start: %+v, want it still done and unclaimed", held)
+	}
+}
+
 // TestRequestLifecycle covers the request routes: creating a request moves
 // the ticket to needs_user_input, its history lists it, answering moves the
 // ticket back to in_progress, and awaiting an already-answered request
