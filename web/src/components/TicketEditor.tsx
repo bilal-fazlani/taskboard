@@ -206,8 +206,10 @@ export default function TicketEditor({
 
   // Images pasted or dropped into the description's Write mode.
   const descriptionRef = useRef<HTMLTextAreaElement>(null);
-  // The Status select, where focus goes once Stop work has freed the ticket.
+  // The Status select, where focus goes once Stop work has freed the ticket,
+  // and whether a stop is waiting to move it there.
   const statusRef = useRef<HTMLSelectElement>(null);
+  const focusAfterStopRef = useRef(false);
   const pasteImages = usePasteImages({
     owner: { ticketId: ticket.id },
     documents,
@@ -601,14 +603,14 @@ export default function TicketEditor({
   // Stop work frees the ticket at once. The ticket it answers with is shown
   // the way a live refresh would show it: filled in quietly, or offered by
   // the notice while there are unsaved edits. Held by, and with it the
-  // focused confirm, goes away, so focus moves to the Status select, which
-  // now says To do, rather than dropping to the page.
+  // focused confirm, goes away, so focus moves on rather than dropping to the
+  // page: see the effect below.
   const handleStopWork = async () => {
     clearActionError();
     try {
       const full = await api.tickets.stop(ticket.id);
+      focusAfterStopRef.current = true;
       setDetail(full);
-      statusRef.current?.focus();
       if (!dirtyRef.current) {
         syncFrom(full);
         return;
@@ -618,6 +620,18 @@ export default function TicketEditor({
       reportActionError(error);
     }
   };
+
+  // Once the freed ticket has rendered, focus goes to the Status select,
+  // which now says To do. A select still locked (a waiting ticket stopped
+  // with unsaved edits keeps its saved status until the notice's reload)
+  // cannot take focus, so the editor's dialog takes it instead.
+  useEffect(() => {
+    if (!focusAfterStopRef.current) return;
+    focusAfterStopRef.current = false;
+    const select = statusRef.current;
+    if (select && !select.disabled) select.focus();
+    else dialogRef.current?.focus();
+  }, [detail]);
 
   const ticketKey = `${ticket.projectPrefix}-${ticket.number}`;
   // "No epic", then the project's epics by name, plus the ticket's own epic if

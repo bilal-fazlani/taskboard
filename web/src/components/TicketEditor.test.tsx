@@ -2701,6 +2701,42 @@ describe("Held by and Stop work", () => {
     expect(document.activeElement).toBe(status);
   });
 
+  const stopFromConfirm = () => {
+    fireEvent.click(stopButton());
+    fireEvent.click(
+      within(screen.getByRole("alertdialog", { name: "Confirm stop work" })).getByRole("button", { name: "Stop work" }),
+    );
+  };
+
+  it("moves focus to the Status select once a waiting ticket's lock lifts", async () => {
+    const waiting = held({ status: "needs_user_input" });
+    mockApi.tickets.get.mockImplementation(() => Promise.resolve(waiting));
+    mockApi.tickets.stop.mockResolvedValue(freed());
+    renderEditor(waiting);
+    const status = screen.getByLabelText("Status") as HTMLSelectElement;
+    await waitFor(() => expect(status.disabled).toBe(true));
+    stopFromConfirm();
+    await waitFor(() => expect(heldBy()).toBeNull());
+    expect(status.disabled).toBe(false);
+    expect(status.value).toBe("todo");
+    expect(document.activeElement?.tagName).toBe("SELECT");
+    expect(document.activeElement).toBe(status);
+  });
+
+  it("gives focus to the editor when unsaved edits keep a waiting ticket's select locked", async () => {
+    const waiting = held({ status: "needs_user_input" });
+    mockApi.tickets.get.mockImplementation(() => Promise.resolve(waiting));
+    mockApi.tickets.stop.mockResolvedValue(freed());
+    renderEditor(waiting);
+    await waitFor(() => expect((screen.getByLabelText("Status") as HTMLSelectElement).disabled).toBe(true));
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Ship the login page" } });
+    stopFromConfirm();
+    await waitFor(() => expect(heldBy()).toBeNull());
+    expect((screen.getByLabelText("Status") as HTMLSelectElement).disabled).toBe(true);
+    expect(document.activeElement).not.toBe(document.body);
+    expect(document.activeElement).toBe(screen.getByRole("dialog", { name: "AUTH-7" }));
+  });
+
   it("goes away when a live change frees the ticket elsewhere", async () => {
     const { rerenderWith } = renderEditor(held());
     expect(heldBy()).toBeTruthy();
