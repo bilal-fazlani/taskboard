@@ -285,6 +285,59 @@ func TestNowLandedIsTheLastDayNewestFirstAtMostTen(t *testing.T) {
 	}
 }
 
+// Each ticket waiting on the person carries its open request's type, prompt
+// and time, oldest wait first; no other ticket carries one, and its JSON
+// leaves the field out.
+func TestNowWaitingCarriesEachRequestOldestFirst(t *testing.T) {
+	f := newClaimFixture(t)
+	second := seedTicket(t, f.s, f.project.ID, "Reviews as entries")
+	working := seedTicket(t, f.s, f.project.ID, "Still being written")
+	for _, id := range []string{f.ticket.ID, second.ID, working.ID} {
+		mustClaim(t, f.s, id, f.first.ID)
+	}
+	mustCreateRequest(t, f.s, models.CreateUserInputRequest{TicketID: f.ticket.ID, AgentID: f.first.ID,
+		Type: models.UserInputApproval, Prompt: "Delete the Decisions document?\nNothing else goes."})
+	mustCreateRequest(t, f.s, models.CreateUserInputRequest{TicketID: second.ID, AgentID: f.first.ID,
+		Type: models.UserInputQuestion, Prompt: "Round only, or the finding too?", Choices: []string{"Round", "Both"}})
+	// ACP-2 has waited since an hour ago, ACP-1 since ten minutes ago.
+	setChangeTimes(t, f.s, f.ticket.ID, nowAt.Add(-3*time.Hour), nowAt.Add(-2*time.Hour), nowAt.Add(-10*time.Minute))
+	setChangeTimes(t, f.s, second.ID, nowAt.Add(-3*time.Hour), nowAt.Add(-2*time.Hour), nowAt.Add(-time.Hour))
+
+	n := readNow(t, f.s, "")
+	if got := nowKeys(n.Waiting); strings.Join(got, ",") != "ACP-2,ACP-1" {
+		t.Fatalf("waiting = %v, want ACP-2 then ACP-1 (oldest wait first)", got)
+	}
+	q, a := n.Waiting[0].Request, n.Waiting[1].Request
+	if q == nil || q.Type != models.UserInputQuestion || q.Prompt != "Round only, or the finding too?" || q.CreatedAt.IsZero() {
+		t.Errorf("ACP-2's request = %+v, want the question", q)
+	}
+	if a == nil || a.Type != models.UserInputApproval || a.Prompt != "Delete the Decisions document?\nNothing else goes." {
+		t.Errorf("ACP-1's request = %+v, want the approval, its whole prompt", a)
+	}
+	if len(n.InProgress) != 1 || n.InProgress[0].Request != nil {
+		t.Fatalf("in progress = %+v, want ACP-3 with no request", n.InProgress)
+	}
+	data, err := json.Marshal(n.InProgress[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), `"request"`) {
+		t.Errorf("a ticket not waiting names a request: %s", data)
+	}
+
+	// Answered, the ticket leaves the waiting group, request and all.
+	reqs, err := f.s.ListRequests(second.ID)
+	if err != nil || len(reqs) != 1 {
+		t.Fatalf("ListRequests: %+v, %v", reqs, err)
+	}
+	if _, err := f.s.AnswerRequest(reqs[0].ID, "Round", "Bilal"); err != nil {
+		t.Fatal(err)
+	}
+	if got := nowKeys(readNow(t, f.s, "").Waiting); strings.Join(got, ",") != "ACP-1" {
+		t.Errorf("waiting after ACP-2's answer = %v, want ACP-1", got)
+	}
+}
+
 func TestReviewRoundAndVerdict(t *testing.T) {
 	for name, want := range map[string]int{"Review 1": 1, "review 12": 12, "REVIEW 3": 3, "Review": 0, "Review 0": 0, "Review notes": 0, "Reviews 1": 0, "Review 1b": 0} {
 		got, ok := reviewRound(name)

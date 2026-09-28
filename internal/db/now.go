@@ -122,6 +122,9 @@ func (s *Store) nowActive(projectID string) ([]models.NowTicket, error) {
 	if err := s.nowReviews(tickets, index); err != nil {
 		return nil, err
 	}
+	if err := s.nowRequests(tickets, index); err != nil {
+		return nil, err
+	}
 
 	// Review rounds, one grouped query, as for a list.
 	roundRows, err := s.db.Query(reviewRoundsQuery+` AND ticket_id IN (`+placeholders+`) GROUP BY ticket_id`, args...)
@@ -151,6 +154,40 @@ func (s *Store) nowActive(projectID string) ([]models.NowTicket, error) {
 		return tickets[a].Key < tickets[b].Key
 	})
 	return tickets, nil
+}
+
+// nowRequests sets Request on each ticket waiting on the person
+// (needs_user_input) from its open request, in one query. A waiting ticket
+// whose request is somehow missing keeps a nil Request rather than failing
+// the page.
+func (s *Store) nowRequests(tickets []models.NowTicket, index map[string]int) error {
+	var ids []string
+	for _, t := range tickets {
+		if t.Status == models.StatusNeedsUserInput {
+			ids = append(ids, t.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	placeholders, args := inList(ids)
+	rows, err := s.db.Query(`SELECT ticket_id, type, prompt, created_at FROM ticket_requests
+		WHERE answered_at IS NULL AND ticket_id IN (`+placeholders+`)`, args...)
+	if err != nil {
+		return fmt.Errorf("loading open requests: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		var r models.NowRequest
+		if err := rows.Scan(&id, &r.Type, &r.Prompt, &r.CreatedAt); err != nil {
+			return err
+		}
+		if i, ok := index[id]; ok {
+			tickets[i].Request = &r
+		}
+	}
+	return rows.Err()
 }
 
 // nowSubtasks fills each ticket's subtask progress.

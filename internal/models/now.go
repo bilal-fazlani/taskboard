@@ -49,6 +49,20 @@ type NowTicket struct {
 	// Review is one of the NowReview states, set only on a ticket in
 	// agent_review.
 	Review string `json:"review,omitempty"`
+	// Request is what the ticket waits on, set only on a ticket in
+	// needs_user_input: the Now page lists each with its type and prompt.
+	Request *NowRequest `json:"request,omitempty"`
+}
+
+// NowRequest is a waiting ticket's open request for user input, as far as
+// the Now page shows it.
+type NowRequest struct {
+	// Type is one of UserInputTypes.
+	Type   string `json:"type"`
+	Prompt string `json:"prompt"`
+	// CreatedAt is when the agent asked: how long the person has kept it
+	// waiting.
+	CreatedAt time.Time `json:"createdAt"`
 }
 
 // LandedTicket is a ticket that recently moved to done, with the commits it
