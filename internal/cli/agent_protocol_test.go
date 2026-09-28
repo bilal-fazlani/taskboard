@@ -103,9 +103,11 @@ func TestTicketAskAndRequestCommands(t *testing.T) {
 		t.Fatalf("answering twice = %v, want it refused", err)
 	}
 
-	// await now returns immediately with the answer.
+	// await now returns immediately with the answer, note included in the
+	// readable text output too.
 	awaitOut := run("request", "await", requestID, "--timeout", "5s")
-	if !strings.Contains(awaitOut, "answered by") || !strings.Contains(awaitOut, "approved") {
+	if !strings.Contains(awaitOut, "answered by") || !strings.Contains(awaitOut, "approved") ||
+		!strings.Contains(awaitOut, "Note: Ship it once CI is green.") {
 		t.Fatalf("await after an answer = %q", awaitOut)
 	}
 

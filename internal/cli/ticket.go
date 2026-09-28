@@ -491,8 +491,10 @@ func ticketCommands() *cobra.Command {
 		Short: "Ask the person for user input on a ticket, moving it to needs_user_input",
 		Long: "Ask the person for user input on a ticket an agent (or its session) holds; prints the new " +
 			"request's id. --type is " + strings.Join(models.UserInputTypes, " or ") + "; --choice " +
-			"(repeatable) offers the only answers the person can give, or leave it out for a free answer. " +
-			"An approval must state exactly what the agent will do on yes, since it acts only on that approval.",
+			"(repeatable) suggests an answer for a question, which the person may still answer with something " +
+			"else instead, or leave it out for a free answer. An approval's answer is always approved or " +
+			"declined, whatever choices it offers, so --choice changes nothing for it: state exactly what the " +
+			"agent will do if approved, since it acts only on that approval, as stated.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			store, err := openStore()
@@ -522,7 +524,7 @@ func ticketCommands() *cobra.Command {
 	_ = askCmd.MarkFlagRequired("type")
 	askCmd.Flags().StringVar(&askPrompt, "prompt", "", "what the person is asked (required)")
 	_ = askCmd.MarkFlagRequired("prompt")
-	askCmd.Flags().StringArrayVar(&askChoices, "choice", nil, "an answer the person can give; repeatable; leave out for a free answer")
+	askCmd.Flags().StringArrayVar(&askChoices, "choice", nil, "a suggested answer for a question (repeatable), which the person may still answer freely instead; changes nothing for an approval")
 	askCmd.Flags().BoolVar(&askJSON, "json", false, "print the new request as JSON instead of readable text")
 
 	cmd.AddCommand(listCmd, getCmd, createCmd, moveCmd, deleteCmd, updateCmd, historyCmd, startCmd, releaseCmd, askCmd,

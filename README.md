@@ -137,7 +137,7 @@ Entries are short typed records of why the work is as it is, on a project, an ep
 
 `POST /api/tickets/{id}/start` with `{"agentId":"..."}` is how an agent begins a ticket, in one call: it claims the ticket and answers everything needed to begin. That is `ticket` (without `agent`, the caller) and `project` (`name`, `description`, `agentInstructions`, and `entries`: its 10 newest current entries other than open notes, with `total`, `hasMore` and `nextBefore` for the rest; `total` leaves out the open notes, which `list_entries` counts), plus, each only when there is one: `takenFrom`, `handOff` (the latest hand-off), `entries` (the ticket's other current entries, all of them), `notes` (the person's open notes on the ticket, epic and project), `epic` (`description`, `documents` by name, `entries`) and `unfinishedDependencies` (keys; they never block a start). No entry names its owner, and open notes appear only under `notes`. A ticket an agent of another session holds is refused while that session is live, naming the holder and when its session was last seen; once it is stale, the start takes the ticket over and `takenFrom` names the agent it came from. What a start costs is mostly its text: on a ticket shaped like this project's own (3.9 KB of agent instructions, a 2 KB description, ten project entries of about 400 bytes) it is about 19 KB, some 5k tokens. A test holds the start's structure, every part with one sentence of text, under 6 KB.
 
-An agent asks the person for user input with `POST /api/tickets/{id}/requests`: `type` (`approval` or `question` today), `prompt`, and optional `choices`. It moves the ticket to `needs_user_input` and answers with the new request; a ticket already waiting on an unanswered request, or held by no agent, refuses a second. `GET /api/tickets/{id}/requests` reads a ticket's whole history, newest first, answered and unanswered alike. `POST /api/requests/{id}/answer` takes `answer` (matched, case-insensitively, against the request's `choices` when it offered any) and `answeredBy`; left out or blank, `answeredBy` defaults to the local person (the OS user), since an answer is today always the local person's. `GET /api/requests/{id}/await?timeout=30s` long-polls that one request only, never whatever else is open on its ticket: the timeout defaults to 30s and is capped at 60s, and its own passing is never an error — the request comes back unanswered, with a 200, rather than as a timeout error. Ticket JSON gains `agent` (the agent holding it, if any) and `openRequest` (the request it waits on, if any).
+An agent asks the person for user input with `POST /api/tickets/{id}/requests`: `type` (`approval` or `question` today), `prompt`, and optional `choices`. It moves the ticket to `needs_user_input` and answers with the new request; a ticket already waiting on an unanswered request, or held by no agent, refuses a second. `GET /api/tickets/{id}/requests` reads a ticket's whole history, newest first, answered and unanswered alike. `POST /api/requests/{id}/answer` takes `answer`, `answeredBy` and an optional `note`. For a `question`, `answer` may be any non-empty text; when it matches one of the request's `choices`, case-insensitively, it is stored as the choice is written. For an `approval`, `answer` is always `approved` or `declined`, matched case-insensitively and stored that way, whatever `choices` the request offered — they suggest nothing there and change nothing. `answeredBy` left out or blank defaults to the local person (the OS user), since an answer is today always the local person's; `note` is optional either way and is returned on every read of the request, alongside `answer`. `GET /api/requests/{id}/await?timeout=30s` long-polls that one request only, never whatever else is open on its ticket: the timeout defaults to 30s and is capped at 60s, and its own passing is never an error — the request comes back unanswered, with a 200, rather than as a timeout error. Ticket JSON gains `agent` (the agent holding it, if any) and `openRequest` (the request it waits on, if any).
 
 Across the agent and request routes, an unresolved ticket or request id is a 404, a request these routes refuse (bad input, a missing hand-off or proof, an unknown type, a second open request) is a 400, and a ticket held by another session (a start while it is live, or a release from outside the holder's session) is a 409 — each with the store's own message.
 
@@ -246,7 +246,7 @@ taskboard ticket ask AUTH-1 --agent <agent-id> --type approval \
   --prompt "Land it?" --choice yes --choice no
 
 taskboard request await <request-id> --timeout 30s   # waits on that request only
-taskboard request answer <request-id> --answer yes   # the person's own command
+taskboard request answer <request-id> --answer approved --note "Ship it once CI is green."
 
 # Give a ticket back to todo, with where the work stopped and the next step...
 taskboard ticket release AUTH-1 --agent <agent-id> \
@@ -260,8 +260,14 @@ A release without its record (`--stopped` and `--next`, or `--done` and
 `--proof`) is refused, naming what is missing; so is a release by an agent
 outside the holder's session, or while the ticket waits on the person's
 answer. `ticket ask --type` accepts `approval` or `question`; an approval
-should state exactly what the agent will do on yes, since it acts only on
-that approval.
+should state exactly what the agent will do if approved, since it acts only
+on that approval, as stated. `--choice` (repeatable) suggests an answer for
+a question, which the person may still answer freely instead; it changes
+nothing for an approval, whose answer is always `approved` or `declined`.
+`request answer --answer` takes any non-empty text for a question (stored
+as a matching choice's own text when one matches, case-insensitively) or
+`approved`/`declined` for an approval; `--note` is optional and goes with
+either answer, printed back by `request answer` and `request await` alike.
 
 ### MCP Server (for AI assistants)
 

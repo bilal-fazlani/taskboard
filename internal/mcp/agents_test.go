@@ -287,10 +287,10 @@ func TestRequestUserInputThenAwaitTheAnswer(t *testing.T) {
 	web := f.secondStore(t)
 	go func() {
 		time.Sleep(300 * time.Millisecond)
-		web.AnswerRequest(id, "3014", "Bilal", "")
+		web.AnswerRequest(id, "3014", "Bilal", "Went with the free port.")
 	}()
 	got = callJSON(t, f.s, "await_answer", map[string]any{"request": id, "agentId": agent, "timeoutSeconds": 20})
-	if got["answered"] != true || got["answer"] != "3014" || got["answeredBy"] != "Bilal" {
+	if got["answered"] != true || got["answer"] != "3014" || got["answeredBy"] != "Bilal" || got["note"] != "Went with the free port." {
 		t.Fatalf("await_answer after the answer = %v", got)
 	}
 	if !f.lastSeen(t, agent).After(before) {

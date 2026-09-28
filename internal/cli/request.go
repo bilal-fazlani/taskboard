@@ -49,6 +49,9 @@ func requestCommands() *cobra.Command {
 				return nil
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "Request %s answered by %s: %s\n", r.ID, r.AnsweredBy, r.Answer)
+			if r.Note != "" {
+				fmt.Fprintf(cmd.OutOrStdout(), "Note: %s\n", r.Note)
+			}
 			return nil
 		},
 	}

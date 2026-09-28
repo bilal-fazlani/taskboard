@@ -78,6 +78,7 @@ type awaitAnswerResult struct {
 	Answered   bool   `json:"answered"`
 	Answer     string `json:"answer,omitempty"`
 	AnsweredBy string `json:"answeredBy,omitempty"`
+	Note       string `json:"note,omitempty"`
 }
 
 // agentIDProp is the agentId argument of every tool an agent calls as
@@ -151,17 +152,18 @@ var agentToolDefs = [5]toolDef{
 		Name: "request_user_input",
 		Description: "Ask the person for input you cannot go on without, on a ticket being worked, then collect it with " +
 			"await_answer. Answers {id, created: true} at once; the ticket waits in needs_user_input until the person " +
-			"answers, one open request per ticket. approval: state exactly what you will do on yes, and act only on that " +
-			"approval, as stated. question: ask what you need; choices are optional, and the person can always answer " +
-			"in their own words.",
+			"answers, one open request per ticket. approval: state exactly what you will do if approved, and act only on " +
+			"that approval, as stated; its answer is always approved or declined, whatever choices you offer, which " +
+			"change nothing for it. question: ask what you need; choices are optional suggestions, and the person can " +
+			"always answer in their own words.",
 		InputSchema: jsonSchema{
 			Type: "object",
 			Properties: map[string]schemaProp{
 				"ticket":  {Type: "string", Description: ticketIDDescription},
 				"agentId": agentIDProp,
 				"type":    {Type: "string", Description: "The type of user input.", Enum: models.UserInputTypes},
-				"prompt":  {Type: "string", Description: "What you ask; for an approval, exactly what you will do on yes."},
-				"choices": {Type: "array", Description: "Answers to offer (optional).", Items: &jsonSchema{Type: "string"}},
+				"prompt":  {Type: "string", Description: "What you ask; for an approval, exactly what you will do if approved."},
+				"choices": {Type: "array", Description: "Suggested answers (optional); for an approval these change nothing, since its answer is always approved or declined.", Items: &jsonSchema{Type: "string"}},
 			},
 			Required: []string{"ticket", "agentId", "type", "prompt"},
 		},
@@ -169,8 +171,9 @@ var agentToolDefs = [5]toolDef{
 	{
 		Name: "await_answer",
 		Description: "Wait for the answer to a request you made with request_user_input. Answers {id, answered, answer, " +
-			"answeredBy} once answered, or {id, answered: false} when the timeout passes: call again to keep waiting. " +
-			"Waiting keeps your session live.",
+			"answeredBy, note} once answered, or {id, answered: false} when the timeout passes: call again to keep " +
+			"waiting. An approval's answer is always \"approved\" or \"declined\"; note is an optional note the person " +
+			"left with either answer, left out when there is none. Waiting keeps your session live.",
 		InputSchema: jsonSchema{
 			Type: "object",
 			Properties: map[string]schemaProp{
@@ -305,7 +308,7 @@ func (s *MCPServer) awaitAnswer(ctx context.Context, a awaitArgs) (awaitAnswerRe
 	if err != nil {
 		return awaitAnswerResult{}, err
 	}
-	return awaitAnswerResult{ID: r.ID, Answered: r.Answered(), Answer: r.Answer, AnsweredBy: r.AnsweredBy}, nil
+	return awaitAnswerResult{ID: r.ID, Answered: r.Answered(), Answer: r.Answer, AnsweredBy: r.AnsweredBy, Note: r.Note}, nil
 }
 
 // awaitTimeout is how long await_answer waits for timeoutSeconds: the

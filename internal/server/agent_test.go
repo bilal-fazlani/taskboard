@@ -288,6 +288,13 @@ func TestRequestLifecycle(t *testing.T) {
 		t.Fatalf("answer: status %d, %#v", status, answered)
 	}
 
+	// The ticket's request history carries the note too.
+	historyAfter, status := doRequest[[]map[string]any](t, http.MethodGet, r.url+"/api/tickets/"+ticketID+"/requests", "")
+	if status != http.StatusOK || len(historyAfter) != 1 || historyAfter[0]["id"] != requestID ||
+		historyAfter[0]["note"] != "Ship it once CI is green." {
+		t.Fatalf("history after answer: status %d, %#v", status, historyAfter)
+	}
+
 	backToWork, _ := doRequest[map[string]any](t, http.MethodGet, r.url+"/api/tickets/"+ticketID, "")
 	if backToWork["status"] != "in_progress" || backToWork["openRequest"] != nil {
 		t.Fatalf("ticket after answer: %#v", backToWork["status"])
