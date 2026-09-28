@@ -141,8 +141,9 @@ export interface TicketRequest {
   ticketId: string;
   /** The agent that asked, and that collects the answer. */
   agentId: string;
-  /** A type this client does not know yet is kept, not refused. */
-  type: UserInputType | string;
+  /** A type this client does not know yet is kept, not refused; `string & {}`
+   * keeps the known ones offered by autocomplete. */
+  type: UserInputType | (string & {});
   prompt: string;
   /** For a question, suggested answers: the person may answer with any
    * non-empty text instead, and one matching a choice, ignoring case, is

@@ -48,15 +48,36 @@ export function collectorPhrase(agent: Pick<Agent, "role" | "model"> | undefined
   return agent.model ? `The ${role} (${agent.model})` : `The ${role}`;
 }
 
+/**
+ * The answer a request is closed with when the person stops work on its
+ * ticket, whatever its type: the server's models.StoppedAnswer, word for
+ * word. Neither approved nor declined, and not the person's answer.
+ */
+export const STOPPED_ANSWER = "Not answered: the person stopped work on this ticket.";
+
 /** The toast after an answer: what was sent, and which agent collects it. */
 export function answerToast(type: string, answer: string, agent: Pick<Agent, "role" | "model"> | undefined): string {
-  const sent = type === "approval" ? (answer === "declined" ? "Declined." : "Approved.") : "Answer sent.";
+  const sent =
+    type === "approval" && answer === "approved"
+      ? "Approved."
+      : type === "approval" && answer === "declined"
+        ? "Declined."
+        : "Answer sent.";
   return `${sent} ${collectorPhrase(agent)} gets it on its next call.`;
 }
 
-/** How an earlier request's answer reads, and its colour. */
-export function answerTone(r: TicketRequest): "approved" | "declined" | "answer" | "waiting" {
+/**
+ * How an earlier request's answer reads, and its colour. Only "approved" is
+ * approved and only "declined" declined; an approval closed any other way,
+ * and a request of either type closed by stopping work, is "closed".
+ */
+export function answerTone(r: TicketRequest): "approved" | "declined" | "answer" | "closed" | "waiting" {
   if (!r.answeredAt) return "waiting";
-  if (r.type === "approval") return r.answer === "declined" ? "declined" : "approved";
+  if (r.answer === STOPPED_ANSWER) return "closed";
+  if (r.type === "approval") {
+    if (r.answer === "approved") return "approved";
+    if (r.answer === "declined") return "declined";
+    return "closed";
+  }
   return "answer";
 }

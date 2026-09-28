@@ -3,7 +3,7 @@
 // A reading block of its own, never part of the ticket's editing forms, so it
 // stays when those forms retire: answering is one step, and sends at once.
 import { useCallback, useEffect, useId, useRef, useState } from "react";
-import Markdown from "react-markdown";
+import Markdown, { type Components } from "react-markdown";
 import { X } from "lucide-react";
 import { api, type Agent, type Ticket, type TicketRequest } from "../api/client";
 import { useLiveRefresh } from "../hooks/useLiveRefresh";
@@ -25,6 +25,10 @@ type AgentInfo = Pick<Agent, "id" | "role" | "model" | "provider">;
 
 /** How long the toast after an answer stays, unless dismissed. */
 export const TOAST_MS = 8000;
+
+/** What the server answers when a request was answered or closed before this answer: a 400, or a 404. */
+const REFUSED = /^API error (400|404)\b/;
+const ALREADY_ANSWERED ="This request was already answered. It is in Earlier requests.";
 
 /** Sends an answer and its note; rejects with the server's reason. */
 type Answer = (answer: string, note: string) => Promise<void>;
@@ -52,7 +56,15 @@ export default function RequestBlock({
   // Requests answered from this page, as the answer came back: the open
   // request goes the moment its answer lands, not when the ticket reloads.
   const [answered, setAnswered] = useState<Record<string, TicketRequest>>({});
+  // Requests the server refused an answer to, since someone else answered or
+  // closed them first: their stale form goes too.
+  const [refused, setRefused] = useState<Record<string, true>>({});
   const [toast, setToast] = useState<{ seq: number; text: string } | null>(null);
+  // What the live region says. It is always on the page, so a screen reader
+  // hears the toast's words as they change, which a region mounted already
+  // holding them doesn't promise.
+  const [announcement, setAnnouncement] = useState("");
+  const blockRef = useRef<HTMLDivElement>(null);
   const seq = useRef(0);
 
   const reload = useCallback(() => {
@@ -78,7 +90,10 @@ export default function RequestBlock({
   }, [reload, ticket.updatedAt, openId]);
   useLiveRefresh(reload);
 
-  const open = ticket.openRequest && !answered[ticket.openRequest.id] ? ticket.openRequest : undefined;
+  const open =
+    ticket.openRequest && !answered[ticket.openRequest.id] && !refused[ticket.openRequest.id]
+      ? ticket.openRequest
+      : undefined;
   const asker = useRequestAgent(open?.agentId, ticket.agent);
 
   const all = (history?.ticketId === ticket.id ? history.list : []).map((r) => answered[r.id] ?? r);
@@ -87,35 +102,77 @@ export default function RequestBlock({
   }
   const earlier = earlierRequests(all, open?.id);
 
+  const say = (text: string) => {
+    setToast((prev) => ({ seq: (prev?.seq ?? 0) + 1, text }));
+    setAnnouncement(text);
+  };
+
+  // The toast took focus from the form it replaced; when it goes, focus
+  // stays in the block rather than dropping to the page.
+  const dismissToast = (hadFocus: boolean) => {
+    setToast(null);
+    setAnnouncement("");
+    if (hadFocus) setTimeout(() => blockRef.current?.focus());
+  };
+
   const answer = (request: TicketRequest, collector: AgentInfo | undefined) => async (text: string, note: string) => {
-    const done = await api.requests.answer(request.id, { answer: text, ...(note.trim() ? { note: note.trim() } : {}) });
+    let done: TicketRequest;
+    try {
+      done = await api.requests.answer(request.id, { answer: text, ...(note.trim() ? { note: note.trim() } : {}) });
+    } catch (err) {
+      // Refused: answered or closed elsewhere since the page last read it.
+      // Anything else (the network, say) leaves the form to try again.
+      if (!(err instanceof Error) || !REFUSED.test(err.message)) throw err;
+      setRefused((prev) => ({ ...prev, [request.id]: true }));
+      say(ALREADY_ANSWERED);
+      onAnswered?.();
+      reload();
+      return;
+    }
     setAnswered((prev) => ({ ...prev, [request.id]: done }));
-    const toastText = answerToast(request.type, done.answer ?? text, collector);
-    setToast((prev) => ({ seq: (prev?.seq ?? 0) + 1, text: toastText }));
+    say(answerToast(request.type, done.answer ?? text, collector));
     onAnswered?.();
     reload();
   };
 
-  if (!open && earlier.length === 0 && !toast) return null;
+  const live = (
+    <div role="status" aria-live="polite" data-testid="requests-announcement" className="sr-only">
+      {announcement}
+    </div>
+  );
+
+  // With nothing to show there is nothing to answer, so no region is needed
+  // either: it is on the page whenever a request is, before any answer.
+  if (!open && earlier.length === 0 && !toast) return announcement ? live : null;
 
   return (
-    <div data-testid="ticket-requests" className="space-y-3">
-      {toast && <AnswerToast key={toast.seq} text={toast.text} onDismiss={() => setToast(null)} />}
-      {open && (
-        <div inert={readOnly} className={readOnly ? "opacity-60" : undefined}>
-          <OpenRequest key={open.id} request={open} agent={asker} onAnswer={answer(open, asker)} />
-        </div>
-      )}
-      {earlier.length > 0 && (
-        <EntryFold label={`Earlier requests (${earlier.length})`}>
-          <ul className="space-y-1.5" aria-label="Earlier requests">
-            {earlier.map((r) => (
-              <EarlierRequest key={r.id} request={r} />
-            ))}
-          </ul>
-        </EntryFold>
-      )}
-    </div>
+    <>
+      {live}
+      <div
+        ref={blockRef}
+        tabIndex={-1}
+        role="group"
+        aria-label="Requests for user input"
+        data-testid="ticket-requests"
+        className="space-y-3 focus:outline-none"
+      >
+        {toast && <AnswerToast key={toast.seq} text={toast.text} onDismiss={dismissToast} />}
+        {open && (
+          <div inert={readOnly} className={readOnly ? "opacity-60" : undefined}>
+            <OpenRequest key={open.id} request={open} agent={asker} onAnswer={answer(open, asker)} />
+          </div>
+        )}
+        {earlier.length > 0 && (
+          <EntryFold label={`Earlier requests (${earlier.length})`}>
+            <ul className="space-y-1.5" aria-label="Earlier requests">
+              {earlier.map((r) => (
+                <EarlierRequest key={r.id} request={r} />
+              ))}
+            </ul>
+          </EntryFold>
+        )}
+      </div>
+    </>
   );
 }
 
@@ -361,8 +418,31 @@ const TONE_STYLES = {
   approved: "text-green-400",
   declined: "text-red-400",
   answer: "text-slate-100",
+  closed: "text-slate-400",
   waiting: "text-slate-500",
 } as const;
+
+/** What the answer line says before who answered. */
+function AnswerText({ request, tone }: { request: TicketRequest; tone: ReturnType<typeof answerTone> }) {
+  if (tone === "approved" || tone === "declined") {
+    return <span className={`font-medium ${TONE_STYLES[tone]}`}>{tone === "declined" ? "Declined" : "Approved"}</span>;
+  }
+  // Closed without the person's answer (stopping work, say): the text as it
+  // stands, neutral, since nobody approved, declined or answered it.
+  if (tone === "closed") return <span className={TONE_STYLES.closed}>{request.answer}</span>;
+  return (
+    <>
+      Answer: <span className={TONE_STYLES.answer}>{request.answer}</span>
+    </>
+  );
+}
+
+// An earlier request's prompt in its compact row: inline markdown only (bold,
+// italics, code), everything else kept as its text, paragraphs run together.
+const INLINE_MARKDOWN = ["p", "strong", "em", "code", "del"];
+const INLINE_COMPONENTS: Components = {
+  p: ({ children }) => <span>{children} </span>,
+};
 
 /** One earlier request: its type, prompt, answer and note, who answered, and when. */
 function EarlierRequest({ request }: { request: TicketRequest }) {
@@ -376,22 +456,22 @@ function EarlierRequest({ request }: { request: TicketRequest }) {
     >
       <span className={`${KIND_TAG} text-slate-500`}>{requestKindLabel(request.type)}</span>
       <div className="min-w-0 space-y-0.5">
-        <p className="line-clamp-3 whitespace-pre-wrap text-slate-300" title={request.prompt}>
-          {request.prompt}
-        </p>
+        <div
+          data-testid="earlier-prompt"
+          className="line-clamp-3 text-slate-300 [&_code]:rounded [&_code]:bg-slate-700/60 [&_code]:px-1 [&_code]:font-mono [&_code]:text-[11.5px] [&_em]:italic [&_strong]:font-semibold [&_strong]:text-slate-100"
+          title={request.prompt}
+        >
+          <Markdown allowedElements={INLINE_MARKDOWN} unwrapDisallowed components={INLINE_COMPONENTS}>
+            {request.prompt}
+          </Markdown>
+        </div>
         <p className="text-slate-400">
           {tone === "waiting" ? (
             <span className={TONE_STYLES.waiting}>Not answered</span>
           ) : (
             <>
-              {request.type === "approval" ? (
-                <span className={`font-medium ${TONE_STYLES[tone]}`}>{tone === "declined" ? "Declined" : "Approved"}</span>
-              ) : (
-                <>
-                  Answer: <span className={TONE_STYLES.answer}>{request.answer}</span>
-                </>
-              )}
-              {request.answeredBy && ` by ${request.answeredBy}`}
+              <AnswerText request={request} tone={tone} />
+              {request.answeredBy && (tone === "closed" ? ` · closed by ${request.answeredBy}` : ` by ${request.answeredBy}`)}
               {answeredAt && (
                 <span className="text-slate-500" title={new Date(request.answeredAt!).toLocaleString()}>
                   {" "}
@@ -414,41 +494,52 @@ function EarlierRequest({ request }: { request: TicketRequest }) {
   );
 }
 
-/** Says what an answer did and which agent collects it; goes by itself after TOAST_MS. */
-function AnswerToast({ text, onDismiss }: { text: string; onDismiss: () => void }) {
+/**
+ * Says what an answer did and which agent collects it, or why it wasn't
+ * taken; goes by itself after TOAST_MS. It takes focus from the form it
+ * replaces, and reports on its way out whether it still had it. The block's
+ * live region reads its words out, so it has no role of its own.
+ */
+function AnswerToast({ text, onDismiss }: { text: string; onDismiss: (hadFocus: boolean) => void }) {
   const [shown, setShown] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
   const dismissRef = useRef(onDismiss);
   useEffect(() => {
     dismissRef.current = onDismiss;
   });
+  const dismiss = () => dismissRef.current(!!ref.current?.contains(document.activeElement));
   useEffect(() => {
+    ref.current?.focus();
     const frame = requestAnimationFrame(() => setShown(true));
-    const timer = setTimeout(() => dismissRef.current(), TOAST_MS);
+    const timer = setTimeout(() => dismissRef.current(!!ref.current?.contains(document.activeElement)), TOAST_MS);
     return () => {
       cancelAnimationFrame(frame);
       clearTimeout(timer);
     };
   }, []);
-  // "Answer sent." or "Approved." leads, in bold; "Declined." isn't green.
+  // "Answer sent." or "Approved." leads, in bold green; "Declined." and a
+  // refusal lead in plain white.
   const cut = text.indexOf(". ") + 1;
   const lead = text.slice(0, cut);
   const rest = text.slice(cut);
+  const good = lead === "Answer sent." || lead === "Approved.";
   return (
     <div
-      role="status"
+      ref={ref}
+      tabIndex={-1}
       data-testid="answer-toast"
-      className={`flex w-fit max-w-full items-start gap-2 rounded-lg border border-slate-700 bg-slate-800 px-3 py-1.5 text-[12.5px] text-slate-100 shadow-lg transition-all duration-300 ease-out motion-reduce:transition-none ${
+      className={`flex w-fit max-w-full items-start gap-2 rounded-lg border border-slate-700 bg-slate-800 px-3 py-1.5 text-[12.5px] text-slate-100 shadow-lg transition-all duration-300 ease-out focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 motion-reduce:transition-none ${
         shown ? "translate-y-0 opacity-100" : "-translate-y-1 opacity-0"
       }`}
     >
       <span>
-        <b className={`font-semibold ${lead === "Declined." ? "text-slate-100" : "text-green-400"}`}>{lead}</b>
+        <b className={`font-semibold ${good ? "text-green-400" : "text-slate-100"}`}>{lead}</b>
         {rest}
       </span>
       <button
         type="button"
         aria-label="Dismiss"
-        onClick={onDismiss}
+        onClick={dismiss}
         className="mt-0.5 shrink-0 text-slate-500 transition-colors hover:text-slate-300"
       >
         <X className="h-3 w-3" />

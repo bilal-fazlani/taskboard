@@ -24,6 +24,13 @@ const mockApi = vi.hoisted(() => ({
   epics: {
     list: vi.fn(),
   },
+  requests: {
+    list: vi.fn(),
+    answer: vi.fn(),
+  },
+  agents: {
+    get: vi.fn(),
+  },
   documents: {
     list: vi.fn(),
     create: vi.fn(),
@@ -168,6 +175,7 @@ beforeEach(() => {
   mockApi.tickets.list.mockResolvedValue([]);
   mockApi.tickets.history.mockResolvedValue([]);
   mockApi.labels.list.mockResolvedValue([]);
+  mockApi.requests.list.mockResolvedValue([]);
 });
 
 afterEach(() => {

@@ -98,6 +98,21 @@ removes only that parameter, so the filters you had set stay put. Back closes
 the editor, and unsaved edits are never dropped without asking — however the
 close was asked for.
 
+#### Answering an agent
+
+A ticket's page answers an agent's request for user input in one step. An open
+request comes first on the page, in red, with the form its type calls for: a
+question offers its choices and a box to answer in your own words instead (what
+you write wins over a picked choice, and one of the two is needed), and an
+approval offers Approve and Decline with one optional note that goes with
+either. Once sent, the ticket is back in progress and a toast names the agent
+that collects the answer; a request answered or closed elsewhere first is
+dropped from the page, saying so. Earlier requests sit in a fold under the open
+one, or at the top of the page when none is open, newest first, each with its
+answer, note, who answered and when. Only `approved` reads as approved and only
+`declined` as declined; a request closed any other way, such as by stopping
+work, reads as closed.
+
 ### API
 
 `GET /api/version` says which build is serving, e.g. `{"version":"v0.2.0","commit":"1f3c9ab…","dev":false}`; `taskboard --version` prints the same, and the sidebar shows it at the bottom. Release binaries carry their tag, and Makefile builds (`make build`, `make dev`, `make install`) carry `git describe --tags --always --dirty`, both with the full commit. `dev` is true for every build but a release binary and the one `make install` builds.
@@ -138,8 +153,6 @@ Entries are short typed records of why the work is as it is, on a project, an ep
 `POST /api/tickets/{id}/start` with `{"agentId":"..."}` is how an agent begins a ticket, in one call: it claims the ticket and answers everything needed to begin. That is `ticket` (without `agent`, the caller) and `project` (`name`, `description`, `agentInstructions`, and `entries`: its 10 newest current entries other than open notes, with `total`, `hasMore` and `nextBefore` for the rest; `total` leaves out the open notes, which `list_entries` counts), plus, each only when there is one: `takenFrom`, `handOff` (the latest hand-off), `entries` (the ticket's other current entries, all of them), `notes` (the person's open notes on the ticket, epic and project), `epic` (`description`, `documents` by name, `entries`) and `unfinishedDependencies` (keys; they never block a start). No entry names its owner, and open notes appear only under `notes`. A ticket an agent of another session holds is refused while that session is live, naming the holder and when its session was last seen; once it is stale, the start takes the ticket over and `takenFrom` names the agent it came from. What a start costs is mostly its text: on a ticket shaped like this project's own (3.9 KB of agent instructions, a 2 KB description, ten project entries of about 400 bytes) it is about 19 KB, some 5k tokens. A test holds the start's structure, every part with one sentence of text, under 6 KB.
 
 An agent asks the person for user input with `POST /api/tickets/{id}/requests`: `type` (`approval` or `question` today), `prompt`, and optional `choices`. It moves the ticket to `needs_user_input` and answers with the new request; a ticket already waiting on an unanswered request, or held by no agent, refuses a second. `GET /api/tickets/{id}/requests` reads a ticket's whole history, newest first, answered and unanswered alike. `POST /api/requests/{id}/answer` takes `answer`, `answeredBy` and an optional `note`. For a `question`, `answer` may be any non-empty text; when it matches one of the request's `choices`, case-insensitively, it is stored as the choice is written. For an `approval`, `answer` is always `approved` or `declined`, matched case-insensitively and stored that way, whatever `choices` the request offered — they suggest nothing there and change nothing. `answeredBy` left out or blank defaults to the local person (the OS user), since an answer is today always the local person's; `note` is optional either way and is returned on every read of the request, alongside `answer`. `GET /api/requests/{id}/await?timeout=30s` long-polls that one request only, never whatever else is open on its ticket: the timeout defaults to 30s and is capped at 60s, and its own passing is never an error — the request comes back unanswered, with a 200, rather than as a timeout error. Ticket JSON gains `agent` (the agent holding it, if any) and `openRequest` (the request it waits on, if any).
-
-The web ticket page answers in one step. An open request comes first on the page, in red, with the form its type calls for: a question offers its choices and a box to answer in your own words instead (what you write wins over a picked choice, and one of the two is needed), and an approval offers Approve and Decline with one optional note that goes with either. Once sent, the ticket is back in progress and a toast names the agent that collects the answer. Earlier requests sit in a fold under the open one, or at the top of the page when none is open, newest first, each with its answer, note, who answered and when.
 
 Across the agent and request routes, an unresolved ticket or request id is a 404, a request these routes refuse (bad input, a missing hand-off or proof, an unknown type, a second open request) is a 400, and a ticket held by another session (a start while it is live, or a release from outside the holder's session) is a 409 — each with the store's own message.
 

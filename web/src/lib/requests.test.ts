@@ -79,4 +79,16 @@ describe("toast and labels", () => {
     expect(answerTone(req({ answer: "Round only", answeredAt: "x" }))).toBe("answer");
     expect(answerTone(req({}))).toBe("waiting");
   });
+  it("keeps a request closed by stopping work neutral, whatever its type", () => {
+    // The server's models.StoppedAnswer, as it arrives.
+    const stopped = "Not answered: the person stopped work on this ticket.";
+    expect(answerTone(req({ type: "approval", answer: stopped, answeredAt: "x" }))).toBe("closed");
+    expect(answerTone(req({ type: "question", answer: stopped, answeredAt: "x" }))).toBe("closed");
+  });
+  it("calls an approval approved or declined only for exactly those answers", () => {
+    expect(answerTone(req({ type: "approval", answer: "yes", answeredAt: "x" }))).toBe("closed");
+    expect(answerToast("approval", "Not answered: the person stopped work on this ticket.", undefined)).toBe(
+      "Answer sent. The agent that asked gets it on its next call.",
+    );
+  });
 });

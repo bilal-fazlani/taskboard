@@ -263,7 +263,6 @@ describe("an open question", () => {
     fireEvent.click(within(block).getByRole("radio", { name: "Round only" }));
     fireEvent.click(within(block).getByRole("button", { name: "Send answer" }));
     const toast = await screen.findByTestId("answer-toast");
-    expect(toast.getAttribute("role")).toBe("status");
     expect(toast.textContent).toBe("Answer sent. The implementer (gpt-5) gets it on its next call.");
     await waitFor(() => expect(status().textContent).toBe("In Progress"));
     expect(screen.queryByTestId("open-request")).toBeNull();
@@ -274,16 +273,39 @@ describe("an open question", () => {
     expect(screen.getByTestId("earlier-request").textContent).toContain("Answer: Round only by bilal");
   });
 
-  it("keeps the form, and says why, when the answer is refused", async () => {
+  it("announces the toast through a live region that was there before it, and moves focus to it", async () => {
     waitingOn(QUESTION);
-    mockApi.requests.answer.mockRejectedValue(new Error("API error 400: request q1 is already answered, by bilal"));
+    renderEditor();
+    const block = await openRequest();
+    // On the page, and empty, before anything is sent.
+    const live = screen.getByTestId("requests-announcement");
+    expect(live.getAttribute("role")).toBe("status");
+    expect(live.textContent).toBe("");
+    fireEvent.click(within(block).getByRole("radio", { name: "Round only" }));
+    fireEvent.click(within(block).getByRole("button", { name: "Send answer" }));
+    const toast = await screen.findByTestId("answer-toast");
+    // The same element, now holding the words.
+    expect(screen.getByTestId("requests-announcement")).toBe(live);
+    expect(live.textContent).toBe("Answer sent. The implementer (gpt-5) gets it on its next call.");
+    expect(toast.getAttribute("role")).toBeNull();
+    expect(document.activeElement).toBe(toast);
+    // Dismissed, the toast gives focus to the block rather than the page.
+    fireEvent.click(within(toast).getByRole("button", { name: "Dismiss" }));
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByTestId("ticket-requests")));
+    expect(live.textContent).toBe("");
+  });
+
+  it("keeps the form, and says why, when the answer fails to reach the server", async () => {
+    waitingOn(QUESTION);
+    mockApi.requests.answer.mockRejectedValue(new Error("Failed to fetch"));
     renderEditor();
     const block = await openRequest();
     fireEvent.change(within(block).getByRole("textbox"), { target: { value: "temp" } });
     fireEvent.click(within(block).getByRole("button", { name: "Send answer" }));
-    expect((await within(block).findByRole("alert")).textContent).toMatch(/already answered/);
+    expect((await within(block).findByRole("alert")).textContent).toBe("That didn't go through.");
     expect(screen.queryByTestId("answer-toast")).toBeNull();
     expect((within(block).getByRole("textbox") as HTMLTextAreaElement).value).toBe("temp");
+    expect((within(block).getByRole("button", { name: "Send answer" }) as HTMLButtonElement).disabled).toBe(false);
   });
 
   it("offers only your own words when it has no choices", async () => {
@@ -354,6 +376,44 @@ describe("an open approval", () => {
     expect(within(newest).getByTestId("request-note").textContent).toBe("Note: Keep it until ACP-209 lands");
   });
 
+  it("drops a stale approval the server refuses, reloading the ticket and the history, and says where it went", async () => {
+    waitingOn(APPROVAL);
+    renderEditor();
+    const block = await openRequest();
+    // Answered from the CLI while the page wasn't looking.
+    mockApi.requests.answer.mockImplementation(() => {
+      serverRequests = [{ ...APPROVAL, answer: "declined", answeredBy: "bilal", answeredAt: "2026-09-28T09:35:00Z" }];
+      serverTicket = makeTicket({ status: "in_progress", updatedAt: "2026-09-28T09:35:00Z" });
+      return Promise.reject(new Error('API error 400: {"error":"request ap1 is already answered, by bilal"}'));
+    });
+    const gets = mockApi.tickets.get.mock.calls.length;
+    fireEvent.click(within(block).getByRole("button", { name: "Approve" }));
+    const toast = await screen.findByTestId("answer-toast");
+    expect(toast.textContent).toBe("This request was already answered. It is in Earlier requests.");
+    expect(screen.getByTestId("requests-announcement").textContent).toBe(
+      "This request was already answered. It is in Earlier requests.",
+    );
+    expect(document.body.textContent).not.toContain("ap1");
+    expect(screen.queryByTestId("open-request")).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
+    await waitFor(() => expect(status().textContent).toBe("In Progress"));
+    expect(mockApi.tickets.get.mock.calls.length).toBeGreaterThan(gets);
+    fireEvent.click(await screen.findByRole("button", { name: /Earlier requests \(1\)/ }));
+    expect(screen.getByTestId("earlier-request").textContent).toContain("Declined by bilal");
+  });
+
+  it("treats a request gone from the server (404) the same way", async () => {
+    waitingOn(APPROVAL);
+    mockApi.requests.answer.mockRejectedValue(new Error('API error 404: {"error":"request not found"}'));
+    renderEditor();
+    const block = await openRequest();
+    fireEvent.click(within(block).getByRole("button", { name: "Decline" }));
+    expect((await screen.findByTestId("answer-toast")).textContent).toBe(
+      "This request was already answered. It is in Earlier requests.",
+    );
+    expect(screen.queryByTestId("open-request")).toBeNull();
+  });
+
   it("names the agent that asked when it isn't the ticket's holder", async () => {
     waitingOn({ ...APPROVAL, agentId: "orch" });
     mockApi.agents.get.mockResolvedValue({ ...IMPLEMENTER, id: "orch", role: "orchestrator", model: "opus-5.5", provider: "anthropic" });
@@ -397,7 +457,7 @@ describe("request history", () => {
     expect(screen.queryByTestId("earlier-request")).toBeNull();
     fireEvent.click(fold);
     const rows = screen.getAllByTestId("earlier-request");
-    expect(rows.map((r) => r.querySelector("p")?.textContent)).toEqual([
+    expect(rows.map((r) => within(r).getByTestId("earlier-prompt").textContent?.trim())).toEqual([
       "Land Review 1's fixes on main?",
       "Which test DB?",
     ]);
@@ -407,6 +467,40 @@ describe("request history", () => {
     expect(rows[1].textContent).toContain("Question");
     expect(rows[1].textContent).toContain("Answer: A fresh t.TempDir() per test by bilal");
     expect(within(rows[1]).queryByTestId("request-note")).toBeNull();
+  });
+
+  it("shows a request closed by stopping work as closed, neither approved nor answered", async () => {
+    // The server's models.StoppedAnswer, word for word.
+    const stopped = "Not answered: the person stopped work on this ticket.";
+    const closedAt = { answer: stopped, answeredBy: "bilal", answeredAt: "2026-09-28T09:50:00Z" };
+    waitingOn(undefined, [
+      { ...APPROVAL, ...closedAt },
+      { ...QUESTION, ...closedAt, createdAt: "2026-09-28T08:59:00Z" },
+    ]);
+    renderEditor();
+    fireEvent.click(await screen.findByRole("button", { name: /Earlier requests \(2\)/ }));
+    const rows = screen.getAllByTestId("earlier-request");
+    expect(rows).toHaveLength(2);
+    for (const row of rows) {
+      expect(row.textContent).toContain(`${stopped} · closed by bilal`);
+      expect(row.textContent).not.toMatch(/Approved|Declined|Answer:/);
+      expect(row.querySelector(".text-green-400")).toBeNull();
+      expect(within(row).getByText(stopped).className).toContain("text-slate-400");
+    }
+  });
+
+  it("renders an earlier prompt's inline markdown instead of showing its marks", async () => {
+    waitingOn(undefined, [
+      { ...APPROVAL, answer: "approved", answeredBy: "bilal", answeredAt: "2026-09-28T09:35:00Z" },
+      { ...QUESTION, answer: "Round only", answeredBy: "bilal", answeredAt: "2026-09-28T09:05:00Z" },
+    ]);
+    renderEditor();
+    fireEvent.click(await screen.findByRole("button", { name: /Earlier requests \(2\)/ }));
+    const [approval, question] = screen.getAllByTestId("earlier-prompt");
+    expect(approval.textContent?.trim()).toBe("Delete the Agents epic's Decisions document?");
+    expect(within(approval).getByText("Decisions").tagName).toBe("STRONG");
+    expect(question.textContent).not.toMatch(/[`*]/);
+    expect(within(question).getByText("Review 2: major #1").tagName).toBe("CODE");
   });
 
   it("sits at the top of the page when no request is open", async () => {
