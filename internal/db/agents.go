@@ -439,7 +439,7 @@ func (s *Store) ClaimTicket(ticketID, agentID string) (*models.Claim, error) {
 	if _, err := tx.Exec(`UPDATE tickets SET agent_id = ?, updated_at = ? WHERE id = ?`, agentID, stamp(now), id); err != nil {
 		return nil, fmt.Errorf("claiming ticket: %w", err)
 	}
-	if err := forgetStops(tx, id, claimer.SessionID); err != nil {
+	if claim.Stopped, err = forgetStops(tx, id, claimer.SessionID); err != nil {
 		return nil, err
 	}
 	to := models.StatusInProgress

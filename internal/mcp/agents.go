@@ -113,7 +113,8 @@ var agentToolDefs = [5]toolDef{
 		Name: "start_ticket",
 		Description: "How you begin work on a ticket: one call claims it for you and answers everything needed to begin, " +
 			"so read nothing else first. Answers {ticket, project: {name, description, agentInstructions, entries}} and, " +
-			"each only when there is one: takenFrom; handOff, where the work stands; entries, the ticket's other current " +
+			"each only when there is one: takenFrom; stopped {by, at}, when the person had stopped your session's work " +
+			"and this start takes it up again; handOff, where the work stands; entries, the ticket's other current " +
 			"entries; notes, the person's open notes on the ticket, its epic and its project (act on each, then handle_note); " +
 			"epic {description, documents, entries}; unfinishedDependencies, keys that never block you (decide whether to go " +
 			"on). project.entries is the newest page of the project's entries: older ones with list_entries, project and " +
@@ -153,9 +154,10 @@ var agentToolDefs = [5]toolDef{
 		Description: "Ask the person for input you cannot go on without, on a ticket being worked, then collect it with " +
 			"await_answer. Answers {id, created: true} at once; the ticket waits in needs_user_input until the person " +
 			"answers, one open request per ticket. approval: state exactly what you will do if approved, and act only on " +
-			"that approval, as stated; its answer is always approved or declined, whatever choices you offer, which " +
+			"that approval, as stated; its answer is approved or declined, whatever choices you offer, which " +
 			"change nothing for it. question: ask what you need; choices are optional suggestions, and the person can " +
-			"always answer in their own words.",
+			"always answer in their own words. If the person stops work on the ticket first, either type closes with " +
+			"\"" + models.StoppedAnswer + "\" instead: the ticket is no longer yours.",
 		InputSchema: jsonSchema{
 			Type: "object",
 			Properties: map[string]schemaProp{
@@ -163,7 +165,7 @@ var agentToolDefs = [5]toolDef{
 				"agentId": agentIDProp,
 				"type":    {Type: "string", Description: "The type of user input.", Enum: models.UserInputTypes},
 				"prompt":  {Type: "string", Description: "What you ask; for an approval, exactly what you will do if approved."},
-				"choices": {Type: "array", Description: "Suggested answers (optional); for an approval these change nothing, since its answer is always approved or declined.", Items: &jsonSchema{Type: "string"}},
+				"choices": {Type: "array", Description: "Suggested answers (optional); for an approval these change nothing, since its answer is approved or declined.", Items: &jsonSchema{Type: "string"}},
 			},
 			Required: []string{"ticket", "agentId", "type", "prompt"},
 		},
@@ -172,8 +174,10 @@ var agentToolDefs = [5]toolDef{
 		Name: "await_answer",
 		Description: "Wait for the answer to a request you made with request_user_input. Answers {id, answered, answer, " +
 			"answeredBy, note} once answered, or {id, answered: false} when the timeout passes: call again to keep " +
-			"waiting. An approval's answer is always \"approved\" or \"declined\"; note is an optional note the person " +
-			"left with either answer, left out when there is none. Waiting keeps your session live.",
+			"waiting. An approval's answer is \"approved\" or \"declined\"; note is an optional note the person " +
+			"left with either answer, left out when there is none. If the person stopped work on the ticket, the answer " +
+			"is \"" + models.StoppedAnswer + "\", neither approved nor declined: the ticket is no longer yours, so leave " +
+			"only your hand-off (release_ticket give_back). Waiting keeps your session live.",
 		InputSchema: jsonSchema{
 			Type: "object",
 			Properties: map[string]schemaProp{

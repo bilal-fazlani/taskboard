@@ -10,9 +10,9 @@ import (
 )
 
 // StoppedAnswer is what a request left open when the person stopped work
-// is closed with: the agent waiting on it learns, on its next poll, that the
-// ticket is no longer its own.
-const StoppedAnswer = "Not answered: the person stopped work on this ticket."
+// is closed with (models.StoppedAnswer): the agent waiting on it learns, on
+// its next poll, that the ticket is no longer its own.
+const StoppedAnswer = models.StoppedAnswer
 
 // ErrStopped is an agent's write on a ticket refused because the person
 // stopped the work its session held there (StopWork). It says so in the words
@@ -131,11 +131,23 @@ func checkNotStopped(q dbtx, ticketID, agentID string) error {
 
 // forgetStops removes the stops recorded against any agent of sessionID on
 // the ticket: that session has claimed it again, so the person's stop no
-// longer stands between it and its writes.
-func forgetStops(q dbtx, ticketID, sessionID string) error {
+// longer stands between it and its writes. It answers with the latest stop
+// it lifted, or nil when there was none.
+func forgetStops(q dbtx, ticketID, sessionID string) (*models.Stop, error) {
+	var stop models.Stop
+	err := q.QueryRow(`SELECT stopped_by, stopped_at FROM ticket_stops
+		WHERE ticket_id = ? AND agent_id IN (SELECT id FROM agents WHERE session_id = ?)
+		ORDER BY stopped_at DESC LIMIT 1`, ticketID, sessionID).Scan(&stop.By, &stop.At)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("reading the ticket's stops: %w", err)
+	}
 	if _, err := q.Exec(`DELETE FROM ticket_stops WHERE ticket_id = ? AND agent_id IN (SELECT id FROM agents WHERE session_id = ?)`,
 		ticketID, sessionID); err != nil {
-		return fmt.Errorf("clearing the ticket's stops: %w", err)
+		return nil, fmt.Errorf("clearing the ticket's stops: %w", err)
 	}
-	return nil
+	stop.At = stop.At.UTC()
+	return &stop, nil
 }

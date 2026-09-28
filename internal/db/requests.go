@@ -192,10 +192,11 @@ func (s *Store) CreateRequest(req models.CreateUserInputRequest) (string, error)
 // to in_progress; a ticket someone has since moved elsewhere stays where it
 // is. A question's answer may be any non-empty text; when it matches one of
 // the request's choices, matched ignoring case, it is stored as the choice
-// is written. An approval's answer is always models.ApprovalApproved or
+// is written. An approval's answer is models.ApprovalApproved or
 // models.ApprovalDeclined, matched ignoring case and stored as those are
-// written, whatever choices the request offers. It answers with the
-// answered request. An unknown request, one already answered, a blank
+// written, whatever choices the request offers. (The one other way a
+// request of either type closes is StopWork, with models.StoppedAnswer.) It
+// answers with the answered request. An unknown request, one already answered, a blank
 // answer or answerer, or an approval answered with anything else, is an
 // ErrInvalidInput and writes nothing.
 func (s *Store) AnswerRequest(requestID, answer, answeredBy, note string) (*models.TicketRequest, error) {

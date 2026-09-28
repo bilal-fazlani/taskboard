@@ -27,11 +27,19 @@ func ValidUserInputType(t string) bool {
 
 // ApprovalApproved and ApprovalDeclined are the only two answers an
 // approval request accepts, whatever choices it offers: AnswerRequest
-// matches them ignoring case and stores the value written here.
+// matches them ignoring case and stores the value written here. The one
+// other way an approval closes is StoppedAnswer.
 const (
 	ApprovalApproved = "approved"
 	ApprovalDeclined = "declined"
 )
+
+// StoppedAnswer is the one answer the person does not give: a request still
+// open when the person stops work on its ticket, an approval or a question,
+// is closed with it. It means the ticket is no longer the asking agent's:
+// neither approved nor declined, and nothing is left to do on it but the
+// hand-off.
+const StoppedAnswer = "Not answered: the person stopped work on this ticket."
 
 // TicketRequest is an agent's request for user input on a ticket. A ticket
 // has at most one unanswered request. Answer, AnsweredBy and AnsweredAt are
@@ -50,8 +58,9 @@ type TicketRequest struct {
 	// Choices are the answers offered. For a question they are suggestions:
 	// the person may answer with any non-empty text instead, and an answer
 	// that matches one, case-insensitively, is stored as the choice is
-	// written. For an approval they change nothing: its answer is always
-	// ApprovalApproved or ApprovalDeclined.
+	// written. For an approval they change nothing: its answer is
+	// ApprovalApproved or ApprovalDeclined. Either type is closed with
+	// StoppedAnswer instead when the person stops work on the ticket.
 	Choices []string `json:"choices"`
 	Answer  string   `json:"answer,omitempty"`
 	// AnsweredBy is who answered: the local person today, the account once
@@ -66,7 +75,8 @@ type TicketRequest struct {
 // CreateUserInputRequest is an agent asking the person for user input on a
 // ticket. For a question, choices are suggestions the person may answer
 // with something else instead. For an approval they change nothing: its
-// answer is always ApprovalApproved or ApprovalDeclined.
+// answer is ApprovalApproved or ApprovalDeclined, or StoppedAnswer when the
+// person stops work on the ticket first.
 type CreateUserInputRequest struct {
 	TicketID string `json:"ticketId"`
 	// AgentID is the agent asking, which collects the answer.

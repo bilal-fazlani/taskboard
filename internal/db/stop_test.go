@@ -217,3 +217,31 @@ func TestClaimingAgainLiftsTheStop(t *testing.T) {
 		}
 	}
 }
+
+// Starting the ticket again from the stopped session, here a resumed chat,
+// takes it back and lifts the stop: the start says who stopped the work and
+// when, and the session's writes on the ticket are accepted again. A later
+// start with no stop to lift says nothing about one.
+func TestStartingAgainLiftsTheStopAndSaysSo(t *testing.T) {
+	f := newClaimFixture(t)
+	mustStart(t, f.s, f.ticket.ID, f.first.ID)
+	mustStop(t, f.s, f.ticket.ID)
+	resumed := identify(t, f.s, "3da2c294", "implementer")
+
+	start := mustStart(t, f.s, f.ticket.ID, resumed.ID)
+	if start.Stopped == nil || start.Stopped.By != "bilal" || time.Since(start.Stopped.At) > time.Minute {
+		t.Fatalf("start after the stop: stopped = %+v, want by bilal just now", start.Stopped)
+	}
+	if start.Ticket.Status != models.StatusInProgress {
+		t.Fatalf("start after the stop: status %s, want in_progress", start.Ticket.Status)
+	}
+	for _, agent := range []*models.Agent{f.first, resumed} {
+		if _, err := f.s.CreateEntry(models.CreateEntryRequest{EntryOwner: models.EntryOwner{TicketID: f.ticket.ID},
+			Type: models.EntryDecision, Text: "Picked up again", Source: models.DecisionSourceAgent, AgentID: agent.ID}); err != nil {
+			t.Fatalf("a write after starting again: %v", err)
+		}
+	}
+	if again := mustStart(t, f.s, f.ticket.ID, resumed.ID); again.Stopped != nil {
+		t.Fatalf("a start with no stop to lift: stopped = %+v, want none", again.Stopped)
+	}
+}

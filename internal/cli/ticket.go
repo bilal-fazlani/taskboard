@@ -519,9 +519,11 @@ func ticketCommands() *cobra.Command {
 		Long: "Ask the person for user input on a ticket an agent (or its session) holds; prints the new " +
 			"request's id. --type is " + strings.Join(models.UserInputTypes, " or ") + "; --choice " +
 			"(repeatable) suggests an answer for a question, which the person may still answer with something " +
-			"else instead, or leave it out for a free answer. An approval's answer is always approved or " +
+			"else instead, or leave it out for a free answer. An approval's answer is approved or " +
 			"declined, whatever choices it offers, so --choice changes nothing for it: state exactly what the " +
-			"agent will do if approved, since it acts only on that approval, as stated.",
+			"agent will do if approved, since it acts only on that approval, as stated. If the person stops work " +
+			"on the ticket first, either type closes with \"" + models.StoppedAnswer + "\": the ticket is no " +
+			"longer the agent's.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			store, err := openStore()

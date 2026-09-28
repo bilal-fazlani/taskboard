@@ -38,7 +38,7 @@ func (s *Store) StartTicket(ticketRef, agentID string) (*models.Start, error) {
 		return nil, fmt.Errorf("reading the claimed ticket %q: it is gone", ticketRef)
 	}
 	t.Agent = nil
-	start := &models.Start{Ticket: t, TakenFrom: claim.TakenFrom, HandOff: claim.HandOff}
+	start := &models.Start{Ticket: t, TakenFrom: claim.TakenFrom, Stopped: claim.Stopped, HandOff: claim.HandOff}
 
 	if start.TakenFrom == nil {
 		if start.HandOff, err = latestHandOff(s.db, t.ID); err != nil {

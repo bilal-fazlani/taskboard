@@ -127,11 +127,20 @@ func FormatDuration(d time.Duration) string {
 // Claim is what claiming a ticket did: the ticket as it now stands, held by
 // the claiming agent, and, when the claim took the ticket over from a stale
 // agent, that agent and the ticket's latest current hand-off, whoever wrote
-// it, if there is one.
+// it, if there is one. Stopped is the person's stop on the claiming
+// session's work that the claim lifted, if there was one.
 type Claim struct {
 	Ticket    *Ticket `json:"ticket"`
 	TakenFrom *Agent  `json:"takenFrom,omitempty"`
 	HandOff   *Entry  `json:"handOff,omitempty"`
+	Stopped   *Stop   `json:"stopped,omitempty"`
+}
+
+// Stop is the person stopping a session's work on a ticket: who stopped it
+// and when.
+type Stop struct {
+	By string    `json:"by"`
+	At time.Time `json:"at"`
 }
 
 // How an agent releases the ticket it holds.

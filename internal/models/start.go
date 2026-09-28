@@ -10,6 +10,9 @@ type Start struct {
 	Ticket *Ticket `json:"ticket"`
 	// TakenFrom is the stale agent the start took the ticket over from.
 	TakenFrom *Agent `json:"takenFrom,omitempty"`
+	// Stopped is who stopped this session's work on the ticket, and when,
+	// when this start takes it up again after the person stopped it.
+	Stopped *Stop `json:"stopped,omitempty"`
 	// HandOff is the ticket's latest current hand-off, whoever wrote it:
 	// where the work stands. It is not repeated in Entries.
 	HandOff *Entry `json:"handOff,omitempty"`
