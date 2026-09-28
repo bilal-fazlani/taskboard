@@ -389,8 +389,12 @@ func ticketCommands() *cobra.Command {
 		Use:   "start [id-or-key]",
 		Short: "Begin work on a ticket as an agent: claim it and print everything needed to begin, as JSON",
 		Long: "Begin work on a ticket: claim it for --agent and print, as compact JSON, the same answer the MCP " +
-			"start_ticket tool and POST /api/tickets/{id}/start give: the ticket, its project (with agent " +
-			"instructions) and epic, their entries, the latest hand-off, every open note, the agent it was taken " +
+			"start_ticket tool and POST /api/tickets/{id}/start give: the ticket, lean (subtasks with id, title and " +
+			"completed; labels with name and color; linked tickets by key, title, status, and a dependency's kind " +
+			"and note, with no ids), its project and epic, their entries (the project's 5 newest; each entry an " +
+			"agent wrote names its agentRole and agentModel), the project's agent instructions (on the agent's " +
+			"first start in the project and again once they change; later starts carry agentInstructionsLeftOut, " +
+			"saying where to read them again, instead), the latest hand-off, every open note, the agent it was taken " +
 			"over from, the person's stop this start lifts (stopped: by and at), the ticket's answeredRequests " +
 			"(its answered requests for user input, newest first: type, prompt, answer, note, answeredBy, " +
 			"answeredAt; a request closed by Stop work instead of an answer carries stopped: true and no answer) " +
@@ -410,7 +414,7 @@ func ticketCommands() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			weburl.Fill(start.Ticket)
+			weburl.Fill(start.Ticket.Ticket)
 			// Compact, as MCP sends it, with or without --json: the start is
 			// read by agents, and indentation is only tokens.
 			return json.NewEncoder(cmd.OutOrStdout()).Encode(start)

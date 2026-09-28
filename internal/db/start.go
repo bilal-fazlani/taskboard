@@ -1,14 +1,19 @@
 package db
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"strings"
+	"time"
 
 	"github.com/tcarac/taskboard/internal/models"
 )
 
 // StartProjectEntries is how many of the project's newest current entries a
 // start carries; the rest are read a page at a time from its nextBefore.
-const StartProjectEntries = 10
+// Every start pays for them, so the page is short.
+const StartProjectEntries = 5
 
 // StartTicket is an agent beginning work on a ticket (an id or display key):
 // it claims the ticket for the agent under ClaimTicket's rules, and answers
@@ -28,6 +33,11 @@ const StartProjectEntries = 10
 // claim has just touched, since it is live. Reading inside the claim would
 // hold the write lock (every transaction here is BEGIN IMMEDIATE) across a
 // dozen reads through helpers that all read through the store's pool.
+//
+// The project's agent instructions come once per agent (per agent, not per
+// session: an orchestrator and the implementers it launches share one), and
+// again when they change; giveAgentInstructions records each giving, after
+// every read has succeeded.
 func (s *Store) StartTicket(ticketRef, agentID string) (*models.Start, error) {
 	claim, err := s.ClaimTicket(ticketRef, agentID)
 	if err != nil {
@@ -41,7 +51,7 @@ func (s *Store) StartTicket(ticketRef, agentID string) (*models.Start, error) {
 	if t.AnsweredRequests, err = s.AnsweredRequests(t.ID); err != nil {
 		return nil, err
 	}
-	start := &models.Start{Ticket: t, TakenFrom: claim.TakenFrom, Stopped: claim.Stopped, HandOff: claim.HandOff}
+	start := &models.Start{Ticket: models.NewStartTicket(t), TakenFrom: claim.TakenFrom, Stopped: claim.Stopped, HandOff: claim.HandOff}
 
 	if start.TakenFrom == nil {
 		if start.HandOff, err = latestHandOff(s.db, t.ID); err != nil {
@@ -81,9 +91,6 @@ func (s *Store) StartTicket(ticketRef, agentID string) (*models.Start, error) {
 		return nil, fmt.Errorf("reading ticket %s's project: it is gone", t.DisplayKey())
 	}
 	start.Project = models.StartProject{Name: p.Name, Description: p.Description}
-	if p.AgentInstructions != nil {
-		start.Project.AgentInstructions = *p.AgentInstructions
-	}
 	project := models.EntryOwner{ProjectID: p.ID}
 	page, err := s.listEntries(project, models.EntryFilter{ExcludeOpenNotes: true}, "", StartProjectEntries, "")
 	if err != nil {
@@ -100,12 +107,94 @@ func (s *Store) StartTicket(ticketRef, agentID string) (*models.Start, error) {
 	if !notes.Empty() {
 		start.Notes = &notes
 	}
-	for _, d := range t.DependsOn {
+	for _, d := range start.Ticket.DependsOn {
 		if d.Status != models.StatusDone {
 			start.UnfinishedDependencies = append(start.UnfinishedDependencies, d.Key)
 		}
 	}
+	if err := s.nameEntryAuthors(start); err != nil {
+		return nil, err
+	}
+
+	// Last, once every read has succeeded, so the instructions are recorded
+	// as given only in a start that answers.
+	if p.AgentInstructions != nil && *p.AgentInstructions != "" {
+		given, err := s.giveAgentInstructions(strings.TrimSpace(agentID), p.ID, *p.AgentInstructions)
+		if err != nil {
+			return nil, err
+		}
+		if given {
+			start.Project.AgentInstructions = *p.AgentInstructions
+		} else {
+			start.Project.AgentInstructionsLeftOut = fmt.Sprintf("Given to you on an earlier start; read them again with "+
+				"get_project %s (GET /api/projects/%s).", p.Prefix, p.ID)
+		}
+	}
 	return start, nil
+}
+
+// giveAgentInstructions records that the agent is given the project's agent
+// instructions, and reports whether a start should carry them: true when the
+// agent has not been given them before, or was given other text (they have
+// changed since); false when it has these already. One upsert both decides
+// and records, so two starts of one agent at once carry them once.
+func (s *Store) giveAgentInstructions(agentID, projectID, instructions string) (bool, error) {
+	sum := sha256.Sum256([]byte(instructions))
+	res, err := s.db.Exec(`INSERT INTO agent_instructions_given (agent_id, project_id, instructions_hash, given_at)
+		VALUES (?, ?, ?, ?)
+		ON CONFLICT (agent_id, project_id) DO UPDATE SET instructions_hash = excluded.instructions_hash, given_at = excluded.given_at
+		WHERE instructions_hash <> excluded.instructions_hash`,
+		agentID, projectID, hex.EncodeToString(sum[:]), stamp(time.Now()))
+	if err != nil {
+		return false, fmt.Errorf("recording the agent instructions given: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("recording the agent instructions given: %w", err)
+	}
+	return n > 0, nil
+}
+
+// nameEntryAuthors names, on every entry in the start that an agent wrote,
+// that agent's role and model.
+func (s *Store) nameEntryAuthors(start *models.Start) error {
+	var all []*models.Entry
+	add := func(entries []models.Entry) {
+		for i := range entries {
+			all = append(all, &entries[i])
+		}
+	}
+	if start.HandOff != nil {
+		all = append(all, start.HandOff)
+	}
+	add(start.Entries)
+	if start.Epic != nil {
+		add(start.Epic.Entries)
+	}
+	if start.Project.Entries != nil {
+		add(start.Project.Entries.Entries)
+	}
+	if start.Notes != nil {
+		add(start.Notes.Ticket)
+		add(start.Notes.Epic)
+		add(start.Notes.Project)
+	}
+	authors := make([]models.Entry, 0, len(all))
+	for _, e := range all {
+		if e.AgentID != "" {
+			authors = append(authors, models.Entry{AgentID: e.AgentID})
+		}
+	}
+	agents, err := s.EntryAgents(authors)
+	if err != nil {
+		return err
+	}
+	for _, e := range all {
+		if a, ok := agents[e.AgentID]; ok {
+			e.AgentRole, e.AgentModel = a.Role, a.Model
+		}
+	}
+	return nil
 }
 
 // startEpic reads the epic's part of a start, nil when it has nothing to

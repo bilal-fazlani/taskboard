@@ -126,8 +126,12 @@ var agentToolDefs = [5]toolDef{
 			"and this start takes it up again; handOff, where the work stands; entries, the ticket's other current " +
 			"entries; notes, the person's open notes on the ticket, its epic and its project (act on each, then handle_note); " +
 			"epic {description, documents, entries}; unfinishedDependencies, keys that never block you (decide whether to go " +
-			"on). project.entries is the newest page of the project's entries: older ones with list_entries, project and " +
-			"before: nextBefore. Refused while an agent of another session holds the ticket and is live: the error names it " +
+			"on). The ticket is lean: subtasks {id, title, completed}, labels {name, color}, and linked tickets (dependsOn, " +
+			"blocks, surfacedFrom, surfaced) by key, title, status, and a dependency's kind and note, with no ids. " +
+			"project.entries is the project's 5 newest entries: older ones with list_entries, project and before: " +
+			"nextBefore. agentInstructions come on your first start in the project, and again once they change; after that " +
+			"agentInstructionsLeftOut takes their place, and get_project reads them again: their absence never means none. " +
+			"Each entry an agent wrote names its agentRole and agentModel. Refused while an agent of another session holds the ticket and is live: the error names it " +
 			"and when its session was last seen; leave the ticket to it. Once that session has gone stale, the start takes " +
 			"the ticket over: takenFrom names the agent it was taken from and handOff says where its work stood; carry on " +
 			"from there. Starting a ticket your session holds continues it. A done ticket is refused too: the error names " +
@@ -268,7 +272,7 @@ func (s *MCPServer) startTicket(a startArgs) (*models.Start, error) {
 	if err != nil {
 		return nil, err
 	}
-	weburl.Fill(start.Ticket)
+	weburl.Fill(start.Ticket.Ticket)
 	return start, nil
 }
 

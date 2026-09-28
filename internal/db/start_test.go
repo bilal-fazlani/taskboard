@@ -288,17 +288,183 @@ func TestStartTicketLeavesOutEmptyParts(t *testing.T) {
 	}
 }
 
+// The start's ticket is lean: a subtask carries its id (toggle_subtask
+// takes it), title and whether it is done, but not its ticket's id or its
+// position; a label its name and color; a linked ticket its key, title,
+// status, and a dependency's kind and note, but no id. The rest of the
+// ticket is as it stands.
+func TestStartTicketIsLean(t *testing.T) {
+	f := newStartFixture(t)
+	from := f.dep.DisplayKey()
+	if _, err := f.s.UpdateTicket(f.ticket.ID, models.UpdateTicketRequest{Labels: []string{"api"}, SurfacedFrom: &from,
+		DependsOn: []models.DependencyInput{{Ticket: f.dep.DisplayKey(), Kind: models.DependencyConflictOnly, Note: "start.go"}}}); err != nil {
+		t.Fatal(err)
+	}
+	start := mustStart(t, f.s, f.ticket.ID, f.first.ID)
+	raw, err := json.Marshal(start.Ticket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ticket struct {
+		ID, Title, Description, Status string
+		Subtasks, DependsOn, Labels    []map[string]any
+		SurfacedFrom                   map[string]any
+	}
+	if err := json.Unmarshal(raw, &ticket); err != nil {
+		t.Fatal(err)
+	}
+	if ticket.ID != f.ticket.ID || ticket.Title != "One-call start" || ticket.Description == "" || ticket.Status != models.StatusInProgress {
+		t.Fatalf("the lean ticket lost its own fields: %s", raw)
+	}
+	keysOf := func(m map[string]any) []string {
+		keys := make([]string, 0, len(m))
+		for k := range m {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		return keys
+	}
+	for part, c := range map[string]struct {
+		got  []map[string]any
+		want []string
+	}{
+		"subtask":      {ticket.Subtasks, []string{"completed", "id", "title"}},
+		"dependsOn":    {ticket.DependsOn, []string{"key", "kind", "note", "status", "title"}},
+		"label":        {ticket.Labels, []string{"color", "name"}},
+		"surfacedFrom": {[]map[string]any{ticket.SurfacedFrom}, []string{"key", "status", "title"}},
+	} {
+		if len(c.got) == 0 {
+			t.Fatalf("the start's ticket has no %s: %s", part, raw)
+		}
+		for _, item := range c.got {
+			if keys := keysOf(item); !reflect.DeepEqual(keys, c.want) {
+				t.Errorf("a %s carries %v, want %v", part, keys, c.want)
+			}
+		}
+	}
+	if len(ticket.Subtasks) != 3 || ticket.Subtasks[0]["title"] != "Store: the start payload" {
+		t.Errorf("subtasks = %v, want the three in order", ticket.Subtasks)
+	}
+	if ticket.DependsOn[0]["key"] != f.dep.DisplayKey() || ticket.DependsOn[0]["kind"] != models.DependencyConflictOnly {
+		t.Errorf("dependsOn = %v, want %s, conflict_only", ticket.DependsOn, f.dep.DisplayKey())
+	}
+	if !reflect.DeepEqual(start.UnfinishedDependencies, []string{f.dep.DisplayKey()}) {
+		t.Errorf("unfinishedDependencies = %v, want %s", start.UnfinishedDependencies, f.dep.DisplayKey())
+	}
+
+	// The ticket that blocks shows the one it blocks the same way.
+	blocker := mustStart(t, f.s, f.dep.ID, f.second.ID)
+	if raw, _ := json.Marshal(blocker.Ticket.Blocks); len(blocker.Ticket.Blocks) != 1 || strings.Contains(string(raw), `"id"`) {
+		t.Errorf("blocks = %s, want one link without an id", raw)
+	}
+}
+
+// The project's agent instructions come on each agent's first start in the
+// project, not on each session's: an agent that has them gets, in their
+// place, where to read them again, while another agent of the same session
+// (an implementer its orchestrator launched) still gets them on its own
+// first start. Changed instructions come again, and another project's come
+// on the agent's first start there.
+func TestStartTicketGivesAgentInstructionsOncePerAgent(t *testing.T) {
+	f := newStartFixture(t)
+	instructions := "Worktrees under taskboard-worktrees/<key-slug>, one branch per ticket; never push."
+	wantGiven := func(start *models.Start, who string) {
+		t.Helper()
+		if start.Project.AgentInstructions != instructions || start.Project.AgentInstructionsLeftOut != "" {
+			t.Fatalf("%s: agentInstructions %q, leftOut %q; want the instructions", who,
+				start.Project.AgentInstructions, start.Project.AgentInstructionsLeftOut)
+		}
+	}
+	wantLeftOut := func(start *models.Start, who string) {
+		t.Helper()
+		p := start.Project
+		if p.AgentInstructions != "" || !strings.Contains(p.AgentInstructionsLeftOut, "earlier start") ||
+			!strings.Contains(p.AgentInstructionsLeftOut, "get_project ACP") ||
+			!strings.Contains(p.AgentInstructionsLeftOut, "/api/projects/"+f.project.ID) {
+			t.Fatalf("%s: agentInstructions %q, leftOut %q; want them left out, saying where to read them",
+				who, p.AgentInstructions, p.AgentInstructionsLeftOut)
+		}
+	}
+
+	orchestrator := identify(t, f.s, "5e55104a", "orchestrator")
+	wantGiven(mustStart(t, f.s, f.dep.ID, orchestrator.ID), "the orchestrator's first start")
+	wantLeftOut(mustStart(t, f.s, f.ticket.ID, orchestrator.ID), "the orchestrator's second start")
+
+	// An implementer of the same session has not had them.
+	implementer := identify(t, f.s, "5e55104a", "implementer")
+	wantGiven(mustStart(t, f.s, f.ticket.ID, implementer.ID), "a second agent of the session")
+	wantLeftOut(mustStart(t, f.s, f.ticket.ID, implementer.ID), "the implementer's second start")
+
+	// Changed instructions come again, once.
+	instructions = "Worktrees under taskboard-worktrees/<key-slug>; never push; land with --ff-only."
+	if _, err := f.s.UpdateProject(f.project.ID, models.UpdateProjectRequest{AgentInstructions: &instructions}); err != nil {
+		t.Fatal(err)
+	}
+	wantGiven(mustStart(t, f.s, f.ticket.ID, implementer.ID), "the start after they changed")
+	wantLeftOut(mustStart(t, f.s, f.ticket.ID, implementer.ID), "the next start")
+
+	// Another project's instructions are its own.
+	other, err := f.s.CreateProject(models.CreateProjectRequest{Name: "Other", Prefix: "OTH", AgentInstructions: "Run make check."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	there := seedTicket(t, f.s, other.ID, "Elsewhere")
+	if p := mustStart(t, f.s, there.ID, implementer.ID).Project; p.AgentInstructions != "Run make check." || p.AgentInstructionsLeftOut != "" {
+		t.Fatalf("the first start in another project: agentInstructions %q, leftOut %q", p.AgentInstructions, p.AgentInstructionsLeftOut)
+	}
+}
+
+// Every entry an agent wrote names that agent's role and model inline; an
+// entry the person wrote names the person, as ever.
+func TestStartTicketNamesEachEntrysAgentRoleAndModel(t *testing.T) {
+	f := newStartFixture(t)
+	start := mustStart(t, f.s, f.ticket.ID, f.second.ID)
+	for part, entries := range map[string][]models.Entry{
+		"handOff": {*start.HandOff}, "entries": start.Entries, "epic": start.Epic.Entries, "project": start.Project.Entries.Entries,
+		"ticket notes": start.Notes.Ticket, "project notes": start.Notes.Project,
+	} {
+		for _, e := range entries {
+			switch {
+			case e.AgentID != "" && (e.AgentRole != "implementer" || e.AgentModel != "claude-opus-5-5"):
+				t.Errorf("%s entry %s by %s names role %q, model %q", part, e.ID, e.AgentID, e.AgentRole, e.AgentModel)
+			case e.AgentID == "" && (e.AgentRole != "" || e.AgentModel != "" || e.AuthorName != "Bilal"):
+				t.Errorf("%s entry %s by the person: %+v", part, e.ID, e)
+			}
+		}
+	}
+	raw, err := json.Marshal(start.HandOff)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"agentRole":"implementer","agentModel":"claude-opus-5-5"`) {
+		t.Errorf("the hand-off's JSON does not name its author inline: %s", raw)
+	}
+
+	// Other reads of entries leave them out.
+	page, err := f.s.ListEntries(models.EntryOwner{TicketID: f.ticket.ID}, models.EntryFilter{}, "", EntryMaxLimit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range page.Entries {
+		if e.AgentRole != "" || e.AgentModel != "" {
+			t.Errorf("list_entries names entry %s's agent inline: %+v", e.ID, e)
+		}
+	}
+}
+
 // startSizeCeiling guards the start's structure, not what a real start
 // costs. The fixture has every part (three subtasks, two dependencies, four
 // entries and a hand-off, an open note at each level, an epic with a
-// decision and a spec, the project's newest ten entries), each with one
-// sentence of text: 5.5 KB when this was written, with room for timestamps,
-// which vary in length. Owner fields, history or any other bulk creeping
-// back in breaks it. A real start is dominated by its text instead: on an
-// ACP-shaped ticket (3.9 KB of agent instructions, a 2 KB description, ten
-// project entries of about 400 bytes) it measured about 19 KB, some 5k
-// tokens, in review. Raise the ceiling only for a part an agent needs.
-const startSizeCeiling = 6000
+// decision and a spec, the project's newest five entries), each with one
+// sentence of text: 4.7 KB since the lean start, with room for timestamps,
+// which vary in length. It was 5.5 KB under a 6,000-byte ceiling before
+// (ten project entries, ids and positions on the ticket's lists); the
+// ceiling came down with it so that the room it guards stays the same.
+// Owner fields, ids, history or any other bulk creeping back in breaks it.
+// A real start is dominated by its text instead:
+// TestStartTicketRealisticSize measures one. Raise the ceiling only for a
+// part an agent needs.
+const startSizeCeiling = 5300
 
 // The start carries no bulk beyond its parts: the fixture's start, as
 // compact JSON the way MCP sends it, stays under the ceiling.

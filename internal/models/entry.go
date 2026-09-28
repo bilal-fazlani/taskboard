@@ -116,7 +116,14 @@ type Entry struct {
 	// agent (its session is the agent's), or else the person, by name.
 	// Entries that came from the project journal keep the name their writer
 	// gave there.
-	AgentID    string `json:"agentId,omitempty"`
+	AgentID string `json:"agentId,omitempty"`
+	// AgentRole and AgentModel are the role and model of the agent that
+	// wrote the entry, named inline so a reader knows who wrote it without
+	// looking the agent up. Only a start fills them in; every other read
+	// leaves them out (an HTTP read of entries carries its agents beside the
+	// page instead).
+	AgentRole  string `json:"agentRole,omitempty"`
+	AgentModel string `json:"agentModel,omitempty"`
 	AuthorName string `json:"authorName,omitempty"`
 	// Source is where a decision came from, one of DecisionSources; empty
 	// for every other type.
